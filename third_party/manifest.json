@@ -1,0 +1,244 @@
+{
+  "schemaVersion": 1,
+  "goModSHA256": "070a13f5f1258d02ddc30b9604b4778e3ff91b263df2fe3602c9afbb8ab2b36e",
+  "components": [
+    {
+      "name": "github.com/ebitengine/purego",
+      "version": "v0.11.1",
+      "source": "https://pkg.go.dev/github.com/ebitengine/purego@v0.11.1",
+      "files": [
+        {
+          "path": "licenses/go/github.com/ebitengine/purego/LICENSE",
+          "sha256": "b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1"
+        }
+      ]
+    },
+    {
+      "name": "github.com/egoist/mygo",
+      "version": "v0.9.1",
+      "source": "https://pkg.go.dev/github.com/egoist/mygo@v0.9.1",
+      "files": [
+        {
+          "path": "licenses/go/github.com/egoist/mygo/LICENSE",
+          "sha256": "f0b56f4ab53beb6e18c5e155219c2e2b6000b5475c0ae3ddb3af3894fd9349b4"
+        },
+        {
+          "path": "licenses/go/github.com/egoist/mygo/internal/shader/LICENSE",
+          "sha256": "b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1"
+        }
+      ]
+    },
+    {
+      "name": "github.com/fxamacker/cbor/v2",
+      "version": "v2.10.0",
+      "source": "https://pkg.go.dev/github.com/fxamacker/cbor/v2@v2.10.0",
+      "files": [
+        {
+          "path": "licenses/go/github.com/fxamacker/cbor/v2/LICENSE",
+          "sha256": "78cad457d5ea7318230f3d969d4cdf29cef45524a1fc8ca3a97646da1ad7a841"
+        }
+      ]
+    },
+    {
+      "name": "github.com/go-text/typesetting",
+      "version": "v0.3.5",
+      "source": "https://pkg.go.dev/github.com/go-text/typesetting@v0.3.5",
+      "files": [
+        {
+          "path": "licenses/go/github.com/go-text/typesetting/LICENSE",
+          "sha256": "6b1bf94c77d7faa0ce94f8745595bfaf4c404f8b3873f5c2ce55ca15f8e44eca"
+        },
+        {
+          "path": "licenses/go/github.com/go-text/typesetting/harfbuzz/LICENSE",
+          "sha256": "e45d96558ba3d406f95dffed6f22c3be07093475ef617bcfddf88444d6b66788"
+        }
+      ]
+    },
+    {
+      "name": "github.com/google/btree",
+      "version": "v1.1.2",
+      "source": "https://pkg.go.dev/github.com/google/btree@v1.1.2",
+      "files": [
+        {
+          "path": "licenses/go/github.com/google/btree/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        }
+      ]
+    },
+    {
+      "name": "github.com/hashicorp/yamux",
+      "version": "v0.1.2",
+      "source": "https://pkg.go.dev/github.com/hashicorp/yamux@v0.1.2",
+      "files": [
+        {
+          "path": "licenses/go/github.com/hashicorp/yamux/LICENSE",
+          "sha256": "ba36895caa0717b51eacc64ad50ef0b399482e1b82b93cfcdd065307409b3d9d"
+        }
+      ]
+    },
+    {
+      "name": "github.com/x448/float16",
+      "version": "v0.8.4",
+      "source": "https://pkg.go.dev/github.com/x448/float16@v0.8.4",
+      "files": [
+        {
+          "path": "licenses/go/github.com/x448/float16/LICENSE",
+          "sha256": "a555f1194fdac34da70fb416968f7e2217b02352c26c1eac2fa45fcb4290ae8d"
+        }
+      ]
+    },
+    {
+      "name": "golang.org/x/crypto",
+      "version": "v0.57.0",
+      "source": "https://pkg.go.dev/golang.org/x/crypto@v0.57.0",
+      "files": [
+        {
+          "path": "licenses/go/golang.org/x/crypto/LICENSE",
+          "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+        }
+      ]
+    },
+    {
+      "name": "golang.org/x/exp",
+      "version": "v0.0.0-20250711185948-6ae5c78190dc",
+      "source": "https://pkg.go.dev/golang.org/x/exp@v0.0.0-20250711185948-6ae5c78190dc",
+      "files": [
+        {
+          "path": "licenses/go/golang.org/x/exp/LICENSE",
+          "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+        }
+      ]
+    },
+    {
+      "name": "golang.org/x/image",
+      "version": "v0.46.0",
+      "source": "https://pkg.go.dev/golang.org/x/image@v0.46.0",
+      "files": [
+        {
+          "path": "licenses/go/golang.org/x/image/LICENSE",
+          "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+        }
+      ]
+    },
+    {
+      "name": "golang.org/x/net",
+      "version": "v0.60.0",
+      "source": "https://pkg.go.dev/golang.org/x/net@v0.60.0",
+      "files": [
+        {
+          "path": "licenses/go/golang.org/x/net/LICENSE",
+          "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+        }
+      ]
+    },
+    {
+      "name": "golang.org/x/sys",
+      "version": "v0.48.0",
+      "source": "https://pkg.go.dev/golang.org/x/sys@v0.48.0",
+      "files": [
+        {
+          "path": "licenses/go/golang.org/x/sys/LICENSE",
+          "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+        }
+      ]
+    },
+    {
+      "name": "golang.org/x/text",
+      "version": "v0.43.0",
+      "source": "https://pkg.go.dev/golang.org/x/text@v0.43.0",
+      "files": [
+        {
+          "path": "licenses/go/golang.org/x/text/LICENSE",
+          "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+        }
+      ]
+    },
+    {
+      "name": "golang.org/x/time",
+      "version": "v0.15.0",
+      "source": "https://pkg.go.dev/golang.org/x/time@v0.15.0",
+      "files": [
+        {
+          "path": "licenses/go/golang.org/x/time/LICENSE",
+          "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+        }
+      ]
+    },
+    {
+      "name": "golang.zx2c4.com/wintun",
+      "version": "v0.0.0-20230126152724-0fa3db229ce2",
+      "source": "https://pkg.go.dev/golang.zx2c4.com/wintun@v0.0.0-20230126152724-0fa3db229ce2",
+      "files": [
+        {
+          "path": "licenses/go/golang.zx2c4.com/wintun/LICENSE",
+          "sha256": "91276db973f25602d1aa43491f59cbc84cb88e6f151e1d0cc82a755563ce0195"
+        }
+      ]
+    },
+    {
+      "name": "golang.zx2c4.com/wireguard",
+      "version": "v0.0.0-20261024220952-b3bc704ef0ee",
+      "source": "https://pkg.go.dev/golang.zx2c4.com/wireguard@v0.0.0-20261024220952-b3bc704ef0ee",
+      "files": [
+        {
+          "path": "licenses/go/golang.zx2c4.com/wireguard/LICENSE",
+          "sha256": "91276db973f25602d1aa43491f59cbc84cb88e6f151e1d0cc82a755563ce0195"
+        }
+      ]
+    },
+    {
+      "name": "gvisor.dev/gvisor",
+      "version": "v0.0.0-20261116062528-83282de1f21f",
+      "source": "https://pkg.go.dev/gvisor.dev/gvisor@v0.0.0-20261116062528-83282de1f21f",
+      "files": [
+        {
+          "path": "licenses/go/gvisor.dev/gvisor/LICENSE",
+          "sha256": "0fbab5c58efbdf6d31e8085214f2dd821659c03d73cff3ed2b08e98826ea1cd9"
+        },
+        {
+          "path": "licenses/go/gvisor.dev/gvisor/AUTHORS",
+          "sha256": "16818597d03ff1b20e9a5e6eeedb3108acde75ec30c3edba534892b1a66b1e71"
+        }
+      ]
+    },
+    {
+      "name": "Go toolchain",
+      "version": "go1.27.3",
+      "source": "https://go.dev/LICENSE",
+      "files": [
+        {
+          "path": "licenses/go-toolchain/LICENSE",
+          "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+        },
+        {
+          "path": "licenses/go-toolchain/PATENTS",
+          "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
+        }
+      ]
+    },
+    {
+      "name": "Wintun prebuilt DLL",
+      "version": "0.14.1",
+      "source": "https://www.wintun.net/builds/wintun-0.14.1.zip",
+      "files": [
+        {
+          "path": "licenses/wintun-binary/LICENSE",
+          "sha256": "183adac21e7d96c508c8fd34d394b7b6708bc81564ad1bad61ab66143a008cd2"
+        }
+      ]
+    },
+    {
+      "name": "Pixel Code Bold",
+      "version": "2.2",
+      "source": "https://github.com/qwerasd205/PixelCode/releases/tag/v2.2",
+      "files": [
+        {
+          "path": "licenses/pixel-code/OFL.txt",
+          "sha256": "7a569ffb71684e10fee26aa8582fbd00c3aad398dc4e67c5003193a7daa61820"
+        }
+      ]
+    }
+  ],
+  "projectLicense": "AGPL-3.0-only",
+  "projectLicenseSHA256": "d8a6cc31abc16b6748c7a21f21611f5a1ec33f67d22ca23d7da1c19b95496bee"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "Remote ENET Client",
+  "identifier": "dev.remote-enet.client",
+  "out": "../../build/client"
+}

@@ -1,0 +1,6 @@
+# Preserve upstream license bytes, including CRLF and intentional whitespace.
+third_party/licenses/** -text whitespace=-blank-at-eol,-blank-at-eof
+LICENSE -text
+
+# Keep the reviewed dependency digest stable across Windows checkouts.
+go.mod text eol=lf

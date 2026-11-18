@@ -1,0 +1,5 @@
+{
+  "name": "Remote ENET Operator",
+  "identifier": "dev.remote-enet.operator",
+  "out": "../../build/operator"
+}

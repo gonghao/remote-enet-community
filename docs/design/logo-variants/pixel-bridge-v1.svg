@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 16 16" shape-rendering="crispEdges">
+  <title>Remote ENET — Pixel Bridge</title>
+  <rect x="3" y="2" width="3" height="1" fill="#2356d8"/>
+  <rect x="2" y="3" width="5" height="2" fill="#2356d8"/>
+  <rect x="1" y="4" width="3" height="8" fill="#2356d8"/>
+  <rect x="2" y="11" width="5" height="2" fill="#2356d8"/>
+  <rect x="3" y="13" width="3" height="1" fill="#2356d8"/>
+  <rect x="10" y="2" width="3" height="1" fill="#2356d8"/>
+  <rect x="9" y="3" width="5" height="2" fill="#2356d8"/>
+  <rect x="12" y="4" width="3" height="8" fill="#2356d8"/>
+  <rect x="9" y="11" width="5" height="2" fill="#2356d8"/>
+  <rect x="10" y="13" width="3" height="1" fill="#2356d8"/>
+  <rect x="4" y="7" width="8" height="2" fill="#087e95"/>
+  <rect x="7" y="7" width="2" height="2" fill="#17263c"/>
+</svg>

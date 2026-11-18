@@ -1,0 +1,303 @@
+package checkup
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net"
+	"net/netip"
+	"os"
+	"runtime"
+	"strings"
+	"syscall"
+	"testing"
+	"testing/synctest"
+	"time"
+
+	"remote-enet/internal/app"
+	"remote-enet/internal/carside"
+	"remote-enet/internal/identity"
+	"remote-enet/internal/netpriv"
+	"remote-enet/internal/settings"
+	"remote-enet/internal/transport"
+	"remote-enet/internal/tunadapter"
+)
+
+type closerFunc func() error
+
+func (c closerFunc) Close() error { return c() }
+
+func fakeBackend(t *testing.T) backend {
+	t.Helper()
+	return backend{
+		interfaces: func() ([]carside.NIC, error) {
+			return []carside.NIC{{Name: "vehicle", Address: netip.MustParseAddr("169.254.5.1"), Prefix: netip.MustParsePrefix("169.254.5.1/16")}}, nil
+		},
+		lookup: func(context.Context, string) ([]netip.Addr, error) {
+			return []netip.Addr{netip.MustParseAddr("127.0.0.1")}, nil
+		},
+		dial: func(context.Context, string) (io.Closer, error) { return closerFunc(func() error { return nil }), nil },
+		port: func(context.Context, string, string) error { return nil },
+		routes: func(context.Context, []netip.Addr) (netip.Prefix, error) {
+			return netip.MustParsePrefix("192.0.2.1/32"), nil
+		},
+	}
+}
+
+func operatorInput() Input {
+	cfg := settings.Default()
+	cfg.Role = settings.RoleOperator
+	cfg.Operator.Bind = "169.254.5.1"
+	cfg.Operator.Endpoint = "fixture.invalid:47000"
+	return Input{Config: cfg, Permission: netpriv.Status{Platform: runtime.GOOS, Elevated: true}}
+}
+
+func finding(t *testing.T, r Report, id string, index int) Finding {
+	t.Helper()
+	for _, f := range r.Findings {
+		if f.ID == id && f.Index == index {
+			return f
+		}
+	}
+	t.Fatalf("missing finding %s/%d: %+v", id, index, r)
+	return Finding{}
+}
+
+func TestClientSelectionAndBoundedCandidates(t *testing.T) {
+	b := fakeBackend(t)
+	in := Input{Config: settings.Default(), PeerCode: "renet1:secret"}
+	r := run(t.Context(), in, b)
+	if !r.Complete || finding(t, r, "vehicle_adapter", 0).Code != "adapter_selected" || finding(t, r, "peer_configuration", 0).Code != "pairing_missing" {
+		t.Fatalf("unexpected client checks: %+v", r)
+	}
+	for i := range 7 {
+		in.Endpoints = append(in.Endpoints, transport.Endpoint{Kind: "hub", Addr: "fixture.invalid:47000", Hub: identity.Fingerprint{byte(i + 1)}})
+	}
+	dials, lookups, closes := 0, 0, 0
+	b.lookup = func(context.Context, string) ([]netip.Addr, error) {
+		lookups++
+		return []netip.Addr{netip.MustParseAddr("::1")}, nil
+	}
+	b.dial = func(context.Context, string) (io.Closer, error) {
+		dials++
+		return closerFunc(func() error { closes++; return nil }), nil
+	}
+	r = run(t.Context(), in, b)
+	if dials != 4 || lookups != 4 || closes != 4 || finding(t, r, "hub_candidates", 0).Code != "endpoint_limit" {
+		t.Fatalf("candidate budget/cleanup failed: %d/%d/%d %+v", dials, lookups, closes, r)
+	}
+	for _, tc := range []struct {
+		name, address, code string
+		nics                []carside.NIC
+	}{
+		{"", "", "adapter_ambiguous", []carside.NIC{{Name: "a", Address: netip.MustParseAddr("169.254.5.1"), Prefix: netip.MustParsePrefix("169.254.0.0/16")}, {Name: "b", Address: netip.MustParseAddr("169.254.6.1"), Prefix: netip.MustParsePrefix("169.254.0.0/16")}}},
+		{"saved-missing", "", "adapter_unavailable", nil},
+		{"vehicle", "169.254.5.2", "adapter_unavailable", []carside.NIC{{Name: "vehicle", Address: netip.MustParseAddr("169.254.5.1")}}},
+	} {
+		b.interfaces = func() ([]carside.NIC, error) { return tc.nics, nil }
+		in.Config.Client.NICName, in.Config.Client.NICAddr = tc.name, tc.address
+		r = run(t.Context(), in, b)
+		if got := finding(t, r, "vehicle_adapter", 0).Code; got != tc.code {
+			t.Fatalf("selection %q/%q: %s", tc.name, tc.address, got)
+		}
+	}
+}
+
+func TestOperatorIdleProbesAndRunningIsolation(t *testing.T) {
+	b, in := fakeBackend(t), operatorInput()
+	var ports []string
+	b.port = func(_ context.Context, network, address string) error {
+		ports = append(ports, network+" "+address)
+		return syscall.EADDRINUSE
+	}
+	b.dial = func(context.Context, string) (io.Closer, error) {
+		t.Fatal("operator must not dial its public endpoint")
+		return nil, nil
+	}
+	r := run(t.Context(), in, b)
+	if len(ports) != 4 || finding(t, r, "discovery_port", 0).Code != "port_in_use" || !strings.HasPrefix(ports[3], "udp4 ") || finding(t, r, "public_endpoint", 0).Code != "remote_check_required" {
+		t.Fatalf("idle probe mismatch: %v %+v", ports, r)
+	}
+	ports = nil
+	in.Running, in.Runtime.Phase = true, app.PhaseConnected
+	r = run(t.Context(), in, b)
+	if len(ports) != 0 || finding(t, r, "hub_port", 0).Status != Skipped || finding(t, r, "diagnostic_port", 0).Code != "runtime_active" || finding(t, r, "peer_session", 0).Code != "session_connected" {
+		t.Fatalf("active session was probed: %v %+v", ports, r)
+	}
+	in.Config.Operator.Bind = "192.0.2.99"
+	in.Running = false
+	r = run(t.Context(), in, b)
+	if len(ports) != 1 || finding(t, r, "presentation_adapter", 0).Status != Failed || finding(t, r, "discovery_port", 0).Status != Skipped {
+		t.Fatal("missing presentation address was not isolated")
+	}
+}
+
+func TestKnownMGURoutesAndPermissionAreReadOnly(t *testing.T) {
+	b, in := fakeBackend(t), operatorInput()
+	calls := 0
+	b.routes = func(_ context.Context, targets []netip.Addr) (netip.Prefix, error) {
+		calls++
+		if len(targets) != 1 || targets[0] != in.Runtime.Direct.Address {
+			t.Fatal("wrong target")
+		}
+		return netip.Prefix{}, tunadapter.ErrTargetConflict
+	}
+	r := run(t.Context(), in, b)
+	if calls != 0 || finding(t, r, "mgu_routes", 0).Code != "mgu_not_discovered" {
+		t.Fatal("queried an unknown MGU")
+	}
+	in.Runtime.Direct.Address = netip.MustParseAddr("169.254.91.3")
+	in.Runtime.Direct.Phase = app.DirectReady
+	r = run(t.Context(), in, b)
+	if calls != 0 || finding(t, r, "mgu_routes", 0).Code != "direct_active" {
+		t.Fatal("checked owned routes")
+	}
+	in.Runtime.Direct.Phase = app.DirectDisabled
+	r = run(t.Context(), in, b)
+	if calls != 1 || finding(t, r, "mgu_routes", 0).Code != "target_conflict" || finding(t, r, "mgu_permission", 0).Code != "permission_available" {
+		t.Fatal("missing read-only result")
+	}
+	in.Permission.Platform = "unobserved"
+	r = run(t.Context(), in, b)
+	if finding(t, r, "mgu_permission", 0).Status != Skipped {
+		t.Fatal("invented permission state")
+	}
+}
+
+func TestFailuresAreFixedAndCancelJoins(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		code string
+	}{
+		{syscall.EADDRINUSE, "port_in_use"}, {syscall.EADDRNOTAVAIL, "address_unavailable"}, {syscall.ECONNREFUSED, "connection_refused"},
+		{os.ErrPermission, "permission_denied"}, {&net.DNSError{Err: "SECRET", Name: "secret.invalid"}, "dns_failed"}, {errors.New("SECRET"), "network_failed"},
+		{&net.DNSError{Err: "SECRET", IsTimeout: true}, "probe_timeout"},
+	} {
+		if got := networkCode(tc.err); got != tc.code {
+			t.Errorf("got %s want %s", got, tc.code)
+		}
+	}
+	synctest.Test(t, func(t *testing.T) {
+		b := fakeBackend(t)
+		finished := false
+		b.lookup = func(ctx context.Context, _ string) ([]netip.Addr, error) {
+			<-ctx.Done()
+			finished = true
+			return nil, ctx.Err()
+		}
+		in := Input{Config: settings.Default(), Endpoints: []transport.Endpoint{{Kind: "hub", Hub: identity.Fingerprint{1}, Addr: "secret.invalid:22"}}}
+		ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+		defer cancel()
+		r := run(ctx, in, b)
+		if !finished || !r.TimedOut || r.Complete || finding(t, r, "hub_dns", 1).Code != "probe_timeout" {
+			t.Fatalf("unjoined deadline: %+v", r)
+		}
+		data, err := JSON(r)
+		if err != nil || strings.Contains(string(data), "secret") {
+			t.Fatalf("secret or invalid report: %s %v", data, err)
+		}
+		cancelled, stop := context.WithCancel(t.Context())
+		stop()
+		b.interfaces = func() ([]carside.NIC, error) { t.Fatal("pre-canceled backend invoked"); return nil, nil }
+		r = run(cancelled, in, b)
+		if !r.Canceled || r.Complete || len(r.Findings) != 0 {
+			t.Fatalf("pre-cancel: %+v", r)
+		}
+	})
+}
+
+func TestRealLoopbackTCPDoesNotSendApplicationData(t *testing.T) {
+	for _, network := range []string{"tcp4", "tcp6"} {
+		t.Run(network, func(t *testing.T) {
+			address := "127.0.0.1:0"
+			if network == "tcp6" {
+				address = "[::1]:0"
+			}
+			listener, err := net.Listen(network, address)
+			if err != nil {
+				if network == "tcp6" {
+					t.Skip("IPv6 loopback is unavailable")
+				}
+				t.Fatal(err)
+			}
+			defer listener.Close()
+			done := make(chan error, 1)
+			go func() {
+				conn, err := listener.Accept()
+				if err != nil {
+					done <- err
+					return
+				}
+				defer conn.Close()
+				_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+				var p [1]byte
+				n, err := conn.Read(p[:])
+				if n != 0 || err != io.EOF {
+					done <- errors.New("probe sent bytes or left socket open")
+					return
+				}
+				done <- nil
+			}()
+			b := fakeBackend(t)
+			b.dial = systemBackend().dial
+			b.lookup = func(context.Context, string) ([]netip.Addr, error) {
+				t.Fatal("literal endpoint used DNS")
+				return nil, nil
+			}
+			in := Input{Config: settings.Default(), Endpoints: []transport.Endpoint{{Kind: "hub", Hub: identity.Fingerprint{1}, Addr: listener.Addr().String()}}}
+			r := run(t.Context(), in, b)
+			if finding(t, r, "hub_tcp", 1).Code != "tcp_reachable" {
+				t.Fatalf("TCP: %+v", r)
+			}
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+			if err := probePort(t.Context(), network, listener.Addr().String()); networkCode(err) != "port_in_use" {
+				t.Fatalf("TCP collision: %v", err)
+			}
+			udp, err := net.ListenPacket("udp4", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer udp.Close()
+			if err := probePort(t.Context(), "udp4", udp.LocalAddr().String()); networkCode(err) != "port_in_use" {
+				t.Fatalf("UDP collision: %v", err)
+			}
+			if err := probePort(t.Context(), "tcp4", "127.0.0.1:0"); err != nil {
+				t.Fatal(err)
+			}
+			if err := probePort(t.Context(), "udp4", "127.0.0.1:0"); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestEndpointValidationAndReportProjection(t *testing.T) {
+	b := fakeBackend(t)
+	for _, address := range []string{"[::1]:47000", "127.0.0.1:47000"} {
+		status, code := resolve(t.Context(), b, address)
+		if status != Pass || code != "literal_address" {
+			t.Fatalf("literal %s: %s/%s", address, status, code)
+		}
+	}
+	for _, address := range []string{"", "invalid", "0.0.0.0:22", "[::]:22", "224.0.0.1:22", "x:0", "x:65536"} {
+		if status, _ := resolve(t.Context(), b, address); status != Failed {
+			t.Fatalf("accepted %s", address)
+		}
+	}
+	now := time.Now()
+	r := Report{StartedAt: now, FinishedAt: now, Complete: true, Findings: []Finding{{ID: "SECRET", Code: "SECRET", Status: "SECRET", Index: 999, Duration: time.Millisecond}}}
+	data, err := JSON(r)
+	if err != nil || strings.Contains(string(data), "SECRET") {
+		t.Fatalf("projection: %s %v", data, err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(data, &out); err != nil || len(out) != 8 || out["schema"] != "checkup/v1" {
+		t.Fatalf("schema: %s %v", data, err)
+	}
+	if r.Findings[0].ID != "SECRET" {
+		t.Fatal("mutated report input")
+	}
+}

@@ -1,0 +1,20 @@
+# research scratch: cloned third-party repos and large downloads are not tracked
+docs/research/scratch/ediabaslib/
+docs/research/scratch/rawenet/
+docs/research/scratch/scapy/
+docs/research/scratch/*.pdf
+docs/research/scratch/__pycache__/
+
+# Go
+/bin/
+/dist/
+/build/
+*.exe
+*.test
+*.out
+coverage.*
+
+# editors / OS
+.idea/
+.vscode/
+.DS_Store

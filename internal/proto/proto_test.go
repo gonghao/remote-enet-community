@@ -1,0 +1,130 @@
+package proto
+
+import (
+	"bytes"
+	"encoding/binary"
+	"errors"
+	"io"
+	"reflect"
+	"testing"
+	"testing/iotest"
+)
+
+func TestRoundTrip(t *testing.T) {
+	messages := []any{
+		Hello{Version, "client", "test", []string{"tcp"}}, PairToken{[16]byte{1}}, PairResult{true, "ok"},
+		VehicleState{"eth0", "169.254.0.1", "169.254.0.2", "VIN", "MAC", 0x12, []byte{1, 2}, 99},
+		Ping{1, 2}, Pong{1, 2}, ExposeReverse{80, true}, ExposeResult{80, true, "ok"}, Log{"info", "test", map[string]string{"a": "b"}, 123}, OpenTunnel{"tcp", "127.0.0.1:80", "test"},
+	}
+	var buf bytes.Buffer
+	for _, m := range messages {
+		if err := Write(&buf, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reader := iotest.OneByteReader(&buf)
+	for _, want := range messages {
+		got, err := Read(reader, MaxFrameLen)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("got %#v, want %#v", got, want)
+		}
+	}
+	if _, err := Read(reader, MaxFrameLen); !errors.Is(err, io.EOF) {
+		t.Fatal(err)
+	}
+}
+func TestVector(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Write(&buf, Ping{1, 2}); err != nil {
+		t.Fatal(err)
+	}
+	want := []byte{0, 0, 0, 9, 0xa2, 1, 5, 2, 0xa2, 1, 1, 2, 2}
+	if !bytes.Equal(buf.Bytes(), want) {
+		t.Fatalf("got %x want %x", buf.Bytes(), want)
+	}
+}
+func TestUnknownThenKnown(t *testing.T) {
+	var buf bytes.Buffer
+	if err := writeEnvelope(&buf, Envelope{Type: 600, Body: []byte{0xa0}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Write(&buf, Pong{3, 4}); err != nil {
+		t.Fatal(err)
+	}
+	m, err := Read(&buf, MaxFrameLen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u, ok := m.(Unknown); !ok || u.Type != 600 {
+		t.Fatalf("unknown: %#v", m)
+	}
+	if m, err = Read(&buf, MaxFrameLen); err != nil || m != (Pong{3, 4}) {
+		t.Fatalf("next: %#v %v", m, err)
+	}
+}
+func TestMalformed(t *testing.T) {
+	for _, raw := range [][]byte{
+		{}, {0, 0}, {0, 0, 0, 0}, {0, 0, 0, 50}, {0, 0, 0, 1, 0xff},
+		{0, 0, 0, 5, 0xa2, 1, 1, 1, 2}, // Duplicate envelope key.
+		{0, 0, 0, 5, 0xa2, 1, 1, 2, 0}, // Invalid Hello body.
+	} {
+		if _, err := Read(bytes.NewReader(raw), 16); err == nil {
+			t.Fatalf("accepted %x", raw)
+		}
+	}
+	var prefix [4]byte
+	binary.BigEndian.PutUint32(prefix[:], 0xffffffff)
+	if _, err := Read(bytes.NewReader(prefix[:]), MaxFrameLen); err == nil {
+		t.Fatal("unbounded length")
+	}
+	if err := Write(io.Discard, struct{}{}); err == nil {
+		t.Fatal("unsupported type")
+	}
+	var nilPing *Ping
+	if err := Write(io.Discard, nilPing); err == nil {
+		t.Fatal("nil pointer")
+	}
+}
+
+type shortWriter struct{ bytes.Buffer }
+
+func (w *shortWriter) Write(b []byte) (int, error) { return w.Buffer.Write(b[:1]) }
+func TestShortWrites(t *testing.T) {
+	w := new(shortWriter)
+	p := Ping{8, 9}
+	if err := Write(w, &p); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Read(w, MaxFrameLen)
+	if err != nil || got != p {
+		t.Fatalf("%v %v", got, err)
+	}
+}
+func FuzzRead(f *testing.F) {
+	f.Add([]byte{0, 0, 0, 1, 0xa0})
+	f.Fuzz(func(t *testing.T, b []byte) { _, _ = Read(bytes.NewReader(b), 4096) })
+}
+
+func TestBoundedMalformedCBOR(t *testing.T) {
+	frame := func(body []byte) []byte {
+		raw := make([]byte, 4+len(body))
+		binary.BigEndian.PutUint32(raw, uint32(len(body)))
+		copy(raw[4:], body)
+		return raw
+	}
+	for _, body := range [][]byte{
+		{0xf6},                            // Null is not an envelope.
+		{0xa0},                            // Missing type and body.
+		{0xa1, 1, 5},                      // Missing body.
+		{0xa2, 1, 5, 2, 0xa2, 1, 1, 1, 2}, // Duplicate body keys.
+		append(append([]byte{0xa2, 1, 0x19, 3, 0xe7, 2}, bytes.Repeat([]byte{0x81}, 100)...), 0),
+		{0xa2, 1, 0x19, 3, 0xe7, 2, 0xff}, // Malformed unknown body.
+	} {
+		if _, err := Read(bytes.NewReader(frame(body)), MaxFrameLen); err == nil {
+			t.Fatalf("accepted malformed CBOR %x", body)
+		}
+	}
+}

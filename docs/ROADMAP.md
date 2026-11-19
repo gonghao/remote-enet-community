@@ -30,7 +30,9 @@
 | 版本与发布 | 版本号与 tag 规则、对应版本源码的获取入口、CI 构建制品 |
 | 签名与更新 | macOS Developer ID 与公证、Windows Authenticode、签名更新清单；只属于官方发行层，功能代码不分叉 |
 
-## R2 · 直连数字配对（已完成，设计见 [PAIRING](PAIRING.md)）
+## R2 · 直连数字配对（已合并，待与中心契约对齐，设计见 [PAIRING](PAIRING.md)）
+
+待办（2026-11-19）：直连与中心模式共用同一套配对消息、状态机和测试向量（[CENTER-CONTRACT §10](CENTER-CONTRACT.md#10-中心模式的首次配对)）。PR #2 合并的实现在 CI 编码、确认 MAC、承诺与 SAS、exporter 标签、消息 11–16、原因枚举、数字码输入与失败文案上都与契约不一致，`filippo.io/edwards25519` 也需升到 v1.1.1 以上。对齐前不打 tag；对齐时直接修改线格式，不保留旧格式兼容。
 
 状态（2026-11-19）：经 PR #2 合并。1–6 已实现，离线测试与独立审查通过。7 已完成 LAN 台架：Windows GUI Operator + Linux CLI Client + 假网关，覆盖首次配对、无码重连、旧码重用、猜错计数与第 5 次成功、撤销、次数用尽、过期和复制格式。Mac GUI Client 与公网验证移入下方「并行验收线」；Mac 经 WG 访问台架时无法发现非同链路网关，属车端有意限制。独立密码学复核列为后续项，不阻塞发布。
 
@@ -55,12 +57,15 @@
 
 把 [CENTER-PROTOCOL](CENTER-PROTOCOL.md) 第 12 节的待定参数落成正式契约，包括 API 与版本协商、票据编码、续租与撤销、写请求幂等、入口回退。同时发布票据与 PAKE 的测试向量，供第三方中心验证兼容性。
 
+契约：[CENTER-CONTRACT](CENTER-CONTRACT.md)（2026-11-19 定稿，测试向量尚未生成）。
+
 ## R5 · 各端接入中心
 
 1. Operator：登录、选择节点、生成纯数字码、确认来访设备、结束接待。
 2. Client：输入纯数字码兑换授权、连接指定 Hub、断线重连；分别显示网卡缺失、Operator 忙、授权到期、码无效、节点离线等原因。
 3. Hub：上报心跳、负载与用量，执行租约与撤销。
 4. 离线测试覆盖 [CENTER-PROTOCOL 第 11 节](CENTER-PROTOCOL.md#11-一致性测试要求)列出的场景。
+5. 中心模式复用直连的配对状态机，但需要补上中心模式专属的行为：SAS 确认钩子必填；Operator 拒绝 SAS 或确认超时时，发 16 `rejected` / `confirm_timeout` 并以同名原因结束会话（[CENTER-CONTRACT §10.2](CENTER-CONTRACT.md#102-sas-与承诺)）。直连模式的钩子为 nil，目前只在本地以 `confirmation` 结束。
 
 ## 并行验收线
 
@@ -87,6 +92,7 @@
 | 项目 | 说明 |
 |---|---|
 | 设备名 | Peer ID 已改为默认显示短 ID、详情页可复制完整 ID；设备名目前协议里没有，需在握手中新增字段，属于协议变更，单独设计 |
+| govulncheck 遗留（2026-11-19） | Go 1.27.3 标准库 GO-2026-6859 在 net/http 路径上可达，需升级工具链修复；`golang.org/x/net` 的 GO-2026-6866、GO-2026-6860 与 `golang.org/x/crypto` 的 GO-2026-5932 未被调用，随依赖升级一并处理 |
 | settings 可选加固（Wave 5 审查，当时有意未做） | 路径以分隔符结尾时留下空目录；rename 后未 fsync 父目录；监听地址接受 `[]:47000`；`NICName` 未拒绝 U+202E 等 Cf 类控制字符；缺字段报错不指明字段 |
 
 ## 研究项（未排期）

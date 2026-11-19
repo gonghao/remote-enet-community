@@ -83,6 +83,8 @@
 | `renet-tuncheck` 报告写入 | `writeReport` 直接 `os.WriteFile`，覆盖已有文件时保留原权限，README 的 0600 说法不准确；改为与 `renet-labprobe` 相同的原子写 |
 | Peer ID 显示 | 现在状态卡、当前客户端、已记住的对端都显示完整指纹。改为默认显示短 ID（已有 `Fingerprint.Short()`，即前两组），完整 ID 放进详情并可复制。设备名目前协议里没有，需在握手中新增字段，属于协议变更，单独设计 |
 | settings 可选加固（Wave 5 审查，当时有意未做） | 路径以分隔符结尾时留下空目录；rename 后未 fsync 父目录；监听地址接受 `[]:47000`；`NICName` 未拒绝 U+202E 等 Cf 类控制字符；缺字段报错不指明字段 |
+| linktest 超时竞争 | `TestPublicRuntimesReconnectAndReleasePresenter` 在 CI 上偶发失败（2026-11-19，PR #1 两次，重跑通过）。用 1ms 超时测连接测试时，服务端预算从 `Serve` 入口起算，可能先于客户端到期并关闭流，客户端读到 EOF 时自身 ctx 尚未超时，结果被归为 `ErrTransport` 而非超时。可考虑服务端预算从收到请求起算或加少量余量，改动涉及 linktest 预算语义，单独设计 |
+| operator 抓取测试偶发失败 | `TestCapturePresenterLifecycleAndDiscovery` 在 CI race 任务偶发失败一次（2026-11-19，`capture_test.go:148`，`starts=4` 且 frames 计数不符），重跑通过；需确认断言是否依赖未同步的时序 |
 
 ## 研究项（未排期）
 

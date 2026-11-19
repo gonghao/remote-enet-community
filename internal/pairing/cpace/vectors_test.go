@@ -213,3 +213,17 @@ func TestCenterCIVector(t *testing.T) {
 	ho := sha256.Sum256(center.bytes(t, "HO"))
 	center.check(t, "CI", lvCat([]byte("renet-pake-v1"), []byte(suiteID), []byte("pair-center/1"), []byte("renet/1"), v.bytes(t, "fpA"), v.bytes(t, "fpB"), hc[:], ho[:], center.bytes(t, "hub_fp"), center.bytes(t, "center_id"), center.bytes(t, "session_id")))
 }
+
+func TestLvCatLengthPrefixes(t *testing.T) {
+	for _, tc := range []struct {
+		length int
+		prefix []byte
+	}{
+		{0, []byte{0}}, {1, []byte{1}}, {127, []byte{0x7f}}, {128, []byte{0x80, 1}}, {300, []byte{0xac, 2}},
+	} {
+		value := bytes.Repeat([]byte{0xd5}, tc.length)
+		if got := lvCat(value); !bytes.Equal(got, append(tc.prefix, value...)) {
+			t.Errorf("length %d: unexpected encoding %x", tc.length, got)
+		}
+	}
+}

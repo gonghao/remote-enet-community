@@ -2,6 +2,8 @@ package hubauth
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"errors"
 	"net"
 	"sync/atomic"
@@ -47,6 +49,18 @@ func TestStandaloneReload(t *testing.T) {
 		}
 		return c
 	}
+	assertClosed := func(conns ...net.Conn) {
+		t.Helper()
+		for _, c := range conns {
+			if err := c.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+				t.Fatal(err)
+			}
+			var timeout net.Error
+			if _, err := c.Read(make([]byte, 1)); err == nil || errors.As(err, &timeout) && timeout.Timeout() {
+				t.Fatalf("expected connection closure, got %v", err)
+			}
+		}
+	}
 	wait := f.claims(hub.RoleWait)
 	wait.PairUntil = f.now.Add(time.Minute)
 	register := hub.Request{Role: hub.RoleWait, Token: f.sign(t, wait)}
@@ -59,22 +73,28 @@ func TestStandaloneReload(t *testing.T) {
 		if waits, pairs := server.SetPolicy(revoked); waits != 0 || pairs != 1 {
 			t.Fatalf("closed %d waits and %d pairs", waits, pairs)
 		}
-		for _, c := range []net.Conn{w, d} {
-			if err := c.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
-				t.Fatal(err)
-			}
-			var timeout net.Error
-			if _, err := c.Read(make([]byte, 1)); err == nil || errors.As(err, &timeout) && timeout.Timeout() {
-				t.Fatalf("expected connection closure, got %v", err)
-			}
-		}
+		assertClosed(w, d)
 		connect(f.client, dial, hub.ErrUnauthorized)
 		server.SetPolicy(p)
 	}
-	connect(f.op, register, nil)
+	w := connect(f.op, register, nil)
 	entry := hub.Request{Role: hub.RoleDial, Target: f.h.Fingerprint()}
 	seconds.Store(wait.PairUntil.Unix() + 31)
 	connect(f.client, entry, hub.ErrUnauthorized)
 	seconds.Store(wait.PairUntil.Unix() + 30)
-	connect(f.client, entry, nil)
+	d := connect(f.client, entry, nil)
+	f.cfg.Deny.Devices = nil
+	f.cfg.PairingOperator = f.client.Fingerprint().String()
+	f.cfg.Issuers = append(f.cfg.Issuers, Issuer{Operator: f.cfg.PairingOperator, PublicKey: base64.RawURLEncoding.EncodeToString(f.client.Key.Public().(ed25519.PublicKey))})
+	other := f.policy(t)
+	if waits, pairs := server.SetPolicy(other); waits != 0 || pairs != 1 {
+		t.Fatalf("operator change closed %d waits and %d pairs", waits, pairs)
+	}
+	assertClosed(w, d)
+	server.SetPolicy(p)
+	w = connect(f.op, register, nil)
+	if waits, pairs := server.SetPolicy(other); waits != 1 || pairs != 0 {
+		t.Fatalf("operator change closed %d waits and %d pairs", waits, pairs)
+	}
+	assertClosed(w)
 }

@@ -31,39 +31,53 @@ func signedTicket(t *testing.T, c ticket.Claims) []byte {
 }
 
 func TestHubTicketExchange(t *testing.T) {
-	for _, path := range []string{"trusted", "invite", "digital", "grant failure"} {
+	for _, path := range []string{"trusted", "invite", "digital", "grant failure", "digital grant failure", "endpoint mismatch"} {
 		t.Run(path, func(t *testing.T) {
 			ctx := testContext(t)
 			claims := deviceClaims()
 			raw := signedTicket(t, claims)
 			a, b := memtransport.Pair(t, claims.Device, claims.Peer)
-			c := Options{Initiator: true, Role: RoleClient, LocalFP: claims.Device, EndpointHub: claims.Hub, Now: func() time.Time { return claims.IssuedAt }}
+			c := Options{RequireHubTicket: true, Initiator: true, Role: RoleClient, LocalFP: claims.Device, EndpointHub: claims.Hub, Now: func() time.Time { return claims.IssuedAt }}
 			o := Options{Role: RoleOperator, LocalFP: claims.Peer, GrantTicket: func(client identity.Fingerprint) ([]byte, error) {
 				if client != claims.Device {
 					t.Error("wrong grant recipient")
 				}
-				if path == "grant failure" {
+				if path == "grant failure" || path == "digital grant failure" {
 					return nil, errors.New("private issuer detail")
 				}
 				return raw, nil
 			}}
+			if path == "endpoint mismatch" {
+				c.EndpointHub[0]++
+			}
 			switch path {
-			case "trusted", "grant failure":
+			case "trusted", "grant failure", "endpoint mismatch":
 				o.Trusted = func(identity.Fingerprint) bool { return true }
 			case "invite":
 				c.Token = [16]byte{7}
 				o.AcceptToken = func(_ identity.Fingerprint, token [16]byte) bool { return token == c.Token }
-			case "digital":
+			case "digital", "digital grant failure":
 				c.HubFP, o.HubFP = claims.Hub, claims.Hub
 				c.DigitalCode = "00001234"
 				o.DigitalManager = testResponder{code: c.DigitalCode}
-				o.Remember = func(context.Context, identity.Fingerprint) error { return nil }
+				o.Remember = func(context.Context, identity.Fingerprint) error {
+					if path == "digital grant failure" {
+						t.Error("committed trust after issuer failure")
+					}
+					return nil
+				}
 			}
 			op := make(chan error, 1)
 			go func() { _, err := Run(ctx, exportSession{b, [32]byte{1}}, o); op <- err }()
 			client, err := Run(ctx, exportSession{a, [32]byte{1}}, c)
 			opErr := <-op
-			if path == "grant failure" {
+			if path == "endpoint mismatch" {
+				if client != nil || !errors.Is(err, ReasonHubTicket) {
+					t.Fatalf("endpoint mismatch: %v", err)
+				}
+				return
+			}
+			if path == "grant failure" || path == "digital grant failure" {
 				if client != nil || !errors.Is(err, ReasonHubTicket) || !errors.Is(opErr, ReasonHubTicket) {
 					t.Fatalf("grant failure: %v, %v", err, opErr)
 				}

@@ -122,6 +122,10 @@ func TestAdmission(t *testing.T) {
 	}{
 		{"dial", "", nil, false},
 		{"wait", "", nil, true},
+		{"bearer", "", func(s *sample) {
+			s.claims.Bearer = true
+			s.claims.Device = identity.Fingerprint{}
+		}, false},
 		{"hub", "A6", func(s *sample) { s.claims.Hub = dev }, false},
 		{"device", "A7", func(s *sample) { s.dev = h }, false},
 		{"role", "A8", func(s *sample) { s.req.Role = hub.RoleWait }, false},
@@ -175,8 +179,11 @@ func TestAdmission(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = p.Admit(s.dev, s.req, s.now)
+			g, err := p.Admit(s.dev, s.req, s.now)
 			checkStep(t, err, tc.step)
+			if err == nil && !p.Valid(g, s.dev) {
+				t.Fatal("fresh grant failed revocation check")
+			}
 			want := tc.step
 			if want == "A8" {
 				want = ""

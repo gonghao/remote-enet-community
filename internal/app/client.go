@@ -268,12 +268,27 @@ func ticketDialError(err error) (fatal bool, classified error) {
 		return true, err
 	case errors.Is(err, identity.ErrFingerprintMismatch):
 		kind, fatal = HubIdentityMismatch, true
-	case errors.Is(err, hub.ErrUnauthorized):
+	case allEndpointsUnauthorized(err):
 		kind, fatal = HubAuthorizationExpired, true
 	default:
 		kind = HubUnreachable
 	}
 	return fatal, fmt.Errorf("%w: %w", kind, err)
+}
+
+// Dial wraps the joined candidate errors. One retryable path is enough
+// to keep a saved peer reachable even when another path's ticket is revoked.
+func allEndpointsUnauthorized(err error) bool {
+	var joined interface{ Unwrap() []error }
+	if !errors.As(err, &joined) {
+		return errors.Is(err, hub.ErrUnauthorized)
+	}
+	for _, cause := range joined.Unwrap() {
+		if !allEndpointsUnauthorized(cause) {
+			return false
+		}
+	}
+	return true
 }
 
 func selectNIC(ctx context.Context, cfg ClientConfig) (carside.NIC, error) {

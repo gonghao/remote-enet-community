@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"testing"
 	"time"
@@ -211,6 +212,9 @@ func TestTicketDialFailureKinds(t *testing.T) {
 		fatal bool
 	}{
 		{hub.ErrUnauthorized, HubAuthorizationExpired, true},
+		{fmt.Errorf("all endpoints: %w", errors.Join(net.ErrClosed, hub.ErrUnauthorized)), HubUnreachable, false},
+		{errors.Join(hub.ErrUnauthorized, net.ErrClosed), HubUnreachable, false},
+		{errors.Join(hub.ErrUnauthorized, fmt.Errorf("relay: %w", hub.ErrUnauthorized)), HubAuthorizationExpired, true},
 		{hub.ErrPeerBusy, "busy", false},
 		{hub.ErrUnknownPeer, OperatorOffline, false},
 		{identity.ErrFingerprintMismatch, HubIdentityMismatch, true},

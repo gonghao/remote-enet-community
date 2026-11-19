@@ -3,15 +3,11 @@ package hubauth
 
 import (
 	"crypto/ed25519"
-	"crypto/x509"
 	"encoding/base64"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"net"
 	"net/netip"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -108,27 +104,7 @@ func fingerprint(s string) (identity.Fingerprint, error) {
 	return fp, nil
 }
 
-// identity.Load repairs a missing certificate. Offline checks must be read-only.
-func checkIdentity(dir string) error {
-	data, err := os.ReadFile(filepath.Join(dir, "device.key"))
-	if err != nil {
-		return err
-	}
-	block, _ := pem.Decode(data)
-	if block == nil || block.Type != "PRIVATE KEY" {
-		return errors.New("expected PKCS8 private key")
-	}
-	key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
-	if err != nil {
-		return err
-	}
-	if _, ok := key.(ed25519.PrivateKey); !ok {
-		return errors.New("expected Ed25519 private key")
-	}
-	return nil
-}
-
-// Validate checks the configuration, including readability of the existing identity.
+// Validate checks configuration fields without accessing the identity directory.
 func (c Config) Validate() error {
 	_, err := c.compile()
 	return err
@@ -141,12 +117,10 @@ func (c Config) compile() (*Policy, error) {
 	if c.Mode != "selfhost" {
 		return nil, errors.New("mode: expected selfhost")
 	}
-	if c.IdentityDir == "" {
+	if strings.TrimSpace(c.IdentityDir) == "" || strings.IndexByte(c.IdentityDir, 0) >= 0 {
 		return nil, errors.New("identity_dir: required")
 	}
-	if err := checkIdentity(c.IdentityDir); err != nil {
-		return nil, fmt.Errorf("identity_dir: %w", err)
-	}
+
 	if !validListen(c.Listen) {
 		return nil, errors.New("listen: expected host:port")
 	}

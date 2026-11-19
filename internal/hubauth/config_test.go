@@ -69,7 +69,7 @@ func TestValidate(t *testing.T) {
 	}{
 		{"version", func(c *Config) { c.Version = 2 }},
 		{"mode", func(c *Config) { c.Mode = "other" }},
-		{"identity_dir", func(c *Config) { c.IdentityDir = t.TempDir() }},
+		{"identity_dir", func(c *Config) { c.IdentityDir = "" }},
 		{"listen", func(c *Config) { c.Listen = "bad host:443" }},
 		{"issuers", func(c *Config) { c.Issuers = nil }},
 		{"issuers", func(c *Config) { c.Issuers = make([]Issuer, 65) }},
@@ -143,16 +143,10 @@ func TestReloadCompatible(t *testing.T) {
 	}
 }
 
-func TestIdentityValidationIsReadOnly(t *testing.T) {
-	f := setup(t)
-	cert := filepath.Join(f.cfg.IdentityDir, "device.crt")
-	if err := os.Remove(cert); err != nil {
+func TestValidateWithoutIdentity(t *testing.T) {
+	cfg := setup(t).cfg
+	cfg.IdentityDir = filepath.Join(t.TempDir(), "missing")
+	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
-	}
-	if err := f.cfg.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(cert); !os.IsNotExist(err) {
-		t.Fatalf("configuration check recreated certificate: %v", err)
 	}
 }

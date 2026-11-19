@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -16,7 +15,6 @@ import (
 	"net/netip"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -24,6 +22,7 @@ import (
 	"golang.org/x/crypto/ssh"
 	"remote-enet/internal/mgu"
 	"remote-enet/internal/proto"
+	"remote-enet/internal/reportfile"
 	"remote-enet/internal/transport"
 )
 
@@ -336,62 +335,9 @@ func command(c *ssh.Client, name string, in io.Reader, out io.Writer) (err error
 	return s.Run(name)
 }
 func writeReport(path string, r report) error {
-	if s, e := os.Lstat(path); e == nil {
-		if !s.Mode().IsRegular() {
-			return errors.New("unsafe destination")
-		}
-	} else if !errors.Is(e, os.ErrNotExist) {
-		return e
-	}
-	// Directory aliases are normal on macOS and Windows. Hold the directory
-	// handle so temporary files and replacement stay in that same directory.
-	dir, e := os.OpenRoot(filepath.Dir(path))
-	if e != nil {
-		return e
-	}
-	defer dir.Close()
-	destination := filepath.Base(path)
-	if s, e := dir.Lstat(destination); e == nil {
-		if !s.Mode().IsRegular() {
-			return errors.New("unsafe destination")
-		}
-	} else if !errors.Is(e, os.ErrNotExist) {
-		return e
-	}
-	var f *os.File
-	var name string
-	for range 10 {
-		name = ".labprobe-" + rand.Text()
-		f, e = dir.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-		if !errors.Is(e, os.ErrExist) {
-			break
-		}
-	}
-	if e != nil {
-		return e
-	}
-	defer dir.Remove(name)
-	defer f.Close()
-	if e = f.Chmod(0600); e != nil {
-		return e
-	}
-	if e = json.NewEncoder(f).Encode(r); e != nil {
-		return e
-	}
-	if e = f.Sync(); e != nil {
-		return e
-	}
-	if e = f.Close(); e != nil {
-		return e
-	}
-	if s, e := dir.Lstat(destination); e == nil {
-		if !s.Mode().IsRegular() {
-			return errors.New("unsafe destination")
-		}
-	} else if !errors.Is(e, os.ErrNotExist) {
-		return e
-	}
-	return dir.Rename(name, destination)
+	return reportfile.Write(path, ".labprobe-", func(w io.Writer) error {
+		return json.NewEncoder(w).Encode(r)
+	})
 }
 
 func validReceipt(data []byte, n int64, sum string) bool {

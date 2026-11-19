@@ -649,3 +649,65 @@ func TestResponsiveScrollAndLongInvitation(t *testing.T) {
 		}
 	}
 }
+
+func TestPeerIDDetailsAndCopy(t *testing.T) {
+	peer := identity.Fingerprint{1, 2, 3, 4, 5, 6}
+	for _, entry := range []struct {
+		name, button, back string
+		operator, saved    bool
+	}{
+		{name: "status card", button: "Peer details", back: "Back to session"},
+		{name: "current client", button: "Current client details", back: "Back to session", operator: true},
+		{name: "remembered peer", button: "Peer details", back: "Back to settings", saved: true},
+	} {
+		for _, language := range []string{"en", "zh-Hans", "zh-Hant"} {
+			for _, zoom := range []float32{1, 1.5} {
+				t.Run(fmt.Sprintf("%s/%s/%.1f", entry.name, language, zoom), func(t *testing.T) {
+					cfg := settings.Default()
+					if entry.operator {
+						cfg = operatorConfig()
+					}
+					if entry.saved {
+						cfg.Client.Peer = peer.String()
+					}
+					var copied string
+					v := New(cfg, Actions{Copy: func(s string) { copied = s }})
+					v.SetLanguage(language)
+					if !entry.saved {
+						v.SetState(State{Running: true, Runtime: app.Snapshot{Phase: app.PhaseConnected, Peer: peer}})
+					}
+					width, height := 680, 560
+					if entry.operator {
+						width, height = 900, 620
+					}
+					tt := ui.NewTester(v.Render, width, height)
+					tt.SetZoom(zoom)
+					if entry.saved {
+						click(t, tt, v.tr("Settings"))
+					}
+					want := peer.Short()
+					if entry.operator {
+						want = v.tr("Current client · %s", want)
+					}
+					if !tt.HasText(want) || tt.HasText(peer.String()) {
+						t.Fatalf("expected %q and no full peer ID", want)
+					}
+					button := v.tr(entry.button)
+					scrollTo(t, tt, button, float32(width), float32(height))
+					click(t, tt, button)
+					if !tt.HasText(peer.String()) || copied != "" {
+						t.Fatal("details should reveal the full peer ID without copying it")
+					}
+					click(t, tt, v.tr("Copy full peer ID"))
+					if copied != peer.String() {
+						t.Fatalf("copied %q, want %q", copied, peer)
+					}
+					click(t, tt, v.tr(entry.back))
+					if !tt.HasText(want) || tt.HasText(peer.String()) {
+						t.Fatal("back did not return to the short ID")
+					}
+				})
+			}
+		}
+	}
+}

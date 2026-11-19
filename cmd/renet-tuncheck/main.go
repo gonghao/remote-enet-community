@@ -18,6 +18,7 @@ import (
 
 	"remote-enet/internal/l3"
 	"remote-enet/internal/packetio"
+	"remote-enet/internal/reportfile"
 	"remote-enet/internal/tunadapter"
 )
 
@@ -199,11 +200,14 @@ func writeReport(out io.Writer, path string, r report) error {
 	if path == "" {
 		return json.NewEncoder(out).Encode(r)
 	}
-	data, err := json.MarshalIndent(r, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode report: %w", err)
-	}
-	if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
+	if err := reportfile.Write(path, ".tuncheck-", func(w io.Writer) error {
+		encoder := json.NewEncoder(w)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(r); err != nil {
+			return fmt.Errorf("encode report: %w", err)
+		}
+		return nil
+	}); err != nil {
 		return fmt.Errorf("write report: %w", err)
 	}
 	return nil

@@ -10,6 +10,7 @@ import (
 	"remote-enet/internal/carside"
 	"remote-enet/internal/checkup"
 	"remote-enet/internal/hsfzcapture"
+	"remote-enet/internal/identity"
 	"remote-enet/internal/linktest"
 	"remote-enet/internal/settings"
 )
@@ -87,6 +88,8 @@ type View struct {
 	role                                string
 	language                            string
 	page                                page
+	peerDetailsFrom                     page
+	detailsPeer                         identity.Fingerprint
 	state                               State
 	saved                               settings.Config
 	draft                               settings.Config

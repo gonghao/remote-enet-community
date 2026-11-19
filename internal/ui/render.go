@@ -6,6 +6,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"remote-enet/internal/brand"
+	"remote-enet/internal/identity"
 	"remote-enet/internal/settings"
 )
 
@@ -25,6 +26,7 @@ const (
 	logPage
 	capturePage
 	checksPage
+	peerDetailsPage
 )
 
 // Render builds native controls; the host owns window sizing and invalidation.
@@ -40,6 +42,14 @@ func (v *View) Render(c *ui.Context) {
 			}
 			ui.Column(c).FillWidth().Padding(vertical, horizontal).Gap(gap).Children(func() {
 				switch v.page {
+				case peerDetailsPage:
+					v.pageTitle(c, "Peer details", "")
+					v.card(c.Key("peer-id"), "Full peer ID", "", func() {
+						ui.Text(c, v.detailsPeer.String()).FillWidth().MinWidth(0).Font("monospace")
+						if ui.Button(c.Key("copy-peer-id"), v.tr("Copy full peer ID")).Disabled(v.actions.Copy == nil).Clicked() {
+							v.actions.Copy(v.detailsPeer.String())
+						}
+					})
 				case settingsPage:
 					v.settingsPage(c)
 				case capturePage:
@@ -105,8 +115,12 @@ func (v *View) header(c *ui.Context) {
 		}
 		ui.Text(c, v.tr(title)).Grow(1).MinWidth(0).SingleLine().TruncateMiddle().FontSize(16).Bold()
 		if v.page != sessionPage {
-			if button("back", "Back", "Back to session").Clicked() {
-				v.page = sessionPage
+			destination, label := sessionPage, "Back to session"
+			if v.page == peerDetailsPage && v.peerDetailsFrom == settingsPage {
+				destination, label = settingsPage, "Back to settings"
+			}
+			if button("back", "Back", label).Clicked() {
+				v.page = destination
 			}
 		}
 		if button("settings", "Settings", "Settings").Disabled(v.page == settingsPage).Clicked() {
@@ -138,7 +152,9 @@ func (v *View) card(c *ui.Context, title, subtitle string, fn func()) {
 func (v *View) pageTitle(c *ui.Context, title, subtitle string) {
 	ui.Column(c).FillWidth().MinWidth(0).Gap(4).Children(func() {
 		ui.Text(c, v.tr(title)).FontSize(18).Bold()
-		ui.Text(c, v.tr(subtitle)).TextColor(muted).FontSize(11)
+		if subtitle != "" {
+			ui.Text(c, v.tr(subtitle)).TextColor(muted).FontSize(11)
+		}
 	})
 }
 
@@ -236,7 +252,8 @@ func (v *View) settingsPage(c *ui.Context) {
 	}
 	v.card(c.Key("save-settings"), "Preferences", "", func() {
 		if v.role == settings.RoleClient && v.saved.Client.Peer != "" {
-			v.value(c, "Remembered peer", v.saved.Client.Peer)
+			peer, _ := identity.ParseFingerprint(v.saved.Client.Peer)
+			v.peerValue(c.Key("remembered-peer"), "Remembered peer", peer)
 		}
 		v.saveControls(c)
 	})

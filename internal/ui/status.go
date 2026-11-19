@@ -9,6 +9,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"remote-enet/internal/app"
+	"remote-enet/internal/identity"
 	"remote-enet/internal/settings"
 )
 
@@ -51,6 +52,8 @@ func (v *View) stage() (string, string, ui.Color) {
 
 func (v *View) phase(c *ui.Context) {
 	title, description, color := v.stage()
+	peer := v.state.Runtime.Peer
+	hasCurrentClient := v.role == settings.RoleOperator && v.state.Runtime.Phase == app.PhaseConnected && v.state.Running && !peer.IsZero()
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(12).Children(func() {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Shrink(0).Children(func() {
 			ui.Box(c).Size(8, 8).Background(color).Shrink(0)
@@ -59,14 +62,17 @@ func (v *View) phase(c *ui.Context) {
 		if v.role == settings.RoleOperator {
 			if v.state.Runtime.Phase == app.PhaseConnected && v.state.Running {
 				description = v.tr("Current client · %s", "—")
-				if !v.state.Runtime.Peer.IsZero() {
-					description = v.tr("Current client · %s", v.state.Runtime.Peer.String())
+				if hasCurrentClient {
+					description = v.tr("Current client · %s", peer.Short())
 				}
 			} else {
 				description = "No client connected · one session at a time"
 			}
 		}
 		ui.Text(c, v.tr(description)).Grow(1).MinWidth(0).SingleLine().TruncateMiddle().FontSize(11).TextColor(muted).Tooltip(v.tr(description))
+		if hasCurrentClient {
+			v.peerDetailsButton(c.Key("current-client-details"), "Current client details", peer)
+		}
 	})
 }
 
@@ -112,11 +118,7 @@ func (v *View) informationSections(c *ui.Context, compact bool) {
 		value("Source IPv4", address(s.NIC.Address))
 	})
 	section("connection", "CONNECTION", func() {
-		peer := ""
-		if !s.Peer.IsZero() {
-			peer = s.Peer.String()
-		}
-		value("Peer", peer)
+		v.peerValue(c.Key("status-peer"), "Peer", s.Peer)
 		value("Peer address", s.Path.RemoteAddr)
 		value("Path", v.tr(string(s.Path.Kind)))
 		value("Via", s.Path.Via)
@@ -143,6 +145,25 @@ func (v *View) informationSections(c *ui.Context, compact bool) {
 			value("Next retry", retry)
 		}
 	})
+}
+
+func (v *View) peerValue(c *ui.Context, label string, peer identity.Fingerprint) {
+	if peer.IsZero() {
+		v.value(c, label, "")
+		return
+	}
+	ui.Row(c).FillWidth().MinWidth(0).Gap(8).AlignItems(ui.Center).Children(func() {
+		ui.Column(c).Grow(1).MinWidth(0).Children(func() {
+			v.value(c, label, peer.Short())
+		})
+		v.peerDetailsButton(c.Key("details"), "Peer details", peer)
+	})
+}
+
+func (v *View) peerDetailsButton(c *ui.Context, label string, peer identity.Fingerprint) {
+	if ui.Button(c, v.tr("Details")).Label(v.tr(label)).Padding(0, 8).Height(20).Shrink(0).Clicked() {
+		v.detailsPeer, v.peerDetailsFrom, v.page = peer, v.page, peerDetailsPage
+	}
 }
 
 func (v *View) exclusiveText() string {

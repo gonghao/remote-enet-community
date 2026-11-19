@@ -13,6 +13,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -419,5 +420,45 @@ func TestHeldBannerProbeLifetime(t *testing.T) {
 				t.Fatalf("repeated Close: %v", err)
 			}
 		})
+	}
+}
+
+func TestWriteReportReplacesExistingFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "report.json")
+	if err := os.WriteFile(path, []byte("old report"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeReport(io.Discard, path, report{}); err != nil {
+		t.Fatal(err)
+	}
+	current, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" && os.SameFile(old, current) {
+		t.Fatal("report was overwritten in place")
+	}
+	// Windows uses directory ACLs for file access control.
+	if runtime.GOOS != "windows" && current.Mode().Perm() != 0o600 {
+		t.Fatalf("report mode = %o, want 600", current.Mode().Perm())
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !json.Valid(data) {
+		t.Fatalf("invalid report: %q", data)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("report directory: %v, %v", entries, err)
 	}
 }

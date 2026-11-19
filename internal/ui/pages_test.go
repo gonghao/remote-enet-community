@@ -192,7 +192,7 @@ func TestClientSettingsPreserveInvitationAndEdits(t *testing.T) {
 	tt := ui.NewTester(v.Render, clientWidth, clientHeight)
 	input(t, tt, "Invitation code", "test-only-paste")
 	openSettings(t, tt)
-	if !tt.HasText("Remembered peer") || !tt.HasText(cfg.Client.Peer) {
+	if !tt.HasText("Remembered peer") || !tt.HasText((identity.Fingerprint{1}).Short()) {
 		t.Fatal("Settings did not show the remembered peer")
 	}
 	click(t, tt, "Allow peer connection tests")

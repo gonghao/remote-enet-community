@@ -133,7 +133,7 @@ func (r *Runtime) clientLoop(ctx context.Context, cfg ClientConfig, connector tr
 			s.Phase, s.NIC, s.Gateway, s.VIN = PhaseDiscovering, nic, netip.Addr{}, ""
 			s.NextRetry = time.Time{}
 		})
-		gateways, err := cfg.Hooks.Discover(ctx, carside.DiscoverOptions{NIC: nic, Destinations: cfg.DiscoveryDestinations, Timeout: cfg.DiscoveryTimeout})
+		gateways, err := cfg.Hooks.Discover(ctx, carside.DiscoverOptions{NIC: nic, Destinations: cfg.DiscoveryDestinations, Timeout: cfg.DiscoveryTimeout, Logger: cfg.Logger})
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -275,12 +275,17 @@ func (r *Runtime) clientConnection(ctx context.Context, connector transport.Conn
 	for {
 		select {
 		case <-connectionCtx.Done():
-			return true, false, context.Cause(connectionCtx)
 		case <-s.Done():
-			return true, false, s.Err()
 		case <-tick.C:
 			r.update(func(*Snapshot) {})
+			continue
 		}
+		// The session may close with ctx.Err() before this loop observes
+		// cancellation. Prefer the cause regardless of which channel won.
+		if cause := context.Cause(connectionCtx); cause != nil {
+			return true, false, cause
+		}
+		return true, false, s.Err()
 	}
 }
 

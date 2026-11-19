@@ -76,12 +76,11 @@
 
 ## 小修与加固（来自代码审查遗留）
 
+2026-11-19 已完成：Client 会话结束原因改用 `context.Cause`、车端发现的部分发送失败补 warn 日志、`renet-tuncheck` 报告改为原子 0600 写入、Peer ID 默认显示短 ID。
+
 | 项目 | 说明 |
 |---|---|
-| Client 会话结束原因 | `internal/app` 的 `clientConnection` 在网卡变化断开时，两个 `select` 分支可能同时就绪；`session.Run` 结束时用的是 `ctx.Err()` 而非 `context.Cause`，结束原因有时记成 `context canceled`，影响 Log 与诊断导出的排障。重试与 LastError 不受影响 |
-| 车端发现的部分发送失败 | `carside.Discover` 向多个目的地发送时，只要有一个成功，其他目的地的失败既不返回也不记日志。应补 warn 日志；2026-11-18 实车排查广播走错网卡时正需要这类信息 |
-| `renet-tuncheck` 报告写入 | `writeReport` 直接 `os.WriteFile`，覆盖已有文件时保留原权限，README 的 0600 说法不准确；改为与 `renet-labprobe` 相同的原子写 |
-| Peer ID 显示 | 现在状态卡、当前客户端、已记住的对端都显示完整指纹。改为默认显示短 ID（已有 `Fingerprint.Short()`，即前两组），完整 ID 放进详情并可复制。设备名目前协议里没有，需在握手中新增字段，属于协议变更，单独设计 |
+| 设备名 | Peer ID 已改为默认显示短 ID、详情页可复制完整 ID；设备名目前协议里没有，需在握手中新增字段，属于协议变更，单独设计 |
 | settings 可选加固（Wave 5 审查，当时有意未做） | 路径以分隔符结尾时留下空目录；rename 后未 fsync 父目录；监听地址接受 `[]:47000`；`NICName` 未拒绝 U+202E 等 Cf 类控制字符；缺字段报错不指明字段 |
 | linktest 超时竞争 | `TestPublicRuntimesReconnectAndReleasePresenter` 在 CI 上偶发失败（2026-11-19，PR #1 两次，重跑通过）。用 1ms 超时测连接测试时，服务端预算从 `Serve` 入口起算，可能先于客户端到期并关闭流，客户端读到 EOF 时自身 ctx 尚未超时，结果被归为 `ErrTransport` 而非超时。可考虑服务端预算从收到请求起算或加少量余量，改动涉及 linktest 预算语义，单独设计 |
 | operator 抓取测试偶发失败 | `TestCapturePresenterLifecycleAndDiscovery` 在 CI race 任务偶发失败一次（2026-11-19，`capture_test.go:148`，`starts=4` 且 frames 计数不符），重跑通过；需确认断言是否依赖未同步的时序 |

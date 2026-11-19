@@ -65,9 +65,9 @@ macOS 真双 app 回归仅在严格识别目标 `127.0.0.2:0` 的 listen/bind/EA
 
 ### Mac → Windows LAN 原生链路
 
-2026-11-16 至17完成真实 Mac Client→Windows GUI Operator→Linux假网关验收。用户手动选择en0/10.0.5.188后发现并连接成功；peer-only测试10/10且车辆连接、收发计数仍为0。普通桌面权限探针核对了完整发现数据报、ACK/VIN、6811控制回应与半关闭。用户Stop、清空邀请码后再次Connect，产生新Hub TCP会话，第二次探针同样通过。保留诊断TCP时，用户直接关闭Mac应用，Windows观察到EOF、旧车辆连接回收；Operator仍监听且不再有Mac会话。
+2026-11-16 至17完成真实 Mac Client→Windows GUI Operator→Linux假网关验收。用户手动选择en0/192.0.2.188后发现并连接成功；peer-only测试10/10且车辆连接、收发计数仍为0。普通桌面权限探针核对了完整发现数据报、ACK/VIN、6811控制回应与半关闭。用户Stop、清空邀请码后再次Connect，产生新Hub TCP会话，第二次探针同样通过。保留诊断TCP时，用户直接关闭Mac应用，Windows观察到EOF、旧车辆连接回收；Operator仍监听且不再有Mac会话。
 
-Windows Operator随后正常退出，测试监听、限定源防火墙规则与临时计划任务均已回收。Linux源过滤测试入口只接受10.0.5.188，共四个车辆TCP连接、两次VIN与两次控制请求，全部关闭；fixture子进程退出0且无残留worker。完整拓扑、逐项证据和Windows混合权限限制见 `docs/MACOS.md`。高权限SSH探针未通过，普通桌面权限探针通过；原生OpenProcess对照确认普通进程读取高权限进程被拒绝，本轮没有绕过独占检查，未把混合权限组合判为通过。
+Windows Operator随后正常退出，测试监听、限定源防火墙规则与临时计划任务均已回收。Linux源过滤测试入口只接受192.0.2.188，共四个车辆TCP连接、两次VIN与两次控制请求，全部关闭；fixture子进程退出0且无残留worker。完整拓扑、逐项证据和Windows混合权限限制见 `docs/MACOS.md`。高权限SSH探针未通过，普通桌面权限探针通过；原生OpenProcess对照确认普通进程读取高权限进程被拒绝，本轮没有绕过独占检查，未把混合权限组合判为通过。
 
 ## 隔离内核弱网验收
 

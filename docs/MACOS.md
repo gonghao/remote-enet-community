@@ -68,7 +68,7 @@ Windows 只读探针 / E-Sys 等 → 本机 Operator 呈现端口
 | 关闭活动会话 | 第二次诊断连接保持打开；用户直接关闭 Mac Client，应用退出，Windows 探针收到 EOF，假网关旧连接关闭；Operator仍监听且已无Mac会话 |
 | 清理 | Windows Operator正常Quit，TCP/UDP端口释放；临时规则和计划任务移除；Linux所有worker回收、两个fixture子进程退出0，无强杀 |
 
-界面显示的 RTT/echo throughput 为本次 LAN 测量及显示精度，不推算真实 WAN 性能或单向容量。Linux 最终收到四个源为10.0.5.188的 TCP 连接，共两次只读VIN和两次控制请求，四个连接全部关闭。私有探针与清理报告保留在测试目录，不提交实际邀请码或身份密钥；Mac下载的临时邀请文件可由用户删除。
+界面显示的 RTT/echo throughput 为本次 LAN 测量及显示精度，不推算真实 WAN 性能或单向容量。Linux 最终收到四个源为192.0.2.188的 TCP 连接，共两次只读VIN和两次控制请求，四个连接全部关闭。私有探针与清理报告保留在测试目录，不提交实际邀请码或身份密钥；Mac下载的临时邀请文件可由用户删除。
 
 ### Windows 权限组合边界
 

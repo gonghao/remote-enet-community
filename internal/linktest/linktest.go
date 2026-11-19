@@ -206,9 +206,8 @@ func exchange(ctx context.Context, stream io.ReadWriter, buf []byte, kind, echo 
 }
 
 // Serve owns stream and enforces its budget from entry, including request reads
-// and blocked echo writes. The request can shorten, never extend, that budget.
+// and blocked echo writes. The requested exchange budget starts on receipt.
 func Serve(ctx context.Context, stream io.ReadWriteCloser) error {
-	started := time.Now()
 	ctx, cancel := context.WithTimeout(ctx, MaxDuration)
 	defer cancel()
 	defer guard(ctx, stream)()
@@ -231,7 +230,7 @@ func Serve(ctx context.Context, stream io.ReadWriteCloser) error {
 	if samples < 1 || samples > MaxSamples || total < uint64(samples)*probeBytes || total > MaxPayloadBytes || frameBytes < probeBytes || frameBytes > maxDataBytes || millis < 1 || millis > uint32(MaxDuration/time.Millisecond) {
 		return fmt.Errorf("%w: request exceeds limits", ErrProtocol)
 	}
-	budget, budgetCancel := context.WithDeadline(ctx, started.Add(time.Duration(millis)*time.Millisecond))
+	budget, budgetCancel := context.WithTimeout(ctx, time.Duration(millis)*time.Millisecond)
 	defer budgetCancel()
 	defer guard(budget, stream)()
 	if err := budget.Err(); err != nil {
@@ -356,6 +355,10 @@ func failure(ctx context.Context, err error) error {
 	}
 	if errors.Is(err, ErrProtocol) {
 		return err
+	}
+	// A peer close can wake the reader before the local deadline timer runs.
+	if deadline, ok := ctx.Deadline(); ok && !time.Now().Before(deadline) {
+		return context.DeadlineExceeded
 	}
 	return fmt.Errorf("%w: %w", ErrTransport, err)
 }

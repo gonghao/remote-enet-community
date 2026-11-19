@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"remote-enet/internal/hsfz"
 	"remote-enet/internal/hsfzcapture"
@@ -104,6 +105,14 @@ func TestCapturePresenterLifecycleAndDiscovery(t *testing.T) {
 	probe(t, c, disc, hsfz.IdentRequest, state.IdentRaw)
 	held := dialTCP(t, diag)
 	nextRequest(t, requests)
+	// The UDP peer can receive the reply before discover records its write.
+	deadline := time.Now().Add(2 * time.Second)
+	for recorder.Snapshot().Frames < 6 {
+		if time.Now().After(deadline) {
+			t.Fatalf("waiting for discovery response capture: %+v", recorder.Snapshot())
+		}
+		time.Sleep(time.Millisecond)
+	}
 	if err := recorder.Stop(t.Context()); err != nil {
 		t.Fatal(err)
 	}

@@ -97,6 +97,8 @@ func readPair[T any](r io.Reader) (T, error) {
 
 func (s *Session) sendPair(msg any) error {
 	if err := proto.Write(s.control, msg); err != nil {
+		// A write can fail after the peer consumed the frame and closed, so use the reason for the expected reply.
+		// Frames 12–14 await an opening or MAC; after 15 the client is waiting for the trust decision.
 		switch msg.(type) {
 		case proto.PakeShareA, proto.PakeShareB, proto.PakeConfirmB:
 			return pairingFailure(cpace.ReasonConfirmation)

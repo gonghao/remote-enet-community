@@ -563,3 +563,109 @@ func TestDirectAdmissionBudget(t *testing.T) {
 		})
 	}
 }
+
+func checkPairIOFailure[T any](t *testing.T, msg T, sendReason, readReason cpace.Reason) {
+	t.Helper()
+	reader, writer := io.Pipe()
+	reader.Close()
+	defer writer.Close()
+	s := Session{control: &recordedStream{writer: writer}}
+	if err := s.sendPair(msg); !errors.Is(err, sendReason) {
+		t.Errorf("sending %T: got %v, want %v", msg, err, sendReason)
+	}
+	if _, err := readPair[T](bytes.NewReader(nil)); !errors.Is(err, readReason) {
+		t.Errorf("reading %T: got %v, want %v", msg, err, readReason)
+	}
+}
+
+func TestPairIOFailureByStage(t *testing.T) {
+	checkPairIOFailure(t, proto.PakeCommit{}, ReasonInterrupted, ReasonInterrupted)
+	checkPairIOFailure(t, proto.PakeShareB{}, cpace.ReasonConfirmation, ReasonInterrupted)
+	checkPairIOFailure(t, proto.PakeShareA{}, cpace.ReasonConfirmation, cpace.ReasonConfirmation)
+	checkPairIOFailure(t, proto.PakeConfirmB{}, cpace.ReasonConfirmation, cpace.ReasonConfirmation)
+	checkPairIOFailure(t, proto.PakeConfirmA{}, ReasonInterrupted, cpace.ReasonConfirmation)
+	checkPairIOFailure(t, proto.PairDecision{}, ReasonInterrupted, ReasonInterrupted)
+}
+
+type corruptCommitTransport struct {
+	transport.Session
+	offset  int
+	altered bool
+	output  bytes.Buffer
+}
+
+func (ts *corruptCommitTransport) AcceptStream(ctx context.Context) (transport.Stream, error) {
+	st, err := ts.Session.AcceptStream(ctx)
+	if err != nil {
+		return nil, err
+	}
+	reader := &corruptCommitReader{Reader: st, ts: ts}
+	return &recordedStream{&prefixedStream{st, reader}, io.MultiWriter(&ts.output, st)}, nil
+}
+
+type corruptCommitReader struct {
+	io.Reader
+	ts *corruptCommitTransport
+}
+
+func (r *corruptCommitReader) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	if !r.ts.altered {
+		if r.ts.offset < n {
+			p[r.ts.offset] ^= 1
+			r.ts.altered = true
+		} else {
+			r.ts.offset -= n
+		}
+	}
+	return n, err
+}
+
+func TestDigitalCommitMismatchClosesWithoutDecision(t *testing.T) {
+	ctx := testContext(t)
+	cfp, ofp := identity.Fingerprint{1}, identity.Fingerprint{2}
+	client, operator := memtransport.Pair(t, cfp, ofp)
+	manager := pairing.NewManager(pairing.Config{})
+	defer manager.Close()
+	display, err := manager.Issue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	hello := proto.Hello{ProtoVersion: proto.Version, Role: "client", Capabilities: []string{proto.PairDirectCapability}}
+	// Flip the last commitment byte in transit, preserving its canonical CBOR and the subsequent opening.
+	wire := &corruptCommitTransport{Session: operator, offset: len(encodedMessages(t, hello, proto.PakeCommit{})) - 1}
+	exporter := [32]byte{9}
+	saved := false
+	result := make(chan error, 1)
+	go func() {
+		_, err := Run(ctx, exportSession{wire, exporter}, Options{
+			Role: RoleOperator, LocalFP: ofp, DigitalManager: managerResponder{manager},
+			Remember: func(context.Context, identity.Fingerprint) error { saved = true; return nil },
+		})
+		result <- err
+	}()
+	cs, clientErr := Run(ctx, exportSession{client, exporter}, Options{Initiator: true, Role: RoleClient, LocalFP: cfp, DigitalCode: display.Code})
+	operatorErr := <-result
+	if cs != nil || !errors.Is(clientErr, cpace.ReasonConfirmation) || !errors.Is(operatorErr, cpace.ReasonConfirmation) {
+		t.Fatalf("client %v, operator %v", clientErr, operatorErr)
+	}
+	select {
+	case <-operator.Done():
+	default:
+		t.Fatal("operator kept the transport open")
+	}
+	if !wire.altered || saved || manager.Status().AttemptsLeft != display.AttemptsLeft-1 {
+		t.Fatal("commit mismatch did not consume exactly one attempt without saving trust")
+	}
+	if msg, err := proto.Read(&wire.output, proto.MaxFrameLen); err != nil {
+		t.Fatal(err)
+	} else if _, ok := msg.(proto.Hello); !ok {
+		t.Fatalf("expected Hello, got %T", msg)
+	}
+	if _, err := readPair[proto.PakeShareB](&wire.output); err != nil {
+		t.Fatal(err)
+	}
+	if wire.output.Len() != 0 {
+		t.Fatalf("unexpected output after Yb: %x", wire.output.Bytes())
+	}
+}

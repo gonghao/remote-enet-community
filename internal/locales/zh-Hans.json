@@ -490,6 +490,7 @@
   "Hub fingerprint": "Hub 指纹",
   "Hub fingerprint verified": "Hub 指纹已验证",
   "Hub has not authorized this device. Check the entry and the system time.": "Hub 未授权本机，请检查授权条目与系统时间",
+  "Issuer key on this device is unavailable. Check the state directory and file permissions.": "本机 Hub 签发密钥不可用，请检查状态目录与文件权限",
   "Hub identity mismatch": "Hub 身份不匹配",
   "Hub numeric pairing is not enabled for this device": "Hub 未为本机开放数字配对",
   "Not configured": "未配置",

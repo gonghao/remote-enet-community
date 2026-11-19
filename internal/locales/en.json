@@ -490,6 +490,7 @@
   "Hub fingerprint": "Hub fingerprint",
   "Hub fingerprint verified": "Hub fingerprint verified",
   "Hub has not authorized this device. Check the entry and the system time.": "Hub has not authorized this device. Check the entry and the system time.",
+  "Issuer key on this device is unavailable. Check the state directory and file permissions.": "Issuer key on this device is unavailable. Check the state directory and file permissions.",
   "Hub identity mismatch": "Hub identity mismatch",
   "Hub numeric pairing is not enabled for this device": "Hub numeric pairing is not enabled for this device",
   "Not configured": "Not configured",

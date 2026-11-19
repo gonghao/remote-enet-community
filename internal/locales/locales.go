@@ -59,6 +59,7 @@ var pairingMessages = map[string]string{
 	"hub_authorization_expired_or_revoked": "Hub authorization expired or revoked",
 	"operator_offline":                     "Operator offline",
 	"hub_ticket":                           "Could not obtain hub authorization",
+	"hub_issuer":                           "Issuer key on this device is unavailable. Check the state directory and file permissions.",
 	"unavailable":                          "Code unavailable",
 	"expired":                              "Code expired",
 	"budget_exhausted":                     "Attempts exhausted",

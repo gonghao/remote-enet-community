@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/egoist/mygo/ui"
@@ -14,7 +15,7 @@ import (
 func (v *View) NumericCodeCurrent(generation uint64) bool {
 	status := v.state.NumericCode
 	return v.state.Running && !v.state.Stopping && !v.stopping && generation != 0 &&
-		generation == status.Generation && !status.Committing && status.Reason == "" && time.Now().Before(status.ExpiresAt)
+		generation == status.Generation && !status.Committing && !status.Redeemed && status.Reason == "" && time.Now().Before(status.ExpiresAt)
 }
 
 // SetNumericCodeDisplay accepts the result of an explicit generation request.
@@ -60,14 +61,16 @@ func (v *View) numericCodeControls(c *ui.Context) {
 	switch {
 	case status.Committing:
 		ui.Text(c, v.tr("Completing pairing")).FontSize(11).TextColor(muted).Role(ui.RoleStatus)
+	case status.Redeemed:
+		ui.Text(c, v.tr("Code redeemed")).FontSize(11).TextColor(muted).Role(ui.RoleStatus)
 	case current:
 		ui.Row(c.Key("numeric-code-status")).FillWidth().AlignItems(ui.Center).Gap(12).Children(func() {
 			if code := v.numericDisplay.Code; code != "" {
 				ui.Text(c, code[:4]+" "+code[4:]).Font("monospace").FontSize(16).Shrink(0)
 			}
-			remaining := time.Until(status.ExpiresAt).Round(time.Second)
-			ui.Text(c, v.tr("Expires in %s", max(0, remaining).String())).FontSize(11).TextColor(muted)
-			ui.Text(c, v.tr("Attempts left: %d", status.AttemptsLeft)).FontSize(11).TextColor(muted)
+			seconds := int(max(0, time.Until(status.ExpiresAt).Round(time.Second)) / time.Second)
+			ui.Text(c, v.tr("Expires in %s", fmt.Sprintf("%d:%02d", seconds/60, seconds%60))).Font("monospace").FontSize(11).TextColor(muted)
+			ui.Text(c, v.tr("Attempts left: %d", status.AttemptsLeft)).Font("monospace").FontSize(11).TextColor(muted)
 		})
 	case status.Generation != 0:
 		message := "Code unavailable"

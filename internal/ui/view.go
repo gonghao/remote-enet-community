@@ -186,6 +186,12 @@ func (v *View) SetState(state State) {
 	state.Capture.Recent = append([]hsfzcapture.Frame(nil), state.Capture.Recent[max(0, len(state.Capture.Recent)-200):]...)
 	state.Capture.RecentMarkers = append([]hsfzcapture.Marker(nil), state.Capture.RecentMarkers[max(0, len(state.Capture.RecentMarkers)-200):]...)
 	state.Checkup.Findings = append([]checkup.Finding(nil), state.Checkup.Findings[:min(len(state.Checkup.Findings), 32)]...)
+	if v.role == settings.RoleOperator && !v.detailsPeer.IsZero() && state.Runtime.Peer != v.detailsPeer {
+		v.detailsPeer = identity.Fingerprint{}
+		if v.page == peerDetailsPage {
+			v.page = sessionPage
+		}
+	}
 	v.state = state
 	v.clearExpiredNumericCode()
 }

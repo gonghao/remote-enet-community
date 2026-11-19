@@ -1,11 +1,14 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -72,4 +75,74 @@ func TestPairingErrorClassification(t *testing.T) {
 			t.Errorf("wrong classification for %T", tc.err)
 		}
 	}
+}
+
+func TestOperatorDoesNotPublishUnpairedClient(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	addr := freeTCPAddress(t)
+	nic, _ := gatewayState(t)
+	var logs bytes.Buffer
+	cfg := OperatorConfig{StateDir: t.TempDir(), Listen: addr, ShareAddress: addr, Bind: nic.Address,
+		Logger: slog.New(slog.NewTextHandler(&logs, nil))}
+	op := New()
+	states := op.Subscribe(ctx)
+	done := make(chan error, 1)
+	go func() { done <- op.RunOperator(ctx, cfg) }()
+	defer func() {
+		cancel()
+		if err := awaitError(t, done); !errors.Is(err, context.Canceled) {
+			t.Errorf("operator stop: %v", err)
+		}
+	}()
+	snapshotWhere(t, states, func(s Snapshot) bool { return s.Phase == PhaseListening })
+	display, err := op.IssueNumericCode(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrong := "00000000"
+	if display.Code == wrong {
+		wrong = "00000001"
+	}
+	id, err := identity.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	connector, _, err := hubtransport.New(hubtransport.Options{Local: id, Wrap: wrap(id)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts, err := connector.DialDirectPair(ctx, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ts.Close(nil)
+	checkPeer := func(s Snapshot) bool {
+		if !s.Peer.IsZero() {
+			t.Fatalf("phase %s exposed unpaired client %s", s.Phase, s.Peer)
+		}
+		return s.Phase == PhaseConnecting
+	}
+	snapshotWhere(t, states, checkPeer)
+	if _, err := session.Run(ctx, ts, session.Options{
+		Role: session.RoleClient, Initiator: true, DigitalCode: wrong, LocalFP: id.Fingerprint(),
+	}); !errors.Is(err, cpace.ReasonConfirmation) {
+		t.Fatalf("wrong code: %v", err)
+	}
+	ended := snapshotWhere(t, states, func(s Snapshot) bool {
+		checkPeer(s)
+		return s.Phase == PhaseListening
+	})
+	if ended.LastError != "confirmation" {
+		t.Errorf("pairing reason: %q", ended.LastError)
+	}
+	for line := range strings.SplitSeq(logs.String(), "\n") {
+		if strings.Contains(line, "operator session ended") {
+			if strings.Contains(line, "peer=") || strings.Contains(line, id.Fingerprint().String()) {
+				t.Fatal("session-end log disclosed an unpaired client")
+			}
+			return
+		}
+	}
+	t.Fatal("unpaired session did not log its end")
 }

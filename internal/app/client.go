@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/netip"
 	"os"
 	"strings"
@@ -32,7 +33,15 @@ func (r *Runtime) RunClient(ctx context.Context, cfg ClientConfig) (err error) {
 	if err := r.begin(session.RoleClient); err != nil {
 		return err
 	}
-	defer func() { r.finish(err) }()
+	if cfg.Logger == nil {
+		cfg.Logger = slog.Default()
+	}
+	defer func() {
+		if err != nil && !errors.Is(err, context.Canceled) {
+			cfg.Logger.Warn("client stopped", "error", err)
+		}
+		r.finish(err)
+	}()
 	if err := cfg.defaults(); err != nil {
 		return err
 	}
@@ -53,7 +62,11 @@ func (r *Runtime) RunClient(ctx context.Context, cfg ClientConfig) (err error) {
 		return err
 	}
 	r.update(func(s *Snapshot) { s.Device, s.Peer = id.Fingerprint(), peer.ID })
-	cfg.Logger.Info("client ready", "device", id.Fingerprint().String(), "operator", peer.ID.String())
+	operatorID := "pending"
+	if !peer.ID.IsZero() {
+		operatorID = peer.ID.String()
+	}
+	cfg.Logger.Info("client ready", "device", id.Fingerprint().String(), "operator", operatorID)
 	return r.clientLoop(ctx, cfg, connector, peer, token, store)
 }
 
@@ -124,7 +137,7 @@ func (r *Runtime) clientLoop(ctx context.Context, cfg ClientConfig, connector cl
 			r.update(func(s *Snapshot) {
 				s.NIC, s.Gateway, s.VIN = carside.NIC{}, netip.Addr{}, ""
 			})
-			if err := r.clientWait(ctx, cfg, PhaseWaitingNIC, err, cfg.NICCheckInterval); err != nil {
+			if err := r.clientWait(ctx, cfg, PhaseWaitingNIC, err.Error(), cfg.NICCheckInterval); err != nil {
 				return err
 			}
 			continue
@@ -133,7 +146,7 @@ func (r *Runtime) clientLoop(ctx context.Context, cfg ClientConfig, connector cl
 			if !errors.Is(err, errEnumeration) {
 				return fmt.Errorf("select vehicle interface; specify --nic and --nic-addr if ambiguous: %w", err)
 			}
-			if err := r.clientWait(ctx, cfg, PhaseBackoff, err, delay); err != nil {
+			if err := r.clientWait(ctx, cfg, PhaseBackoff, err.Error(), delay); err != nil {
 				return err
 			}
 			delay = nextDelay(delay, cfg.RetryMax)
@@ -148,7 +161,7 @@ func (r *Runtime) clientLoop(ctx context.Context, cfg ClientConfig, connector cl
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			if err := r.clientWait(ctx, cfg, PhaseBackoff, fmt.Errorf("discover vehicle: %w", err), delay); err != nil {
+			if err := r.clientWait(ctx, cfg, PhaseBackoff, fmt.Sprintf("discover vehicle: %v", err), delay); err != nil {
 				return err
 			}
 			delay = nextDelay(delay, cfg.RetryMax)
@@ -158,7 +171,7 @@ func (r *Runtime) clientLoop(ctx context.Context, cfg ClientConfig, connector cl
 			return fmt.Errorf("found %d gateways; isolate one vehicle or use a unicast --discovery-target", len(gateways))
 		}
 		if len(gateways) == 0 {
-			if err := r.clientWait(ctx, cfg, PhaseWaitingVehicle, errors.New("no gateway found; waiting for vehicle"), cfg.DiscoveryRetryInterval); err != nil {
+			if err := r.clientWait(ctx, cfg, PhaseWaitingVehicle, "no gateway found; waiting for vehicle", cfg.DiscoveryRetryInterval); err != nil {
 				return err
 			}
 			continue
@@ -172,7 +185,7 @@ func (r *Runtime) clientLoop(ctx context.Context, cfg ClientConfig, connector cl
 			if !errors.Is(err, errEnumeration) {
 				return err
 			}
-			if err := r.clientWait(ctx, cfg, PhaseBackoff, err, delay); err != nil {
+			if err := r.clientWait(ctx, cfg, PhaseBackoff, err.Error(), delay); err != nil {
 				return err
 			}
 			delay = nextDelay(delay, cfg.RetryMax)
@@ -186,7 +199,7 @@ func (r *Runtime) clientLoop(ctx context.Context, cfg ClientConfig, connector cl
 		if saved != nil {
 			peer, cfg.DirectPair = *saved, nil
 		} else if cfg.DirectPair != nil {
-			return classifyPairingError(err)
+			return fmt.Errorf("%w: %w", classifyPairingError(err), err)
 		}
 		if connected {
 			token = [16]byte{}
@@ -203,10 +216,14 @@ func (r *Runtime) clientLoop(ctx context.Context, cfg ClientConfig, connector cl
 			continue
 		}
 		cfg.Logger.Warn("client connection ended; retrying", "error", err, "retry_in", delay)
-		if errors.Is(err, identity.ErrFingerprintMismatch) {
-			err = PairingErrorKind("identity_mismatch")
+		message := sessionEndMessage(session.RoleClient, err)
+		switch {
+		case errors.Is(err, identity.ErrFingerprintMismatch):
+			message = string(PairingErrorKind("identity_mismatch"))
+		case errors.Is(err, hubtransport.ErrPeerBusy):
+			message = string(PairingErrorKind("busy"))
 		}
-		if err := r.clientWait(ctx, cfg, PhaseBackoff, err, delay); err != nil {
+		if err := r.clientWait(ctx, cfg, PhaseBackoff, message, delay); err != nil {
 			return err
 		}
 		delay = nextDelay(delay, cfg.RetryMax)
@@ -221,12 +238,10 @@ func selectNIC(ctx context.Context, cfg ClientConfig) (carside.NIC, error) {
 	return carside.SelectNICFrom(nics, cfg.NICName, cfg.NICAddr)
 }
 
-func (r *Runtime) clientWait(ctx context.Context, cfg ClientConfig, phase Phase, cause error, delay time.Duration) error {
+func (r *Runtime) clientWait(ctx context.Context, cfg ClientConfig, phase Phase, message string, delay time.Duration) error {
 	r.update(func(s *Snapshot) {
 		s.Phase, s.NextRetry = phase, time.Now().Add(delay)
-		if cause != nil {
-			s.LastError = cause.Error()
-		}
+		s.LastError = message
 	})
 	return cfg.Hooks.Wait(ctx, delay)
 }

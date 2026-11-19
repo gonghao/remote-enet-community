@@ -62,9 +62,9 @@ Client 验证 Tb 后以 FP_B、用户输入的规范地址以及 Hub=FP_B、Kind
 
 去掉首尾 Unicode 空白。先用 strings.EqualFold 识别不区分大小写的 `renet1:` 调现有 invite.Decode，不折叠内部字符或全角符号，解码失败原路报错。其余以空白分字段，允许一项地址加连续八位，或地址加两组各四位；空白可为换行、制表、全角空格。只在口令字段把 U+FF10…FF19 映射为 ASCII，拒绝其他数字、标点、零宽字符及多余字段。单独八位（也可 4+4）是预留的中心输入，R2 提示补充直连地址，不联网。例：`[2001:db8::2]:47000 ００００ １２３４` 得到口令 `00001234`。
 
-地址以 net.SplitHostPort 拆分，端口为 ASCII 十进制 1…65535；接受 IPv4、括号 IPv6、ASCII DNS/DDNS 名（单标签或点分标签，每标签 1…63 字节，字母数字及内部连字符，可有末尾根点，总长至多 253 字节不含根点）。IP 用 netip 严格解析，纯数字点分而无效的 IPv4 直接报错。拒绝空主机、未括起的 IPv6、zone、URL、路径、用户信息和通配监听地址。用 net.JoinHostPort 重建，DNS 存小写名、保留末尾根点，重连时重新解析。DNS 失败、连接超时与口令格式错误分开显示。解析错误只含枚举和出错字段，不携带输入或嵌套含原文的解析器错误。桌面现有脱敏正则只覆盖原始邀请。数字自检只向 internal/checkup 传固定 PeerCode=direct_input_valid 或对应错误枚举，Endpoints 留空；新增本地 finding 分支，不做 DNS、TCP 或口令探测。
+地址以 net.SplitHostPort 拆分，端口为 ASCII 十进制 1…65535；接受 IPv4、括号 IPv6、ASCII DNS/DDNS 名（单标签或点分标签，每标签 1…63 字节，字母数字及内部连字符，可有末尾根点，总长至多 253 字节不含根点）。IP 用 netip 严格解析，纯数字点分而无效的 IPv4 直接报错。拒绝空主机、未括起的 IPv6、zone、URL、路径、用户信息和通配监听地址。用 net.JoinHostPort 重建，DNS 存小写名、保留末尾根点，重连时重新解析。DNS 失败、连接超时与口令格式错误分开显示。解析错误只含枚举和出错字段，不携带输入或嵌套含原文的解析器错误。桌面日志页的运行时错误明细会遮盖原始邀请和数字码；匿名诊断导出仍只含白名单字段，不含原始错误。数字自检只向 internal/checkup 传固定 PeerCode=direct_input_valid 或对应错误枚举，Endpoints 留空；新增本地 finding 分支，不做 DNS、TCP 或口令探测。
 
-Operator 在已有邀请区增加「生成数字码」「复制地址和数字码」「撤销数字码」。生成只在监听且可接待时可用；复制和撤销只在当前代次有效时可用。复制格式为地址、一个空格、4+4 分组。码用等宽数字，旁列倒计时和剩余可发起次数，提交中显示处理中。桌面 State.NumericCode 只携带无秘密 Status；独立的复制操作按当前代次取 Display，显式展示用的 UI 局部秘密在失效、换代或窗口关闭时清除。State.Invitation 继续服务原始邀请。Client 沿用单输入框，提交后清空敏感输入；终态提示是否需要新码。遵循浅色、直角、整数网格，状态同时用文字表达，键盘可达，简繁字体回退与窄窗布局沿用主题。[UI-DESIGN](UI-DESIGN.md)
+Operator 在已有邀请区增加「生成数字码」「复制地址和数字码」「撤销数字码」。生成只在监听且可接待时可用；复制和撤销只在当前代次有效时可用。复制格式为地址、一个空格、4+4 分组。码用等宽数字，旁列倒计时和剩余可发起次数，提交中显示处理中，保存完成后显示「数字码已兑换」。桌面 State.NumericCode 只携带无秘密 Status；独立的复制操作按当前代次取 Display，显式展示用的 UI 局部秘密在失效、换代或窗口关闭时清除。State.Invitation 继续服务原始邀请。Client 沿用单输入框，提交后清空敏感输入；终态提示是否需要新码。遵循浅色、直角、整数网格，状态同时用文字表达，键盘可达，简繁字体回退与窄窗布局沿用主题。[UI-DESIGN](UI-DESIGN.md)
 
 沿用 internal/locales 的英文原文作为键，三个 JSON 同步。下表同一行的斜线分隔独立键（占位符类型、数量、顺序一致）。远端 reason 仅接受固定枚举并本地化，确认前的远端提示仅供排障，不作为已验证身份的事实。
 
@@ -78,8 +78,13 @@ Operator 在已有邀请区增加「生成数字码」「复制地址和数字�
 | Numeric pairing unsupported / Device identity mismatch | 对端不支持数字配对 / 设备身份不匹配 | 對端不支援數字配對 / 裝置身分不符 |
 | Code unavailable / Code expired / Attempts exhausted / Try again later | 数字码不可用 / 数字码已过期 / 次数已用尽 / 请稍后重试 | 數字碼無法使用 / 數字碼已過期 / 次數已用盡 / 請稍後重試 |
 | Code or peer confirmation failed / Pairing interrupted / Could not save pairing | 数字码或对端确认失败 / 配对已中断 / 无法保存配对 | 數字碼或對端確認失敗 / 配對已中斷 / 無法儲存配對 |
+| Code redeemed | 数字码已兑换 | 數字碼已兌換 |
+| Client disconnected. / Operator disconnected. | 客户端已断开连接。 / Operator 已断开连接。 | 用戶端已中斷連線。 / Operator 已中斷連線。 |
+| Client connection could not be accepted. / Client session ended with an error. / Operator session ended with an error. | 无法接纳客户端连接。 / 客户端会话因错误结束。 / Operator 会话因错误结束。 | 無法接受用戶端連線。 / 用戶端工作階段因錯誤結束。 / Operator 工作階段因錯誤結束。 |
+| Pairing rejected. / Incompatible protocol version. | 配对被拒绝。 / 协议版本不兼容。 | 配對遭拒。 / 通訊協定版本不相容。 |
+| Runtime stopped with an error. Check runtime diagnostics. | 运行因错误停止，请检查运行诊断信息。 | 執行因錯誤停止，請檢查執行診斷資訊。 |
 
-拒绝原因依次使用 unavailable（未生成、已撤销或已兑换）、expired、exhausted、rate_limited、busy、confirmation、store_failed。只保留当前管理器末次终态给出原因，重启后统一 unavailable。无法从 MAC 失败区分输错与中间人；旧端明确缺 capability 才显示“不支持”，单独 EOF 显示“中断”。原始邀请过期沿用其期限检查。
+拒绝原因依次使用 unavailable（未生成、已撤销或已兑换）、expired、exhausted、rate_limited、busy、confirmation、store_failed。只保留当前管理器末次终态给出原因，重启后统一 unavailable。无法从 MAC 失败区分输错与中间人；旧端明确缺 capability 才显示“不支持”，单独 EOF 显示“中断”。原始邀请过期沿用其期限检查。旧版配对拒绝的诊断只接受固定的 `invalid pairing token` 原因，界面统一显示「配对被拒绝」。
 
 ## 6. 实施拆分和接口
 

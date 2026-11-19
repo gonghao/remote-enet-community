@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"remote-enet/internal/app"
 	"remote-enet/internal/exclusive"
 	"remote-enet/internal/hsfz"
 	"remote-enet/internal/testutil/fakezgw"
@@ -111,6 +112,36 @@ func freeRuntimeHub(t *testing.T) string {
 	return addr
 }
 
+func TestCLIPairFileDialsDirectAddress(t *testing.T) {
+	_, gateway := gatewayState(t)
+	zgw, err := fakezgw.Start(t.Context(), gateway.Address, fakezgw.Profile{Ident: gateway.Identification}, fakezgw.WithPorts(0, 0, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zgw.Close()
+	_, _, discovery := zgw.Addr()
+	const formattedCode = "0482 7193"
+	const numericCode = "04827193"
+	address := freeRuntimeHub(t)
+	path := filepath.Join(t.TempDir(), "pair.txt")
+	if err := os.WriteFile(path, []byte(address+" "+formattedCode+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	var stdout, stderr bytes.Buffer
+	err = run(ctx, []string{"client", "--state-dir", t.TempDir(), "--pair-file", path,
+		"--nic-addr", "127.0.0.1", "--discovery-target", discovery.String(),
+		"--discovery-timeout", "50ms", "--status-interval", "0"}, &stdout, &stderr)
+	if !errors.Is(err, app.PairingErrorKind("interrupted")) || !strings.Contains(stderr.String(), "hub: dial "+address+":") {
+		t.Fatalf("direct pairing did not dial the file address: %v", err)
+	}
+	output := stdout.String() + stderr.String() + err.Error()
+	if strings.Contains(output, formattedCode) || strings.Contains(output, numericCode) {
+		t.Fatal("numeric code leaked during direct pairing")
+	}
+}
+
 func TestCLIConnectionTestsAndStatusUseRealRuntime(t *testing.T) {
 	for _, allow := range []bool{true, false} {
 		t.Run(strconv.FormatBool(allow), func(t *testing.T) {
@@ -169,7 +200,10 @@ func TestCLIConnectionTestsAndStatusUseRealRuntime(t *testing.T) {
 			}
 			c.Close()
 			stopClient()
-			opLogs.wait(t, "operator session ended")
+			endLine := opLogs.wait(t, "operator session ended")
+			if runtimeField(t, endLine, "peer") != runtimeField(t, presenting, "peer") {
+				t.Fatal("ended session did not log its verified peer")
+			}
 			nextClientLogs, stopNext := runCLIForTest(t, clientArgs)
 			opLogs.wait(t, resultMessage, "generation=2", "status="+status)
 			if stats := zgw.Stats(); stats.Connections != 1 || stats.DiagReceived != 1 {

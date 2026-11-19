@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -60,12 +61,7 @@ func TestNumericOperatorControlsAtMinimumSize(t *testing.T) {
 				v.SetNumericCodeDisplay(pairing.Display{Status: status, Code: "00001234"})
 				v.Complete(ActionIssueNumericCode)
 				tt.Frame()
-				scrollTo(t, tt, "0000 1234", 900, 620)
-				expires := v.tr("Expires in %s", "TIMER")
-				expires = strings.Split(expires, "TIMER")[0]
-				if !tt.HasText(expires) || !tt.HasText(v.tr("Attempts left: %d", 4)) {
-					t.Fatal("the live code lacks a countdown or remaining attempt count")
-				}
+				assertNumericCodeVisible(t, tt, v, 900, 620)
 				click(t, tt, copyCode)
 				v.Complete(ActionCopyNumericCode)
 				tt.Frame()
@@ -97,7 +93,66 @@ func TestNumericOperatorControlsAtMinimumSize(t *testing.T) {
 				if !tt.HasText(v.tr("Code expired")) || tt.HasText("0000 1234") || v.numericDisplay.Code != "" {
 					t.Fatal("expiration did not clear the UI secret")
 				}
+				state.NumericCode = status
+				v.SetState(state)
+				v.SetNumericCodeDisplay(pairing.Display{Status: status, Code: "00001234"})
+				tt.Frame()
+				assertNumericCodeVisible(t, tt, v, 900, 620)
+				state.NumericCode.Reason = cpace.ReasonUnavailable
+				state.NumericCode.Redeemed = true
+				v.SetState(state)
+				tt.Frame()
+				if !tt.HasText(v.tr("Code redeemed")) || tt.HasText(v.tr("Code unavailable")) {
+					t.Fatal("redemption did not show its own terminal status")
+				}
+				copied, revoked = 0, 0
+				click(t, tt, copyCode)
+				click(t, tt, revoke)
+				if copied != 0 || revoked != 0 || tt.HasText("0000 1234") || v.numericDisplay.Code != "" {
+					t.Fatal("redemption retained the UI secret or admitted an action")
+				}
 			})
+		}
+	}
+}
+
+func TestNumericCodeVisibleAtDefaultOperatorSize(t *testing.T) {
+	for _, zoom := range []float32{1, 1.5} {
+		for _, language := range []string{"en", "zh-Hans", "zh-Hant"} {
+			t.Run(fmt.Sprintf("%s/%.1f", language, zoom), func(t *testing.T) {
+				v := New(operatorConfig(), Actions{})
+				v.SetLanguage(language)
+				status := pairing.Status{Generation: 1, AttemptsLeft: 4, ExpiresAt: time.Now().Add(72 * time.Second)}
+				v.SetState(State{
+					Running: true, Runtime: app.Snapshot{Phase: app.PhaseListening, LastError: "Client disconnected."},
+					NumericCode: status,
+				})
+				v.SetNumericCodeDisplay(pairing.Display{Status: status, Code: "00001234"})
+				tt := ui.NewTester(v.Render, 1080, 760)
+				tt.SetZoom(zoom)
+				assertNumericCodeVisible(t, tt, v, 1080, 760)
+			})
+		}
+	}
+}
+
+func assertNumericCodeVisible(t *testing.T, tt *ui.Tester, v *View, width, height float32) {
+	t.Helper()
+	pattern := regexp.MustCompile("^" + strings.Replace(regexp.QuoteMeta(v.tr("Expires in %s", "TIMER")), "TIMER", `\d+:[0-5]\d`, 1) + "$")
+	countdown := ""
+	for _, label := range tt.Texts() {
+		if pattern.MatchString(label) {
+			countdown = label
+			break
+		}
+	}
+	if countdown == "" {
+		t.Fatal("missing m:ss countdown")
+	}
+	for _, label := range []string{"0000 1234", countdown, v.tr("Attempts left: %d", 4)} {
+		r, ok := tt.Find(label)
+		if !ok || r.W <= 0 || r.H <= 0 || r.X < 0 || r.X+r.W > width || r.Y < 0 || r.Y+r.H > height {
+			t.Errorf("%q is clipped: %+v", label, r)
 		}
 	}
 }

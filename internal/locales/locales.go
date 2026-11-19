@@ -69,8 +69,14 @@ var pairingMessages = map[string]string{
 // PairingMessage accepts only fixed reason codes.
 func PairingMessage(reason string) string { return pairingMessages[reason] }
 
-// RuntimeErrorText translates known pairing messages among runtime diagnostics.
+// RuntimeErrorText translates application-owned messages among runtime diagnostics.
 func RuntimeErrorText(tag, message string) string {
+	switch message {
+	case "Client disconnected.", "Client connection could not be accepted.", "Client session ended with an error.",
+		"Operator disconnected.", "Operator session ended with an error.",
+		"Pairing rejected.", "Incompatible protocol version.", "Runtime stopped with an error. Check runtime diagnostics.":
+		return Text(tag, message)
+	}
 	for _, key := range pairingMessages {
 		if message == key {
 			return Text(tag, key)

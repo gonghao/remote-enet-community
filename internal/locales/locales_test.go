@@ -29,7 +29,7 @@ func TestCatalogsHaveCompleteMatchingFormats(t *testing.T) {
 	}
 }
 
-func TestNumericPairingMessagesAreCataloged(t *testing.T) {
+func TestPairingAndRuntimeMessagesAreCataloged(t *testing.T) {
 	for _, key := range []string{
 		"Generate numeric code", "Copy address and code", "Revoke code",
 		"Expires in %s", "Attempts left: %d", "Completing pairing",
@@ -37,26 +37,36 @@ func TestNumericPairingMessagesAreCataloged(t *testing.T) {
 		"Invalid invite", "Invitation expired", "Invalid host", "Invalid port", "Enter eight digits",
 		"Address lookup failed", "Connection timed out", "Operator busy",
 		"Numeric pairing unsupported", "Device identity mismatch",
-		"Code unavailable", "Code expired", "Attempts exhausted", "Try again later",
+		"Code unavailable", "Code expired", "Code redeemed", "Attempts exhausted", "Try again later",
 		"Code or peer confirmation failed", "Pairing interrupted", "Could not save pairing",
+		"Client disconnected.", "Client connection could not be accepted.", "Client session ended with an error.",
+		"Operator disconnected.", "Operator session ended with an error.",
+		"Pairing rejected.", "Incompatible protocol version.", "Runtime stopped with an error. Check runtime diagnostics.",
 		"Request a new numeric code.", "You can retry with the same code if it is still valid.",
 		"Check the operator address before trying again.", "Try again later with a new numeric code.",
 	} {
 		for _, tag := range []string{"en", "zh-Hans", "zh-Hant"} {
 			if catalogs[tag][key] == "" {
-				t.Errorf("missing %s numeric pairing message %q", tag, key)
+				t.Errorf("missing %s pairing or runtime message %q", tag, key)
 			}
 		}
 	}
 }
 
-func TestRuntimeErrorTextUsesPairingWhitelist(t *testing.T) {
+func TestRuntimeErrorTextUsesMessageWhitelist(t *testing.T) {
 	message := PairingMessage("identity_mismatch")
 	if got := RuntimeErrorText("zh-Hans", message); got != "设备身份不匹配" {
 		t.Errorf("identity mismatch text: %q", got)
 	}
 	if got := RuntimeErrorText("zh-Hans", "Settings"); got != "Settings" {
 		t.Errorf("unrelated diagnostic text was translated: %q", got)
+	}
+	for tag, want := range map[string]string{
+		"en": "Client disconnected.", "zh-Hans": "客户端已断开连接。", "zh-Hant": "用戶端已中斷連線。",
+	} {
+		if got := RuntimeErrorText(tag, "Client disconnected."); got != want {
+			t.Errorf("%s disconnect text: %q", tag, got)
+		}
 	}
 }
 

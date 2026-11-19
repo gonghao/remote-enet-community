@@ -626,3 +626,11 @@ func TestExpiredInvitationShowsSpecificError(t *testing.T) {
 		t.Fatal("expired invitation did not yield its specific message")
 	}
 }
+
+func TestRuntimeLogRedactsPairingCredentials(t *testing.T) {
+	raw := "bind failed: renet1:ABCDEFG 04827193 0482 7193 ０４８２　７１９３"
+	want := "bind failed: [invitation redacted] [numeric code redacted] [numeric code redacted] [numeric code redacted]"
+	if got := displayRuntimeError(raw); got != want {
+		t.Errorf("runtime error redaction = %q, want %q", got, want)
+	}
+}

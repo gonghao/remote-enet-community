@@ -402,7 +402,7 @@ func TestClientRetryIsBoundedAndCancelable(t *testing.T) {
 	go func() { done <- r.clientLoop(ctx, cfg, connector, transport.PeerInfo{ID: cfg.Peer}, [16]byte{}, store) }()
 	for _, d := range []time.Duration{time.Millisecond, 2 * time.Millisecond, 4 * time.Millisecond, 4 * time.Millisecond} {
 		got := snapshotWhere(t, states, func(s Snapshot) bool { return s.Phase == PhaseBackoff })
-		if got.NextRetry.IsZero() || got.LastError != fail.Error() {
+		if got.NextRetry.IsZero() || got.LastError != "Operator session ended with an error." {
 			t.Fatalf("missing retry state: %+v", got)
 		}
 		w := n.nextWait(t, d)
@@ -443,6 +443,39 @@ func TestClientPairingAndVersionFailuresDoNotRetry(t *testing.T) {
 			}
 			if len(n.discoveryHistory()) != 1 {
 				t.Fatal("fatal error retried")
+			}
+		})
+	}
+}
+
+func TestClientRetryKeepsSessionErrorOutOfBanner(t *testing.T) {
+	for _, tc := range []struct {
+		cause error
+		want  string
+	}{
+		{io.EOF, "Operator disconnected."},
+		{errors.New("peer-controlled detail"), "Operator session ended with an error."},
+	} {
+		t.Run(tc.want, func(t *testing.T) {
+			nic, gateway := gatewayState(t)
+			cfg := connectionConfig(nic)
+			cfg.Hooks.Discover = func(context.Context, carside.DiscoverOptions) ([]carside.Gateway, error) {
+				return []carside.Gateway{gateway}, nil
+			}
+			r := New()
+			cfg.Hooks.Wait = func(ctx context.Context, delay time.Duration) error {
+				if delay == cfg.NICCheckInterval {
+					<-ctx.Done()
+					return ctx.Err()
+				}
+				if s := r.Snapshot(); s.Phase != PhaseBackoff || s.LastError != tc.want {
+					t.Errorf("retry snapshot: phase=%s error=%q", s.Phase, s.LastError)
+				}
+				return context.Canceled
+			}
+			connector := dialFunc(func(context.Context, transport.PeerInfo) (transport.Session, error) { return nil, tc.cause })
+			if err := r.clientLoop(t.Context(), cfg, connector, transport.PeerInfo{}, [16]byte{}, nil); !errors.Is(err, context.Canceled) {
+				t.Fatal(err)
 			}
 		})
 	}
@@ -648,7 +681,7 @@ func TestReconnectWaitAdvancesAfterTransientPeerBusy(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("injected busy did not enter backoff")
 	}
-	if s := r.Snapshot(); s.Phase != PhaseBackoff || s.Generation != 1 || s.LastError != hubtransport.ErrPeerBusy.Error() || s.NextRetry.IsZero() {
+	if s := r.Snapshot(); s.Phase != PhaseBackoff || s.Generation != 1 || s.LastError != "busy" || s.NextRetry.IsZero() {
 		t.Fatalf("busy was bypassed rather than retried: %+v", s)
 	}
 	retryStarted := time.Now()

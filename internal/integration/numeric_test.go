@@ -154,6 +154,9 @@ func TestNumericLastAttemptAndSavedRestart(t *testing.T) {
 		}
 		f.absent(t, op.Snapshot().Device)
 	}
+	if logs, zero := f.logs.snapshot(), (identity.Fingerprint{}).String(); !strings.Contains(logs, "operator=pending") || strings.Contains(logs, "operator="+zero) {
+		t.Fatal("first pairing did not log the operator as pending")
+	}
 	f.client.DirectPair.Code = d.Code
 	called := make(chan transport.PeerInfo, 1)
 	f.client.Hooks.OnPaired = func(p transport.PeerInfo) { called <- p }
@@ -162,6 +165,9 @@ func TestNumericLastAttemptAndSavedRestart(t *testing.T) {
 	stopClient := runRuntime(t, f.ctx, func(ctx context.Context) error { return c.RunClient(ctx, cfg) })
 	waitPhase(t, f.ctx, op, app.PhaseConnected)
 	waitPhase(t, f.ctx, c, app.PhaseConnected)
+	if status := op.NumericCodeStatus(); !status.Redeemed || status.Reason != cpace.ReasonUnavailable {
+		t.Fatalf("successful pairing status: %+v", status)
+	}
 	var p transport.PeerInfo
 	select {
 	case p = <-called:

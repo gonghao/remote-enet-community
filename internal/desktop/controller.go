@@ -5,8 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -431,5 +429,3 @@ func wait(ctx context.Context, done <-chan struct{}) error {
 		return ctx.Err()
 	}
 }
-
-func quietLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }

@@ -278,11 +278,24 @@ func TestBlockedSave(t *testing.T) {
 			wantErr(t, <-done, cpace.ReasonStoreFailed)
 			_, err = m.Begin(t.Context())
 			wantErr(t, err, cpace.ReasonStoreFailed)
+			if m.Status().Redeemed {
+				t.Fatal("failed save marked the code redeemed")
+			}
 		} else {
 			wantErr(t, <-done, nil)
 			wantErr(t, m.Revoke(t.Context(), d.Generation), ErrRedeemed)
+			status := m.Status()
+			if !status.Redeemed || status.Committing || status.Reason != cpace.ReasonUnavailable {
+				t.Fatalf("redeemed status: %+v", status)
+			}
+			_, err = m.Begin(t.Context())
+			wantErr(t, err, cpace.ReasonUnavailable)
 		}
 		fresh := issue(t, m)
+		wantErr(t, m.Revoke(t.Context(), d.Generation), cpace.ReasonUnavailable)
+		if fresh.Redeemed {
+			t.Fatal("replacement code started as redeemed")
+		}
 		a.Finish()
 		if m.Status() != fresh.Status {
 			t.Fatal("late finish changed replacement")

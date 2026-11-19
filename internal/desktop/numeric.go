@@ -154,7 +154,7 @@ func numericMessage(err error) string {
 	case errors.Is(err, pairing.ErrAlreadyRedeeming):
 		return "Completing pairing"
 	case errors.Is(err, pairing.ErrRedeemed):
-		return "Code unavailable"
+		return "Code redeemed"
 	case errors.Is(err, ErrRole):
 		return "Save the selected role before starting."
 	case errors.Is(err, invite.ErrInvalidHost):

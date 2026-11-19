@@ -706,6 +706,15 @@ func TestPeerIDDetailsAndCopy(t *testing.T) {
 					if !tt.HasText(want) || tt.HasText(peer.String()) {
 						t.Fatal("back did not return to the short ID")
 					}
+					if entry.operator {
+						scrollTo(t, tt, button, float32(width), float32(height))
+						click(t, tt, button)
+						v.SetState(State{Running: true, Runtime: app.Snapshot{Phase: app.PhaseListening}})
+						tt.Frame()
+						if v.page != sessionPage || !v.detailsPeer.IsZero() || tt.HasText(peer.Short()) || tt.HasText(peer.String()) {
+							t.Fatal("disconnect retained the client details")
+						}
+					}
 				})
 			}
 		}

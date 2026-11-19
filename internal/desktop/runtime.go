@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/netip"
 	"reflect"
 	"runtime"
@@ -107,6 +108,8 @@ func (c *Controller) start(ctx context.Context, role, input string) error {
 	}
 	runCtx, cancel := context.WithCancel(c.ctx)
 	g := &running{runtime: c.deps.newRuntime(), ctx: runCtx, cancel: cancel, done: make(chan struct{}), pairing: peer}
+	logger := slog.New(runtimeLogHandler{controller: c, run: g})
+	client.Logger, op.Logger = logger, logger
 	if client.DirectPair != nil {
 		g.digitalPair = true
 		address := client.DirectPair.Address
@@ -141,9 +144,9 @@ func (c *Controller) start(ctx context.Context, role, input string) error {
 func (c *Controller) runtimeConfigs(cfg settings.Config, code string) (app.ClientConfig, app.OperatorConfig, transport.PeerInfo, error) {
 	var pairing transport.PeerInfo
 	client := app.ClientConfig{StateDir: c.roleDir(settings.RoleClient), NICName: cfg.Client.NICName,
-		AllowLinkTest: cfg.AllowLinkTest, Logger: quietLogger()}
+		AllowLinkTest: cfg.AllowLinkTest}
 	op := app.OperatorConfig{StateDir: c.roleDir(settings.RoleOperator), Listen: cfg.Operator.Listen,
-		AllowLinkTest: cfg.AllowLinkTest, Exclusive: cfg.Operator.Exclusive, Logger: quietLogger(),
+		AllowLinkTest: cfg.AllowLinkTest, Exclusive: cfg.Operator.Exclusive,
 		DirectFactory: c.opts.DirectFactory,
 		Ports:         operator.Ports{Diagnostic: cfg.Operator.DiagnosticPort, Control: cfg.Operator.ControlPort, Discovery: cfg.Operator.DiscoveryPort}}
 	if err := cfg.Validate(); err != nil {
@@ -289,6 +292,8 @@ func (c *Controller) serve(g *running, role string, client app.ClientConfig, op 
 			c.setFailureLocked(pairingText, nil, hint)
 		case g.peerSaveFailed:
 			c.setFailureLocked("Could not save pairing", nil, "Request a new numeric code.")
+		case !wasStopping && (errors.Is(err, session.ErrPairing) || errors.Is(err, session.ErrVersion)):
+			c.setFailureLocked(final.LastError, nil, "")
 		case err != nil && !wasStopping:
 			c.failureLocked("Runtime stopped with an error. Check runtime diagnostics.", err)
 		case c.state.Capture.Error != "":
@@ -310,6 +315,9 @@ func (c *Controller) acceptSnapshot(g *running, s app.Snapshot) {
 	previous := c.state.Runtime
 	if s.Phase != app.PhaseIdle {
 		c.state.Runtime = s
+	}
+	if s.Phase != app.PhaseIdle && s.Phase != app.PhaseStarting && c.state.Notice == "Runtime starting." {
+		c.state.Notice = ""
 	}
 	if previous.Generation != s.Generation || s.Phase != app.PhaseConnected {
 		if g.test != nil {

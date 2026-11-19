@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"remote-enet/internal/carside"
 	"remote-enet/internal/exclusive"
 	"remote-enet/internal/hsfz"
 	"remote-enet/internal/hsfzcapture"
@@ -19,6 +20,7 @@ import (
 	"remote-enet/internal/linktest"
 	"remote-enet/internal/observe"
 	"remote-enet/internal/operator"
+	"remote-enet/internal/session"
 	"remote-enet/internal/testutil/fakezgw"
 )
 
@@ -242,7 +244,13 @@ func TestPublicRuntimesReconnectAndReleasePresenter(t *testing.T) {
 		t.Fatalf("invalid measured RTT: generation=%d valid=%t rtt=%s samples=%+v", rtt.Generation, rtt.RTTValid, rtt.RTT, rtt.Metrics.Session.RTT)
 	}
 	stopClient()
-	snapshotWhere(t, opStates, func(s Snapshot) bool { return s.Phase == PhaseListening && s.Generation == 2 })
+	ended := snapshotWhere(t, opStates, func(s Snapshot) bool { return s.Phase == PhaseListening && s.Generation == 2 })
+	if !ended.Peer.IsZero() || ended.NIC != (carside.NIC{}) || ended.Gateway.IsValid() || ended.VIN != "" {
+		t.Errorf("operator retained client or vehicle after disconnect: %+v", ended)
+	}
+	if ended.LastError != "Client disconnected." {
+		t.Errorf("disconnect message: %q", ended.LastError)
+	}
 	portsReleased(t, secondOp)
 	if s := op.Snapshot(); s.Diagnostic.IsValid() || s.Control.IsValid() || s.Discovery.IsValid() {
 		t.Fatalf("released endpoints retained in snapshot: %+v", s)
@@ -295,6 +303,27 @@ func TestPublicRuntimesReconnectAndReleasePresenter(t *testing.T) {
 	// for a later session to supply a response.
 	for _, c := range []net.Conn{a, b} {
 		_, _ = io.Copy(io.Discard, c)
+	}
+}
+
+func TestSessionEndMessage(t *testing.T) {
+	for _, test := range []struct {
+		err      error
+		operator string
+		client   string
+	}{
+		{io.EOF, "Client disconnected.", "Operator disconnected."},
+		{net.ErrClosed, "Client disconnected.", "Operator disconnected."},
+		{context.Canceled, "Client disconnected.", "Operator disconnected."},
+		{session.ErrPairing, "Pairing rejected.", "Pairing rejected."},
+		{session.ErrVersion, "Incompatible protocol version.", "Incompatible protocol version."},
+		{errors.New("unexpected transport detail"), "Client session ended with an error.", "Operator session ended with an error."},
+	} {
+		for role, want := range map[session.Role]string{session.RoleOperator: test.operator, session.RoleClient: test.client} {
+			if got := sessionEndMessage(role, test.err); got != want {
+				t.Errorf("%s error %v: got %q, want %q", role, test.err, got, want)
+			}
+		}
 	}
 }
 

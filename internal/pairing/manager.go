@@ -35,6 +35,7 @@ type Status struct {
 	ExpiresAt    time.Time
 	AttemptsLeft int
 	Committing   bool
+	Redeemed     bool
 	Reason       cpace.Reason
 }
 
@@ -56,7 +57,7 @@ type Manager struct {
 	stopTimer        func()
 	saving           chan struct{}
 	commitGeneration uint64
-	redeemed, closed bool
+	closed           bool
 }
 
 // NewManager starts without an available code.
@@ -112,6 +113,7 @@ func (m *Manager) retire(reason cpace.Reason) {
 	m.owner = nil
 	m.code = ""
 	m.status.AttemptsLeft = 0
+	m.status.Redeemed = false
 	m.status.Reason = reason
 }
 
@@ -136,7 +138,6 @@ func (m *Manager) Issue() (Display, error) {
 	}
 	gen := m.status.Generation + 1
 	m.status = Status{Generation: gen, Address: m.cfg.Address, ExpiresAt: now.Add(m.cfg.TTL), AttemptsLeft: m.cfg.PerCode}
-	m.redeemed = false
 	m.code = fmt.Sprintf("%08d", n.Int64())
 	m.stopTimer = m.cfg.AfterFunc(m.status.ExpiresAt.Sub(m.cfg.Now()), func() {
 		m.mu.Lock()
@@ -175,11 +176,11 @@ func (m *Manager) Revoke(ctx context.Context, generation uint64) error {
 	if generation == m.commitGeneration && m.saving != nil {
 		return ErrAlreadyRedeeming
 	}
-	if generation == m.commitGeneration && m.redeemed {
-		return ErrRedeemed
-	}
 	if generation != m.status.Generation || m.closed {
 		return cpace.ReasonUnavailable
+	}
+	if m.status.Redeemed {
+		return ErrRedeemed
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -363,7 +364,7 @@ func (a *Attempt) Commit(save func(context.Context) error) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.status.Committing = false
-	m.redeemed = err == nil
+	m.status.Redeemed = err == nil && !m.closed
 	close(m.saving)
 	m.saving = nil
 	if err != nil {
@@ -380,7 +381,6 @@ func (m *Manager) Close() {
 		m.closed = true
 		m.retire(cpace.ReasonUnavailable)
 		m.status.Generation++
-		m.redeemed = false
 	}
 	saving := m.saving
 	m.mu.Unlock()

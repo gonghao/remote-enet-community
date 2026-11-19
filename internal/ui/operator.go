@@ -6,12 +6,12 @@ func (v *View) operatorPage(c *ui.Context) {
 	v.phase(c)
 	v.messages(c)
 	v.traffic(c)
-	v.information(c)
 	v.card(c.Key("operator-actions"), "Session controls", "One client at a time", func() {
 		v.startControls(c)
-		v.invitationControls(c)
 		v.numericCodeControls(c)
+		v.invitationControls(c)
 	})
+	v.information(c)
 	w, _ := c.Size()
 	if w >= 1000 {
 		ui.Grid(c).Columns(2).FillWidth().Gap(12).Children(func() {

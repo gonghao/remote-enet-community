@@ -14,9 +14,14 @@ import (
 	"remote-enet/internal/locales"
 )
 
-const maxEvents = 200
+const (
+	maxEvents = 200
+)
 
-var invitationText = regexp.MustCompile(`(?i)renet1:[a-z0-9=]*`)
+var (
+	invitationText  = regexp.MustCompile(`(?i)renet1:[a-z0-9=]*`)
+	numericCodeText = regexp.MustCompile(`[0-9０-９]{4}[\s\p{Zs}]*[0-9０-９]{4}`)
+)
 
 func (c *Controller) failure(message string, err error) {
 	c.mu.Lock()
@@ -26,8 +31,7 @@ func (c *Controller) failure(message string, err error) {
 	}
 }
 
-// Error objects and arbitrary error text never enter the operation history.
-// Raw app diagnostics remain available in Runtime, with invitation codes scrubbed.
+// Operation failures use fixed messages in the banner and history.
 func (c *Controller) failureLocked(message string, err error) {
 	c.setFailureLocked(message, err, "")
 }
@@ -95,7 +99,15 @@ func cloneRuntime(s app.Snapshot) app.Snapshot {
 }
 
 func displayText(value string) string {
+	return trimDisplayText(invitationText.ReplaceAllString(value, "[invitation redacted]"))
+}
+
+func displayRuntimeError(value string) string {
 	value = invitationText.ReplaceAllString(value, "[invitation redacted]")
+	return trimDisplayText(numericCodeText.ReplaceAllString(value, "[numeric code redacted]"))
+}
+
+func trimDisplayText(value string) string {
 	value = strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) {
 			return ' '
@@ -112,7 +124,7 @@ func displayText(value string) string {
 }
 
 // Scrub all diagnostic strings, including those supplied by the remote peer.
-// The controller never copies an app error or remote log into its own Events.
+// Snapshot strings stay separate from the runtime logger’s diagnostic events.
 func displayRuntime(s app.Snapshot) app.Snapshot {
 	s = cloneRuntime(s)
 	if message := locales.PairingMessage(s.LastError); message != "" {

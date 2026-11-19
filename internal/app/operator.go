@@ -84,7 +84,15 @@ func (r *Runtime) RunOperator(ctx context.Context, cfg OperatorConfig) (err erro
 	if err := r.begin(session.RoleOperator); err != nil {
 		return err
 	}
-	defer func() { r.finish(err) }()
+	if cfg.Logger == nil {
+		cfg.Logger = slog.Default()
+	}
+	defer func() {
+		if err != nil && !errors.Is(err, context.Canceled) {
+			cfg.Logger.Warn("operator stopped", "error", err)
+		}
+		r.finish(err)
+	}()
 	if err := cfg.validate(); err != nil {
 		return err
 	}
@@ -93,9 +101,6 @@ func (r *Runtime) RunOperator(ctx context.Context, cfg OperatorConfig) (err erro
 		if err != nil {
 			return err
 		}
-	}
-	if cfg.Logger == nil {
-		cfg.Logger = slog.Default()
 	}
 	r.update(func(s *Snapshot) { s.Exclusive.Enabled = cfg.Exclusive })
 	store, err := trust.Open(ctx, cfg.StateDir)
@@ -139,7 +144,7 @@ func (r *Runtime) operatorLoop(ctx context.Context, acceptor transport.Acceptor,
 			}
 			cfg.Logger.Warn("operator connection rejected", "error", err)
 			r.update(func(s *Snapshot) {
-				s.Phase, s.LastError, s.NextRetry = PhaseBackoff, err.Error(), time.Now().Add(delay)
+				s.Phase, s.LastError, s.NextRetry = PhaseBackoff, "Client connection could not be accepted.", time.Now().Add(delay)
 			})
 			if err := pause(ctx, delay); err != nil {
 				return err
@@ -148,7 +153,7 @@ func (r *Runtime) operatorLoop(ctx context.Context, acceptor transport.Acceptor,
 			continue
 		}
 		delay = 100 * time.Millisecond
-		r.update(func(s *Snapshot) { s.Phase, s.Peer = PhaseConnecting, ts.Peer() })
+		r.update(func(s *Snapshot) { s.Phase, s.LastError = PhaseConnecting, "" })
 		fatal, err := r.operatorConnection(ctx, ts, cfg, store, cfg.Logger)
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -156,12 +161,7 @@ func (r *Runtime) operatorLoop(ctx context.Context, acceptor transport.Acceptor,
 		if fatal {
 			return err
 		}
-		r.update(func(s *Snapshot) {
-			if err != nil {
-				s.LastError = err.Error()
-			}
-		})
-		cfg.Logger.Info("operator session ended", "peer", ts.Peer().String(), "error", err)
+		r.update(func(s *Snapshot) { s.LastError = sessionEndMessage(session.RoleOperator, err) })
 	}
 }
 
@@ -175,7 +175,20 @@ func setVehicle(s *Snapshot, state proto.VehicleState) {
 func (r *Runtime) operatorConnection(ctx context.Context, ts transport.Session, cfg OperatorConfig, store *trust.Store, logger *slog.Logger) (fatal bool, err error) {
 	connectionCtx, cancel := context.WithCancel(ctx)
 	metrics := &measurements{runtime: r, direction: observe.Outbound}
-	defer func() { cancel(); ts.Close(err); metrics.end(err); r.deactivate() }()
+	var peer identity.Fingerprint
+	defer func() {
+		cancel()
+		ts.Close(err)
+		metrics.end(err)
+		r.deactivate()
+		if ctx.Err() == nil && !fatal {
+			if peer.IsZero() {
+				logger.Info("operator session ended", "error", err)
+			} else {
+				logger.Info("operator session ended", "peer", peer.String(), "error", err)
+			}
+		}
+	}()
 	states := make(chan proto.VehicleState, 1)
 	var authErr error
 	var responder session.DigitalResponder
@@ -229,16 +242,11 @@ func (r *Runtime) operatorConnection(ctx context.Context, ts transport.Session, 
 		return true, fmt.Errorf("operator authentication state: %w", authErr)
 	}
 	if err != nil {
-		// Hello decode failures can contain untrusted peer text.
 		var reason cpace.Reason
-		switch {
-		case errors.Is(err, session.ErrVersion):
-			return false, session.ErrVersion
-		case errors.Is(err, session.ErrPairing) && !errors.As(err, &reason):
-			return false, session.ErrPairing
-		default:
-			return false, classifyPairingError(err)
+		if errors.As(err, &reason) {
+			return false, fmt.Errorf("%w: %w", classifyPairingError(err), err)
 		}
+		return false, err
 	}
 	captureGeneration := metrics.start()
 	var first proto.VehicleState
@@ -309,6 +317,7 @@ func (r *Runtime) operatorConnection(ctx context.Context, ts transport.Session, 
 	}
 	install()
 	generation := r.activate(connectionCtx, s, ts.Path())
+	peer = s.Peer()
 	autoDone := make(chan struct{})
 	if cfg.AutoMGU || cfg.AutoEVO {
 		initial := manager

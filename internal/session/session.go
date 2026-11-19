@@ -152,6 +152,9 @@ func Run(ctx context.Context, ts transport.Session, o Options) (*Session, error)
 	go s.acceptLoop()
 	return s, nil
 }
+
+const invalidPairingToken = "invalid pairing token"
+
 func (s *Session) handshake(ctx context.Context) error {
 	var err error
 	if s.opts.Initiator {
@@ -189,7 +192,7 @@ func (s *Session) handshake(ctx context.Context) error {
 		return fmt.Errorf("%w: peer %d, local %d", ErrVersion, hello.ProtoVersion, proto.Version)
 	}
 	if (s.opts.Role == RoleClient && hello.Role != string(RoleOperator)) || (s.opts.Role == RoleOperator && hello.Role != string(RoleClient)) {
-		return fmt.Errorf("session: unexpected peer role %q", hello.Role)
+		return errors.New("session: unexpected peer role")
 	}
 	for _, cap := range s.opts.Capabilities {
 		for _, remote := range hello.Capabilities {
@@ -227,7 +230,10 @@ func (s *Session) handshake(ctx context.Context) error {
 			return fmt.Errorf("session: expected PairResult, got %T", msg)
 		}
 		if !result.Accepted {
-			return fmt.Errorf("%w: %s", ErrPairing, result.Reason)
+			if result.Reason == invalidPairingToken {
+				return fmt.Errorf("%w: %s", ErrPairing, invalidPairingToken)
+			}
+			return ErrPairing
 		}
 		return nil
 	}
@@ -242,7 +248,7 @@ func (s *Session) handshake(ctx context.Context) error {
 	}
 	result := proto.PairResult{Accepted: trusted}
 	if !trusted {
-		result.Reason = "invalid pairing token"
+		result.Reason = invalidPairingToken
 	}
 	if err := proto.Write(s.control, result); err != nil {
 		if !trusted {

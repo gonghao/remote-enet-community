@@ -4,6 +4,8 @@ package app
 import (
 	"context"
 	"errors"
+	"io"
+	"net"
 	"net/netip"
 	"sync"
 	"time"
@@ -197,7 +199,10 @@ func (r *Runtime) finish(err error) {
 	defer r.mu.Unlock()
 	r.state.Phase, r.state.NextRetry = PhaseStopped, time.Time{}
 	if err != nil && !errors.Is(err, context.Canceled) {
-		r.state.LastError = err.Error()
+		r.state.LastError = protocolErrorMessage(err)
+		if r.state.LastError == "" {
+			r.state.LastError = "Runtime stopped with an error. Check runtime diagnostics."
+		}
 	}
 	r.stopped = true
 	r.publishLocked()
@@ -205,6 +210,39 @@ func (r *Runtime) finish(err error) {
 		sub.stop()
 		close(sub.ch)
 		delete(r.subs, sub)
+	}
+}
+
+func protocolErrorMessage(err error) string {
+	var pairingErr PairingErrorKind
+	switch {
+	case errors.As(err, &pairingErr):
+		return string(pairingErr)
+	case errors.Is(err, session.ErrPairing):
+		return "Pairing rejected."
+	case errors.Is(err, session.ErrVersion):
+		return "Incompatible protocol version."
+	default:
+		return ""
+	}
+}
+
+func sessionEndMessage(role session.Role, err error) string {
+	if message := protocolErrorMessage(err); message != "" {
+		return message
+	}
+	switch {
+	case err == nil, errors.Is(err, context.Canceled), errors.Is(err, io.EOF),
+		errors.Is(err, io.ErrUnexpectedEOF), errors.Is(err, io.ErrClosedPipe), errors.Is(err, net.ErrClosed):
+		if role == session.RoleClient {
+			return "Operator disconnected."
+		}
+		return "Client disconnected."
+	default:
+		if role == session.RoleClient {
+			return "Operator session ended with an error."
+		}
+		return "Client session ended with an error."
 	}
 }
 
@@ -244,6 +282,10 @@ func (r *Runtime) deactivate() {
 	r.exclusiveState = nil
 	r.state.Phase = PhaseDisconnected
 	r.state.Path = transport.PathInfo{}
+	if r.state.Role == session.RoleOperator {
+		r.state.Peer = identity.Fingerprint{}
+		r.state.NIC, r.state.Gateway, r.state.VIN = carside.NIC{}, netip.Addr{}, ""
+	}
 	r.state.RTT, r.state.RTTValid = 0, false
 	r.state.Diagnostic, r.state.Control, r.state.Discovery = netip.AddrPort{}, netip.AddrPort{}, netip.AddrPort{}
 	r.publishLocked()

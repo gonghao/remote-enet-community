@@ -273,3 +273,47 @@ func TestWaitHubMismatchStopsAccept(t *testing.T) {
 		t.Fatalf("expected terminal hub mismatch, got %v", err)
 	}
 }
+
+func TestOnRegisterDoesNotBlockRetry(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	local := id(t)
+	ep := startHub(t, id(t), router.NewEmbedded())
+	token := []byte("wait")
+	events := make(chan error)
+	release := make(chan struct{})
+	defer close(release)
+	c, acc, err := New(Options{Local: local, Wrap: stubWrap(ep.Hub), Endpoints: []transport.Endpoint{ep},
+		WaitToken: func(context.Context, identity.Fingerprint) ([]byte, error) { return token, nil },
+		OnRegister: func(h identity.Fingerprint, tok []byte, err error) {
+			if h != ep.Hub || string(tok) != "wait" {
+				err = errors.New("incorrect registration")
+			}
+			if len(tok) > 0 {
+				tok[0] = 0
+			}
+			select {
+			case events <- err:
+			case <-ctx.Done():
+			}
+			<-release
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer acc.Close()
+	pending := asyncAccept(t, ctx, acc)
+	for range 2 {
+		select {
+		case err := <-events:
+			if !errors.Is(err, router.ErrUnauthorized) {
+				t.Fatal(err)
+			}
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		c.Refresh()
+	}
+	cancel()
+	<-pending
+}

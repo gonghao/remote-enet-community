@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -79,8 +80,11 @@ func (a *Connector) wait(ctx context.Context, ep transport.Endpoint) (transport.
 	return nil, ctx.Err()
 }
 
-func (a *Connector) registerWait(ctx context.Context, ep transport.Endpoint) (net.Conn, error) {
+func (a *Connector) registerWait(ctx context.Context, ep transport.Endpoint) (conn net.Conn, err error) {
 	req := router.Request{Role: router.RoleWait}
+	if notify := a.o.OnRegister; notify != nil {
+		defer func() { go notify(ep.Hub, bytes.Clone(req.Token), err) }()
+	}
 	if a.o.WaitToken != nil {
 		token, err := a.o.WaitToken(ctx, ep.Hub)
 		if err != nil {

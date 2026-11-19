@@ -33,6 +33,10 @@ type Options struct {
 	// WaitToken signs each registration. It may run concurrently for different
 	// endpoints and must honor ctx. Nil sends an empty token.
 	WaitToken func(ctx context.Context, hub identity.Fingerprint) ([]byte, error)
+	// OnRegister receives a private token copy (nil on signing failure). Calls
+	// run asynchronously without connector locks, may overlap or arrive out of
+	// order, and must return promptly, including after Close.
+	OnRegister func(hub identity.Fingerprint, token []byte, err error)
 }
 
 // Connector uses its local identity for both pinned and direct pairing dials.

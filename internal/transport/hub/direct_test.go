@@ -76,7 +76,7 @@ func TestDirectPairInnerExporter(t *testing.T) {
 				<-ctx.Done()
 			}()
 			wraps := 0
-			c, _, err := New(Options{Local: client, Token: []byte("standalone"), Wrap: func(ctx context.Context, conn net.Conn, clientRole bool, expect identity.Fingerprint, path transport.PathInfo) (transport.Session, error) {
+			c, _, err := New(Options{Local: client, Wrap: func(ctx context.Context, conn net.Conn, clientRole bool, expect identity.Fingerprint, path transport.PathInfo) (transport.Session, error) {
 				wraps++
 				return secure.WrapStream(ctx, conn, secure.Opts{Local: client, Expect: expect, IsClient: clientRole, Path: path})
 			}})

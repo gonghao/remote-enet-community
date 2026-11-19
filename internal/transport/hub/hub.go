@@ -17,7 +17,7 @@ import (
 var ErrPeerBusy = router.ErrPeerBusy
 
 // Wrap must authenticate the inner peer, honor ctx, and close conn with Session.
-// A zero expect permits any authenticated peer (standalone wait connections).
+// A zero expect permits any authenticated peer (standalone waits and bootstrap dials).
 type Wrap func(ctx context.Context, conn net.Conn, isClient bool, expect identity.Fingerprint, path transport.PathInfo) (transport.Session, error)
 
 // Options selects embedded acceptance or outbound registration. Embedded takes
@@ -30,8 +30,9 @@ type Options struct {
 	SetupLimits router.SetupLimits
 	// Endpoints are standalone hubs on which Accept registers as a waiter.
 	Endpoints []transport.Endpoint
-	// Token is an optional standalone-hub credential, copied by New.
-	Token []byte
+	// WaitToken signs each registration. It may run concurrently for different
+	// endpoints and must honor ctx. Nil sends an empty token.
+	WaitToken func(ctx context.Context, hub identity.Fingerprint) ([]byte, error)
 }
 
 // Connector uses its local identity for both pinned and direct pairing dials.
@@ -44,6 +45,7 @@ type Connector struct {
 	mu         sync.Mutex
 	active     transport.Session
 	closed     bool
+	idle       map[*waitAttempt]struct{}
 }
 
 // Register injects the inner security layer into the transport registry once,
@@ -65,9 +67,8 @@ func New(o Options) (*Connector, transport.Acceptor, error) {
 		return nil, nil, errors.New("transport/hub: Local and Wrap required")
 	}
 	o.Endpoints = append([]transport.Endpoint(nil), o.Endpoints...)
-	o.Token = append([]byte(nil), o.Token...)
 	ctx, cancel := context.WithCancel(context.Background())
-	a := &Connector{o: o, ctx: ctx, cancel: cancel, gate: make(chan struct{}, 1)}
+	a := &Connector{o: o, ctx: ctx, cancel: cancel, gate: make(chan struct{}, 1), idle: make(map[*waitAttempt]struct{})}
 	a.gate <- struct{}{}
 	if o.Listen != "" {
 		ln, err := net.Listen("tcp", o.Listen)
@@ -94,7 +95,7 @@ func New(o Options) (*Connector, transport.Acceptor, error) {
 }
 
 func path(conn net.Conn, ep transport.Endpoint, peer identity.Fingerprint) transport.PathInfo {
-	p := transport.PathInfo{Kind: transport.PathRelay, LocalAddr: conn.LocalAddr().String(), RemoteAddr: conn.RemoteAddr().String(), Via: ep.Addr}
+	p := transport.PathInfo{Kind: transport.PathRelay, LocalAddr: conn.LocalAddr().String(), RemoteAddr: conn.RemoteAddr().String(), Via: ep.Addr, Hub: ep.Hub}
 	if ep.Hub == peer {
 		p.Kind = transport.PathDirect
 		p.Via = ""
@@ -102,16 +103,22 @@ func path(conn net.Conn, ep transport.Endpoint, peer identity.Fingerprint) trans
 	return p
 }
 
-func (a *Connector) open(ctx context.Context, ep transport.Endpoint, role router.Role, target identity.Fingerprint) (transport.Session, error) {
-	conn, err := router.Connect(ctx, ep.Addr, a.o.Local, ep.Hub, router.Request{Role: role, Target: target, Token: a.o.Token})
+// DialBootstrap returns the candidate outer hub identity alongside the session.
+// Pairing must authenticate the inner peer before either identity is trusted.
+func (a *Connector) DialBootstrap(ctx context.Context, addr string) (transport.Session, identity.Fingerprint, error) {
+	if a.isClosed() {
+		return nil, identity.Fingerprint{}, net.ErrClosed
+	}
+	conn, h, err := router.ConnectBootstrap(ctx, addr, a.o.Local)
 	if err != nil {
-		return nil, err
+		return nil, identity.Fingerprint{}, err
 	}
-	expect := target
-	if role == router.RoleWait {
-		expect = identity.Fingerprint{}
+	p := path(conn, transport.Endpoint{Addr: addr, Hub: h}, identity.Fingerprint{})
+	s, err := a.wrap(ctx, conn, true, identity.Fingerprint{}, p, nil)
+	if err != nil {
+		return nil, identity.Fingerprint{}, err
 	}
-	return a.wrap(ctx, conn, role == router.RoleDial, expect, path(conn, ep, target), role == router.RoleWait)
+	return s, h, nil
 }
 
 // DialDirectPair binds the inner identity to the hub reached by this self-dial.
@@ -123,8 +130,8 @@ func (a *Connector) DialDirectPair(ctx context.Context, addr string) (transport.
 	if err != nil {
 		return nil, err
 	}
-	p := transport.PathInfo{Kind: transport.PathDirect, LocalAddr: conn.LocalAddr().String(), RemoteAddr: conn.RemoteAddr().String()}
-	return a.wrap(ctx, conn, true, hubID, p, false)
+	p := transport.PathInfo{Kind: transport.PathDirect, Hub: hubID, LocalAddr: conn.LocalAddr().String(), RemoteAddr: conn.RemoteAddr().String()}
+	return a.wrap(ctx, conn, true, hubID, p, nil)
 }
 
 func (a *Connector) Dial(ctx context.Context, peer transport.PeerInfo) (transport.Session, error) {
@@ -135,7 +142,11 @@ func (a *Connector) Dial(ctx context.Context, peer transport.PeerInfo) (transpor
 		return nil, errors.New("transport/hub: peer identity required")
 	}
 	return race(ctx, peer.Endpoints, func(ctx context.Context, ep transport.Endpoint) (transport.Session, error) {
-		return a.open(ctx, ep, router.RoleDial, peer.ID)
+		conn, err := router.Connect(ctx, ep.Addr, a.o.Local, ep.Hub, router.Request{Role: router.RoleDial, Target: peer.ID, Token: []byte(ep.Ticket)})
+		if err != nil {
+			return nil, err
+		}
+		return a.wrap(ctx, conn, true, peer.ID, path(conn, ep, peer.ID), nil)
 	})
 }
 
@@ -193,7 +204,7 @@ func race(ctx context.Context, endpoints []transport.Endpoint, attempt func(cont
 			}
 		}
 	}
-	if err := ctx.Err(); err != nil {
+	if err := context.Cause(ctx); err != nil {
 		if winner != nil {
 			_ = winner.Close(err)
 		}
@@ -206,7 +217,8 @@ func race(ctx context.Context, endpoints []transport.Endpoint, attempt func(cont
 }
 
 func (a *Connector) Accept(ctx context.Context) (transport.Session, error) {
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, stopAccept := context.WithCancelCause(ctx)
+	cancel := func() { stopAccept(context.Canceled) }
 	stop := context.AfterFunc(a.ctx, cancel)
 	// The winner's context remains valid until it is closed or the acceptor stops.
 	success := false
@@ -243,12 +255,16 @@ func (a *Connector) Accept(ctx context.Context) (transport.Session, error) {
 		var peer identity.Fingerprint
 		conn, peer, err = a.o.Embedded.Accept(ctx)
 		if err == nil {
-			p := transport.PathInfo{Kind: transport.PathDirect, LocalAddr: conn.LocalAddr().String(), RemoteAddr: conn.RemoteAddr().String()}
-			session, err = a.wrap(ctx, conn, false, peer, p, false)
+			p := transport.PathInfo{Kind: transport.PathDirect, Hub: a.o.Local.Fingerprint(), LocalAddr: conn.LocalAddr().String(), RemoteAddr: conn.RemoteAddr().String()}
+			session, err = a.wrap(ctx, conn, false, peer, p, nil)
 		}
 	} else {
 		session, err = race(ctx, a.o.Endpoints, func(ctx context.Context, ep transport.Endpoint) (transport.Session, error) {
-			return a.open(ctx, ep, router.RoleWait, identity.Fingerprint{})
+			s, err := a.wait(ctx, ep)
+			if errors.Is(err, identity.ErrFingerprintMismatch) {
+				stopAccept(err)
+			}
+			return s, err
 		})
 	}
 	if err != nil {

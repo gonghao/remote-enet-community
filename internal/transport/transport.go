@@ -65,6 +65,8 @@ type PathInfo struct {
 	RemoteAddr string
 	// Via is the hub address when Kind == PathRelay, empty otherwise.
 	Via string
+	// Hub identifies the outer TLS endpoint for both direct and relay paths.
+	Hub identity.Fingerprint
 }
 
 // LinkStats is a point-in-time snapshot; implementations may return zero RTT
@@ -84,6 +86,8 @@ type Endpoint struct {
 	// Hub is the fingerprint of the hub's own identity, pinned during the
 	// outer TLS handshake. For an embedded hub it equals PeerInfo.ID.
 	Hub identity.Fingerprint
+	// Ticket contains opaque dial credentials for this endpoint only.
+	Ticket string
 }
 
 // PeerInfo is everything needed to reach and verify a peer. It comes from an

@@ -129,6 +129,15 @@ func (l *countedListener) Accept() (net.Conn, error) {
 
 func startCountedHub(t *testing.T, h *identity.Local, e *router.Embedded) (transport.Endpoint, *countedListener) {
 	t.Helper()
+	options := router.Options{Local: h, Embedded: e}
+	if e == nil {
+		options.Policy = relayPolicy{}
+	}
+	return startTestHub(t, options)
+}
+
+func startTestHub(t *testing.T, options router.Options) (transport.Endpoint, *countedListener) {
+	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -136,10 +145,6 @@ func startCountedHub(t *testing.T, h *identity.Local, e *router.Embedded) (trans
 	counted := &countedListener{Listener: ln}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
-	options := router.Options{Local: h, Embedded: e}
-	if e == nil {
-		options.Policy = relayPolicy{}
-	}
 	go func() { done <- router.NewServer(options).Serve(ctx, counted) }()
 	t.Cleanup(func() {
 		cancel()
@@ -152,7 +157,7 @@ func startCountedHub(t *testing.T, h *identity.Local, e *router.Embedded) (trans
 			t.Error("server handler leaked")
 		}
 	})
-	return transport.Endpoint{Kind: "hub", Addr: ln.Addr().String(), Hub: h.Fingerprint()}, counted
+	return transport.Endpoint{Kind: "hub", Addr: ln.Addr().String(), Hub: options.Local.Fingerprint()}, counted
 }
 
 func build(t *testing.T, o Options) (transport.Connector, transport.Acceptor) {
@@ -429,7 +434,7 @@ func TestInnerSetupTimerAndLifetime(t *testing.T) {
 				context.AfterFunc(ctx, func() { _ = s.Close(ctx.Err()) })
 				return s, nil
 			}}}
-			s, err := adapter.wrap(t.Context(), a, true, identity.Fingerprint{1}, transport.PathInfo{}, false)
+			s, err := adapter.wrap(t.Context(), a, true, identity.Fingerprint{1}, transport.PathInfo{}, nil)
 			if !succeed {
 				if !errors.Is(err, context.DeadlineExceeded) {
 					t.Fatalf("setup timeout: %v", err)
@@ -473,7 +478,7 @@ func TestIdleWaitHasNoSetupDeadline(t *testing.T) {
 	}}}
 	done := make(chan error, 1)
 	go func() {
-		_, err := adapter.wrap(ctx, a, false, identity.Fingerprint{}, transport.PathInfo{}, true)
+		_, err := adapter.wrap(ctx, a, false, identity.Fingerprint{}, transport.PathInfo{}, func() {})
 		done <- err
 	}()
 	<-started

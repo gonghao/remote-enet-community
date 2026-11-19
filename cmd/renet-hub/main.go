@@ -41,7 +41,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 	if command == "ticket" {
 		if len(args) == 0 || args[0] != "inspect" {
-			return errors.New("usage: renet-hub ticket inspect --config FILE --ticket-file FILE [--device FP]")
+			return errors.New("usage: renet-hub ticket inspect --config FILE --ticket-file FILE [--device FP] [--hub-fp FP]")
 		}
 		command = "ticket inspect"
 		args = args[1:]
@@ -51,6 +51,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet(command, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var dir, config, file, device string
+	var hubFP identity.Fingerprint
 	var debug bool
 	switch command {
 	case "init", "fingerprint":
@@ -62,6 +63,14 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		if command == "ticket inspect" {
 			fs.StringVar(&file, "ticket-file", "", "unpadded base64url ticket file")
+			fs.Func("hub-fp", "Hub fingerprint for offline verification", func(value string) error {
+				fp, err := identity.ParseFingerprint(value)
+				if err != nil || fp.IsZero() {
+					return errors.New("expected full nonzero fingerprint")
+				}
+				hubFP = fp
+				return nil
+			})
 			fs.StringVar(&device, "device", "", "outer TLS device fingerprint")
 		}
 	default:
@@ -97,6 +106,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	cfg, err := hubauth.Load(config)
 	if err != nil {
 		return err
+	}
+	if command == "ticket inspect" && !hubFP.IsZero() {
+		return inspect(stdout, cfg, hubFP, file, device)
 	}
 	local, err := identity.LoadExisting(cfg.IdentityDir)
 	if err != nil {

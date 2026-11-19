@@ -115,6 +115,12 @@ func TestCommands(t *testing.T) {
 	}
 	f.cfg.IdentityDir = filepath.Join(t.TempDir(), "missing")
 	writeConfig(t, f.path, f.cfg)
+	if err := call(append(args, "--hub-fp", f.local.Fingerprint().String())...); err != nil || !strings.Contains(out.String(), "Passed") {
+		t.Fatalf("offline inspect without device key: %v", err)
+	}
+	if err := call(args...); err == nil || !strings.Contains(err.Error(), "identity_dir") {
+		t.Fatalf("inspect without fingerprint or identity: %v", err)
+	}
 	for _, cmd := range []string{"serve", "check"} {
 		if err := call(cmd, "--config", f.path); err == nil || !strings.Contains(err.Error(), "identity_dir") {
 			t.Fatalf("%s missing identity: %v", cmd, err)

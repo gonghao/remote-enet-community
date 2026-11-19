@@ -394,6 +394,9 @@ func TestExtensionAndTagBoundaries(t *testing.T) {
 		value []byte
 		valid bool
 	}{
+		{"core deterministic integer keys", must(enc.Marshal(map[int]int{24: 0, -1: 0})), true},
+		{"bytewise integer keys", []byte{0xa2, 0x18, 24, 0, 0x20, 0}, true},
+		{"length-first integer keys", []byte{0xa2, 0x20, 0, 0x18, 24, 0}, false},
 		{"compound information key", []byte{0xa1, 0x81, 1, 0xd8, 100, 0xf6}, true},
 		{"duplicate compound key", []byte{0xa2, 0x81, 1, 0, 0x81, 1, 2}, false},
 		{"alternate duplicate encoding", []byte{0xa2, 1, 0, 0x18, 1, 2}, false},

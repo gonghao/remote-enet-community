@@ -4,3 +4,6 @@ LICENSE -text
 
 # Keep the reviewed dependency digest stable across Windows checkouts.
 go.mod text eol=lf
+
+# Brand tests compare SVG assets byte for byte with generated output.
+internal/brand/assets/*.svg text eol=lf

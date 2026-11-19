@@ -7,6 +7,7 @@ import (
 	"net"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -101,13 +102,33 @@ func id(t *testing.T) *identity.Local {
 
 func startHub(t *testing.T, h *identity.Local, e *router.Embedded) transport.Endpoint {
 	t.Helper()
+	ep, _ := startCountedHub(t, h, e)
+	return ep
+}
+
+type countedListener struct {
+	net.Listener
+	count atomic.Int32
+}
+
+func (l *countedListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if err == nil {
+		l.count.Add(1)
+	}
+	return conn, err
+}
+
+func startCountedHub(t *testing.T, h *identity.Local, e *router.Embedded) (transport.Endpoint, *countedListener) {
+	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
+	counted := &countedListener{Listener: ln}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
-	go func() { done <- router.NewServer(router.Options{Local: h, Embedded: e}).Serve(ctx, ln) }()
+	go func() { done <- router.NewServer(router.Options{Local: h, Embedded: e}).Serve(ctx, counted) }()
 	t.Cleanup(func() {
 		cancel()
 		select {
@@ -119,7 +140,7 @@ func startHub(t *testing.T, h *identity.Local, e *router.Embedded) transport.End
 			t.Error("server handler leaked")
 		}
 	})
-	return transport.Endpoint{Kind: "hub", Addr: ln.Addr().String(), Hub: h.Fingerprint()}
+	return transport.Endpoint{Kind: "hub", Addr: ln.Addr().String(), Hub: h.Fingerprint()}, counted
 }
 
 func build(t *testing.T, o Options) (transport.Connector, transport.Acceptor) {
@@ -379,7 +400,7 @@ func TestInnerSetupTimerAndLifetime(t *testing.T) {
 			defer a.Close()
 			defer b.Close()
 			var retained context.Context
-			adapter := &adapter{o: Options{Wrap: func(ctx context.Context, conn net.Conn, _ bool, _ identity.Fingerprint, p transport.PathInfo) (transport.Session, error) {
+			adapter := &Connector{o: Options{Wrap: func(ctx context.Context, conn net.Conn, _ bool, _ identity.Fingerprint, p transport.PathInfo) (transport.Session, error) {
 				retained = ctx
 				if _, ok := ctx.Deadline(); ok {
 					t.Error("setup deadline leaked into session context")
@@ -427,7 +448,7 @@ func TestIdleWaitHasNoSetupDeadline(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	started := make(chan struct{})
-	adapter := &adapter{o: Options{Wrap: func(ctx context.Context, conn net.Conn, _ bool, _ identity.Fingerprint, _ transport.PathInfo) (transport.Session, error) {
+	adapter := &Connector{o: Options{Wrap: func(ctx context.Context, conn net.Conn, _ bool, _ identity.Fingerprint, _ transport.PathInfo) (transport.Session, error) {
 		c := conn.(*setupConn)
 		c.mu.Lock()
 		if c.started || c.timer != nil {

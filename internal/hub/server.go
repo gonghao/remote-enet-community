@@ -24,6 +24,8 @@ type Options struct {
 	AuthorizeToken func(dev identity.Fingerprint, role Role, target identity.Fingerprint, token []byte) bool
 	Embedded       *Embedded
 	Logger         *slog.Logger
+	// SetupLimits applies only when Embedded is enabled.
+	SetupLimits SetupLimits
 }
 
 // Server owns its listener and all accepted connections until Serve returns.
@@ -46,9 +48,10 @@ type waiter struct {
 // connection closes the socket directly: TLS close_notify must not stall shutdown.
 type connection struct {
 	net.Conn
-	raw  net.Conn
-	once sync.Once
-	done chan struct{}
+	raw          net.Conn
+	once         sync.Once
+	done         chan struct{}
+	releaseSetup func()
 }
 
 func (c *connection) Close() error {
@@ -74,6 +77,20 @@ func (c *connection) Write(p []byte) (int, error) {
 		_ = c.Close()
 	}
 	return n, err
+}
+
+// Only the setup worker touches releaseSetup. Long-lived relay and wait
+// connections release their slot before entering the forwarding loop.
+func (c *connection) releaseSlot() {
+	if c.releaseSetup != nil {
+		c.releaseSetup()
+		c.releaseSetup = nil
+	}
+}
+
+func (c *connection) finishSetup() {
+	_ = c.SetDeadline(time.Time{})
+	c.releaseSlot()
 }
 
 // NewServer leaves listener ownership and startup to Serve.
@@ -116,6 +133,12 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 		connsMu.Unlock()
 		wg.Wait()
 	}()
+	var admission *setupAdmission
+	timeout := setupTimeout
+	if s.o.Embedded != nil {
+		admission = newSetupAdmission(s.o.SetupLimits)
+		timeout = admission.Timeout
+	}
 	for {
 		raw, err := ln.Accept()
 		if err != nil {
@@ -124,7 +147,17 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 			}
 			return fmt.Errorf("hub: accept: %w", err)
 		}
-		conn := &connection{Conn: tls.Server(raw, serverTLS(s.o.Local)), raw: raw, done: make(chan struct{})}
+		now := time.Now()
+		var release func()
+		if admission != nil {
+			if !admission.acquire(now) {
+				_ = raw.Close()
+				continue
+			}
+			release = admission.release
+		}
+		_ = raw.SetDeadline(now.Add(timeout))
+		conn := &connection{releaseSetup: release, Conn: tls.Server(raw, serverTLS(s.o.Local)), raw: raw, done: make(chan struct{})}
 		connsMu.Lock()
 		conns[conn] = struct{}{}
 		connsMu.Unlock()
@@ -136,15 +169,15 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 				delete(conns, conn)
 				connsMu.Unlock()
 			}()
-			if s.handle(serveCtx, conn) {
+			if s.handle(serveCtx, conn, timeout) {
 				<-conn.done
 			}
 		})
 	}
 }
 
-func (s *Server) handle(ctx context.Context, conn *connection) bool {
-	_ = conn.SetDeadline(time.Now().Add(setupTimeout))
+func (s *Server) handle(ctx context.Context, conn *connection, timeout time.Duration) bool {
+	defer conn.releaseSlot()
 	tc := conn.Conn.(*tls.Conn)
 	if err := tc.HandshakeContext(ctx); err != nil {
 		s.o.Logger.DebugContext(ctx, "Hub TLS handshake failed", "error", err)
@@ -165,14 +198,14 @@ func (s *Server) handle(ctx context.Context, conn *connection) bool {
 		return false
 	}
 	if embedded {
-		if !s.o.Embedded.reserve(conn) {
+		if !s.o.Embedded.reserve(conn, timeout) {
 			_ = writeAll(conn, []byte{statusBusy})
 			return false
 		}
 		if err := writeAll(conn, []byte{statusOK}); err != nil {
 			return false
 		}
-		_ = conn.SetDeadline(time.Time{})
+		conn.finishSetup()
 		return s.o.Embedded.publish(conn, dev)
 	}
 	if req.Role == RoleWait {
@@ -205,7 +238,7 @@ func (s *Server) wait(conn *connection, dev, target identity.Fingerprint) {
 		s.mu.Unlock()
 	}()
 	err := writeAll(conn, []byte{statusOK})
-	_ = conn.SetDeadline(time.Time{})
+	conn.finishSetup()
 	// Dial can reserve immediately, but cannot write to the wait socket until
 	// its routing response is complete. Never hold the routing lock during I/O.
 	close(wait.ready)
@@ -259,7 +292,7 @@ func (s *Server) dial(conn *connection, dev, target identity.Fingerprint) {
 	if err := writeAll(conn, []byte{statusOK}); err != nil {
 		return
 	}
-	_ = conn.SetDeadline(time.Time{})
+	conn.finishSetup()
 	done := make(chan struct{})
 	go func() {
 		_, _ = io.Copy(wait.conn, conn)
@@ -294,7 +327,7 @@ type Embedded struct {
 // NewEmbedded provides one admission slot shared by all servers using it.
 func NewEmbedded() *Embedded { return &Embedded{notify: make(chan struct{}, 1)} }
 
-func (e *Embedded) reserve(conn *connection) bool {
+func (e *Embedded) reserve(conn *connection, timeout time.Duration) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.active != nil {
@@ -312,7 +345,7 @@ func (e *Embedded) reserve(conn *connection) bool {
 	e.claimed = false
 	// Pending handoffs have no reader yet, so socket deadlines alone cannot
 	// detect disconnects or bound slot occupancy. Expire them explicitly.
-	e.timer = time.AfterFunc(setupTimeout, func() {
+	e.timer = time.AfterFunc(timeout, func() {
 		e.mu.Lock()
 		defer e.mu.Unlock()
 		if e.active == conn && !e.claimed {

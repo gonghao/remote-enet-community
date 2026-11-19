@@ -23,17 +23,19 @@ type Wrap func(ctx context.Context, conn net.Conn, isClient bool, expect identit
 // Options selects embedded acceptance or outbound registration. Embedded takes
 // precedence over Endpoints; Listen uses the supplied Embedded when available.
 type Options struct {
-	Local    *identity.Local
-	Wrap     Wrap
-	Embedded *router.Embedded
-	Listen   string
+	Local       *identity.Local
+	Wrap        Wrap
+	Embedded    *router.Embedded
+	Listen      string
+	SetupLimits router.SetupLimits
 	// Endpoints are standalone hubs on which Accept registers as a waiter.
 	Endpoints []transport.Endpoint
 	// Token is an optional standalone-hub credential, copied by New.
 	Token []byte
 }
 
-type adapter struct {
+// Connector uses its local identity for both pinned and direct pairing dials.
+type Connector struct {
 	o          Options
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -48,20 +50,24 @@ type adapter struct {
 // during application startup. Config accepts "listen"; relay endpoints use New.
 func Register(wrap Wrap) {
 	transport.Register("hub", func(cfg transport.Config, local *identity.Local) (transport.Connector, transport.Acceptor, error) {
-		return New(Options{Local: local, Wrap: wrap, Listen: cfg.Options["listen"]})
+		connector, acceptor, err := New(Options{Local: local, Wrap: wrap, Listen: cfg.Options["listen"]})
+		if err != nil {
+			return nil, nil, err
+		}
+		return connector, acceptor, nil
 	})
 }
 
 // New owns listeners started by Listen. The returned acceptor must be closed;
 // it is nil when neither embedded acceptance nor wait endpoints are configured.
-func New(o Options) (transport.Connector, transport.Acceptor, error) {
+func New(o Options) (*Connector, transport.Acceptor, error) {
 	if o.Local == nil || o.Wrap == nil {
 		return nil, nil, errors.New("transport/hub: Local and Wrap required")
 	}
 	o.Endpoints = append([]transport.Endpoint(nil), o.Endpoints...)
 	o.Token = append([]byte(nil), o.Token...)
 	ctx, cancel := context.WithCancel(context.Background())
-	a := &adapter{o: o, ctx: ctx, cancel: cancel, gate: make(chan struct{}, 1)}
+	a := &Connector{o: o, ctx: ctx, cancel: cancel, gate: make(chan struct{}, 1)}
 	a.gate <- struct{}{}
 	if o.Listen != "" {
 		ln, err := net.Listen("tcp", o.Listen)
@@ -73,7 +79,7 @@ func New(o Options) (transport.Connector, transport.Acceptor, error) {
 			a.o.Embedded = router.NewEmbedded()
 		}
 		a.serverDone = make(chan struct{})
-		server := router.NewServer(router.Options{Local: o.Local, Embedded: a.o.Embedded})
+		server := router.NewServer(router.Options{Local: o.Local, Embedded: a.o.Embedded, SetupLimits: o.SetupLimits})
 		go func() {
 			defer close(a.serverDone)
 			_ = server.Serve(ctx, ln)
@@ -96,7 +102,7 @@ func path(conn net.Conn, ep transport.Endpoint, peer identity.Fingerprint) trans
 	return p
 }
 
-func (a *adapter) open(ctx context.Context, ep transport.Endpoint, role router.Role, target identity.Fingerprint) (transport.Session, error) {
+func (a *Connector) open(ctx context.Context, ep transport.Endpoint, role router.Role, target identity.Fingerprint) (transport.Session, error) {
 	conn, err := router.Connect(ctx, ep.Addr, a.o.Local, ep.Hub, router.Request{Role: role, Target: target, Token: a.o.Token})
 	if err != nil {
 		return nil, err
@@ -108,13 +114,35 @@ func (a *adapter) open(ctx context.Context, ep transport.Endpoint, role router.R
 	return a.wrap(ctx, conn, role == router.RoleDial, expect, path(conn, ep, target), role == router.RoleWait)
 }
 
-func (a *adapter) Dial(ctx context.Context, peer transport.PeerInfo) (transport.Session, error) {
+// DialDirectPair binds the inner identity to the hub reached by this self-dial.
+func (a *Connector) DialDirectPair(ctx context.Context, addr string) (transport.Session, error) {
+	if a.isClosed() {
+		return nil, net.ErrClosed
+	}
+	conn, hubID, err := router.ConnectBootstrap(ctx, addr, a.o.Local)
+	if err != nil {
+		return nil, err
+	}
+	p := transport.PathInfo{Kind: transport.PathDirect, LocalAddr: conn.LocalAddr().String(), RemoteAddr: conn.RemoteAddr().String()}
+	return a.wrap(ctx, conn, true, hubID, p, false)
+}
+
+func (a *Connector) Dial(ctx context.Context, peer transport.PeerInfo) (transport.Session, error) {
+	if a.isClosed() {
+		return nil, net.ErrClosed
+	}
 	if peer.ID.IsZero() {
 		return nil, errors.New("transport/hub: peer identity required")
 	}
 	return race(ctx, peer.Endpoints, func(ctx context.Context, ep transport.Endpoint) (transport.Session, error) {
 		return a.open(ctx, ep, router.RoleDial, peer.ID)
 	})
+}
+
+func (a *Connector) isClosed() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.closed
 }
 
 // race waits for every canceled attempt before returning. Only a fully wrapped
@@ -177,7 +205,7 @@ func race(ctx context.Context, endpoints []transport.Endpoint, attempt func(cont
 	return nil, fmt.Errorf("transport/hub: all endpoints failed: %w", errors.Join(failures...))
 }
 
-func (a *adapter) Accept(ctx context.Context) (transport.Session, error) {
+func (a *Connector) Accept(ctx context.Context) (transport.Session, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	stop := context.AfterFunc(a.ctx, cancel)
 	// The winner's context remains valid until it is closed or the acceptor stops.
@@ -239,7 +267,7 @@ func (a *adapter) Accept(ctx context.Context) (transport.Session, error) {
 	return session, nil
 }
 
-func (a *adapter) Close() error {
+func (a *Connector) Close() error {
 	a.mu.Lock()
 	a.closed = true
 	active := a.active

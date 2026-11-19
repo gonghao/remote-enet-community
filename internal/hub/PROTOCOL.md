@@ -6,9 +6,11 @@ Hub 只根据本文件的路由头建立路径。路由完成后的字节属于�
 
 - TCP 上运行 TLS 1.3，ALPN 必须为 `renet-hub/1`，不接受缺省 ALPN 或 TLS 1.2。
 - 双方各出示一张 Ed25519 自签设备证书。检查有效期、Subject/Issuer 一致、自签名和未知关键扩展；不使用公网 CA、DNS 名或客户端自报 ID。
-- 设备 ID 是证书 Ed25519 公钥的 SHA-256，由 `identity.FingerprintOfCert` 计算。客户端必须钉扎 `Endpoint.Hub`，零指纹不允许连接。
+- 设备 ID 是证书 Ed25519 公钥的 SHA-256，由 `identity.FingerprintOfCert` 计算。普通 Connect 必须钉扎 `Endpoint.Hub`，拒绝零指纹。直连数字配对专用的 ConnectBootstrap 从通过上述校验的证书取得候选指纹 H，在同一条连接上发送 target=H、token 长度为零的 dial 请求。内层 TLS 须钉扎 H，口令确认由上层完成。
 - Hub 从 TLS 客户端证书取得设备 ID。路由头不含发送方 ID，无法通过修改头部冒充其他 wait 方。
 - TCP 建立、TLS 握手、头部和状态交换各连接共用最多 10 秒的外层 setup 窗口；调用方 context 可更早取消。成功后清除 setup deadline，context 的后续生命周期由调用方或 transport 管理。
+
+内嵌 listener 在创建 TLS worker 前非阻塞检查并发和速率。默认同时允许 16 个 setup，每秒接纳 8 个、突发 16 个，超限直接关闭 TCP。可通过 SetupLimits 配置并发、速率、突发和外层 setup 时限；路由完成或 setup 失败即释放并发槽。
 
 ## 请求与响应
 

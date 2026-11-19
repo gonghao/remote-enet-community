@@ -82,7 +82,7 @@ func WrapStream(ctx context.Context, conn net.Conn, o Opts) (transport.Session, 
 				return fmt.Errorf("secure: certificate outside validity period")
 			}
 			if !o.Expect.IsZero() && fp != o.Expect {
-				return fmt.Errorf("secure: peer fingerprint mismatch")
+				return fmt.Errorf("secure: peer %w", identity.ErrFingerprintMismatch)
 			}
 			peer = fp
 			return nil
@@ -103,6 +103,12 @@ func WrapStream(ctx context.Context, conn net.Conn, o Opts) (transport.Session, 
 	if err := tc.HandshakeContext(ctx); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("secure: TLS handshake: %w", err)
+	}
+	state := tc.ConnectionState()
+	exporter, err := state.ExportKeyingMaterial("EXPORTER-renet-pair-direct-v1", nil, 32)
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("secure: pairing exporter: %w", err)
 	}
 	// TLS 1.3 lets the client finish before the server verifies its certificate.
 	// Wait for the authenticated server's acceptance before starting yamux, so
@@ -136,7 +142,6 @@ func WrapStream(ctx context.Context, conn net.Conn, o Opts) (transport.Session, 
 	yc.LogOutput = nil
 	yc.Logger = muxLogger{}
 	var mux *yamux.Session
-	var err error
 	if o.IsClient {
 		mux, err = yamux.Client(tc, yc)
 	} else {
@@ -146,7 +151,7 @@ func WrapStream(ctx context.Context, conn net.Conn, o Opts) (transport.Session, 
 		conn.Close()
 		return nil, fmt.Errorf("secure: yamux: %w", err)
 	}
-	s := &session{mux: mux, raw: conn, peer: peer, path: o.Path, done: make(chan struct{}), openGate: make(chan struct{}, 1)}
+	s := &session{exporter: [32]byte(exporter), mux: mux, raw: conn, peer: peer, path: o.Path, done: make(chan struct{}), openGate: make(chan struct{}, 1)}
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -170,6 +175,7 @@ func (muxLogger) Printf(format string, args ...interface{}) {
 }
 
 type session struct {
+	exporter [32]byte
 	mux      *yamux.Session
 	raw      net.Conn
 	peer     identity.Fingerprint
@@ -272,6 +278,8 @@ func (s *session) AcceptStream(ctx context.Context) (transport.Stream, error) {
 	}
 	return &stream{Stream: st}, nil
 }
+func (s *session) PairingExporter() [32]byte { return s.exporter }
+
 func (s *session) Peer() identity.Fingerprint { return s.peer }
 func (s *session) Path() transport.PathInfo   { return s.path }
 func (s *session) Stats() transport.LinkStats {

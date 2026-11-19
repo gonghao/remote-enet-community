@@ -9,6 +9,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/asn1"
 	"encoding/binary"
+	"errors"
 	"io"
 	"math/big"
 	"net"
@@ -96,7 +97,11 @@ func TestInvalidDeviceCertificates(t *testing.T) {
 				_ = c.Close()
 				t.Fatal("accepted invalid client certificate")
 			}
-			_, badAddr, _ := start(t, Options{Local: bad})
+			_, badAddr, _ := start(t, Options{Local: bad, Embedded: NewEmbedded()})
+			if c, _, err := ConnectBootstrap(t.Context(), badAddr, goodDevice); err == nil {
+				_ = c.Close()
+				t.Fatal("bootstrap accepted invalid hub certificate")
+			}
 			if c, err := Connect(t.Context(), badAddr, goodDevice, bad.Fingerprint(), Request{Role: RoleWait}); err == nil {
 				_ = c.Close()
 				t.Fatal("accepted invalid hub certificate")
@@ -113,11 +118,11 @@ func TestEmbeddedLatePublishAndExpiry(t *testing.T) {
 		return &connection{Conn: a, raw: a, done: make(chan struct{})}
 	}
 	old, next := makeConn(), makeConn()
-	if !e.reserve(old) {
+	if !e.reserve(old, setupTimeout) {
 		t.Fatal("initial reservation")
 	}
 	_ = old.Close()
-	if !e.reserve(next) {
+	if !e.reserve(next, setupTimeout) {
 		t.Fatal("new reservation")
 	}
 	if e.publish(old, identity.Fingerprint{1}) {
@@ -134,7 +139,7 @@ func TestEmbeddedLatePublishAndExpiry(t *testing.T) {
 	}
 	_ = c.Close()
 	pending := makeConn()
-	if !e.reserve(pending) || !e.publish(pending, identity.Fingerprint{3}) {
+	if !e.reserve(pending, setupTimeout) || !e.publish(pending, identity.Fingerprint{3}) {
 		t.Fatal("pending reservation")
 	}
 	e.mu.Lock()
@@ -145,7 +150,64 @@ func TestEmbeddedLatePublishAndExpiry(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("unclaimed handoff did not expire")
 	}
-	if !e.reserve(makeConn()) {
+	if !e.reserve(makeConn(), setupTimeout) {
 		t.Fatal("expired handoff kept slot busy")
+	}
+}
+
+func TestBootstrapRoutingRequest(t *testing.T) {
+	h, c := local(t), local(t)
+	for _, protocol := range []string{ALPN, "wrong", ""} {
+		t.Run("alpn-"+protocol, func(t *testing.T) {
+			ln, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer ln.Close()
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			defer cancel()
+			done := make(chan error, 1)
+			go func() {
+				raw, err := ln.Accept()
+				if err != nil {
+					done <- err
+					return
+				}
+				defer raw.Close()
+				raw.SetDeadline(time.Now().Add(3 * time.Second))
+				cfg := serverTLS(h)
+				cfg.NextProtos = nil
+				if protocol != "" {
+					cfg.NextProtos = []string{protocol}
+				}
+				tc := tls.Server(raw, cfg)
+				req, err := readRequest(tc)
+				if err == nil {
+					if req.Role != RoleDial || req.Target != h.Fingerprint() || len(req.Token) != 0 {
+						err = errors.New("incorrect bootstrap routing request")
+					} else {
+						err = writeAll(tc, []byte{statusOK})
+					}
+				}
+				done <- err
+			}()
+			conn, fp, err := ConnectBootstrap(ctx, ln.Addr().String(), c)
+			if conn != nil {
+				conn.Close()
+			}
+			peerErr := <-done
+			if protocol == ALPN {
+				if err != nil || peerErr != nil || fp != h.Fingerprint() {
+					t.Fatalf("bootstrap: %v, server: %v, fingerprint: %v", err, peerErr, fp)
+				}
+			} else if err == nil || peerErr == nil || !fp.IsZero() {
+				t.Fatal("bootstrap accepted invalid ALPN")
+			}
+		})
+	}
+	_, addr, _ := start(t, Options{Local: h, Embedded: NewEmbedded()})
+	if conn, err := Connect(t.Context(), addr, c, identity.Fingerprint{}, Request{Role: RoleDial, Target: h.Fingerprint()}); err == nil {
+		conn.Close()
+		t.Fatal("pinned Connect accepted zero hub ID")
 	}
 }

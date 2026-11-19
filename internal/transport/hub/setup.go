@@ -65,7 +65,7 @@ func (c *setupConn) finish() error {
 	return c.Conn.SetDeadline(time.Time{})
 }
 
-func (a *adapter) wrap(ctx context.Context, conn net.Conn, isClient bool, expect identity.Fingerprint, p transport.PathInfo, idleWait bool) (transport.Session, error) {
+func (a *Connector) wrap(ctx context.Context, conn net.Conn, isClient bool, expect identity.Fingerprint, p transport.PathInfo, idleWait bool) (transport.Session, error) {
 	wrapCtx, cancel := context.WithCancelCause(ctx)
 	c := &setupConn{Conn: conn, cancel: cancel}
 	if !idleWait {
@@ -110,8 +110,18 @@ func ownSession(ctx context.Context, session transport.Session, cleanup func()) 
 		cleanup()
 		close(s.done)
 	}()
+	if exporter, ok := session.(interface{ PairingExporter() [32]byte }); ok {
+		return &ownedPairingSession{ownedSession: s, exporter: exporter}
+	}
 	return s
 }
+
+type ownedPairingSession struct {
+	*ownedSession
+	exporter interface{ PairingExporter() [32]byte }
+}
+
+func (s *ownedPairingSession) PairingExporter() [32]byte { return s.exporter.PairingExporter() }
 
 func (s *ownedSession) Done() <-chan struct{} { return s.done }
 

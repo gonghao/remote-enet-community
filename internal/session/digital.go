@@ -41,6 +41,7 @@ func (s *Session) PairingOutcome() PairingOutcome { return s.outcome }
 const (
 	ReasonUnsupported cpace.Reason = "unsupported"
 	ReasonInterrupted cpace.Reason = "interrupted"
+	ReasonHubTicket   cpace.Reason = "hub_ticket"
 )
 
 func pairingFailure(r cpace.Reason) error { return fmt.Errorf("%w: %w", ErrPairing, r) }
@@ -56,12 +57,19 @@ func admissionReason(err error) (cpace.Reason, bool) {
 	return "", false
 }
 
+func (o Options) pairCapability() string {
+	if o.HubFP.IsZero() {
+		return proto.PairDirectCapability
+	}
+	return proto.PairHubCapability
+}
+
 func (s *Session) digital(ctx context.Context, local, peer [32]byte) error {
 	exp, ok := s.ts.(interface{ PairingExporter() [32]byte })
 	if !ok || s.opts.LocalFP == (identity.Fingerprint{}) || s.Peer() == (identity.Fingerprint{}) {
 		return pairingFailure(ReasonInterrupted)
 	}
-	b := cpace.Binding{Capability: proto.PairDirectCapability, Exporter: exp.PairingExporter(), ClientFP: s.opts.LocalFP, OperatorFP: s.Peer(), HelloClientHash: local, HelloOperatorHash: peer}
+	b := cpace.Binding{Capability: s.opts.pairCapability(), HubFP: s.opts.HubFP, Exporter: exp.PairingExporter(), ClientFP: s.opts.LocalFP, OperatorFP: s.Peer(), HelloClientHash: local, HelloOperatorHash: peer}
 	if s.opts.Role == RoleClient {
 		return s.digitalClient(ctx, b)
 	}

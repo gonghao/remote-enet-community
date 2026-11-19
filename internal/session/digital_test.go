@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -120,7 +121,7 @@ func TestDigitalExchange(t *testing.T) {
 		name string
 		want cpace.Reason
 	}{
-		{"success", ""}, {"wrong code", cpace.ReasonConfirmation}, {"SAS rejected", cpace.ReasonConfirmation}, {"altered operator hello", cpace.ReasonConfirmation}, {"altered hello", cpace.ReasonConfirmation}, {"exporter mismatch", cpace.ReasonConfirmation}, {"save failed", cpace.ReasonStoreFailed}, {"no code", cpace.ReasonUnavailable},
+		{"success", ""}, {"hub mismatch", cpace.ReasonConfirmation}, {"hub client", ReasonUnsupported}, {"hub operator", ReasonUnsupported}, {"wrong code", cpace.ReasonConfirmation}, {"SAS rejected", cpace.ReasonConfirmation}, {"altered operator hello", cpace.ReasonConfirmation}, {"altered hello", cpace.ReasonConfirmation}, {"exporter mismatch", cpace.ReasonConfirmation}, {"save failed", cpace.ReasonStoreFailed}, {"no code", cpace.ReasonUnavailable},
 		{"lost decision", ReasonInterrupted}, {"commit canceled", ReasonInterrupted}, {"commit deadline", ReasonInterrupted}, {"save deadline", cpace.ReasonStoreFailed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -163,6 +164,15 @@ func TestDigitalExchange(t *testing.T) {
 				}
 				return nil
 			}}
+			switch tc.name {
+			case "hub client":
+				c.HubFP = identity.Fingerprint{3}
+			case "hub operator":
+				o.HubFP = identity.Fingerprint{3}
+			case "hub mismatch":
+				c.HubFP = identity.Fingerprint{3}
+				o.HubFP = identity.Fingerprint{4}
+			}
 			if tc.name == "SAS rejected" {
 				o.ConfirmSAS = func(_ context.Context, sas string, peer identity.Fingerprint) (bool, error) {
 					if len(sas) != 6 || peer != cfp {
@@ -268,7 +278,7 @@ func TestDigitalClientScript(t *testing.T) {
 				t.Fatalf("unexpected result: %v", err)
 			}
 			msg, err := proto.Read(&record.output, proto.MaxFrameLen)
-			if err != nil || len(msg.(proto.Hello).Capabilities) != 1 {
+			if err != nil || !slices.Equal(msg.(proto.Hello).Capabilities, []string{proto.PairDirectCapability, proto.HubTicketCapability}) {
 				t.Fatal("missing pairing capability")
 			}
 			shares, confirms := 0, 0

@@ -2,7 +2,9 @@
 // big-endian binary record: version:u8, peer:32 bytes, token:16 bytes,
 // expiry:Unix seconds:i64, endpoint count:u16, then each endpoint as
 // kind length:u16 + UTF-8 bytes, address length:u16 + UTF-8 bytes, hub:32 bytes.
-// Version 1 has no extension or trailing bytes; records are limited to 64 KiB.
+// Version 2 appends ticket length:u16 + opaque bytes (0–1024) after each hub
+// and requires at least one nonempty ticket. Version 1 has no ticket fields.
+// Neither version permits trailing bytes; records are limited to 64 KiB.
 package invite
 
 import (
@@ -18,7 +20,10 @@ import (
 	"remote-enet/internal/transport"
 )
 
-const maxSize = 64 * 1024
+const (
+	maxSize       = 64 * 1024
+	maxTicketSize = 1024
+)
 
 var encoding = base32.StdEncoding.WithPadding(base32.NoPadding)
 
@@ -30,9 +35,10 @@ type Invite struct {
 	ExpiresAt time.Time
 }
 
-// Encode preserves second precision for expiry and never changes Version.
+// Encode preserves second precision for expiry. Callers must set Version to 2
+// if any endpoint has a ticket and to 1 otherwise.
 func (i Invite) Encode() (string, error) {
-	if i.Version != 1 {
+	if i.Version != 1 && i.Version != 2 {
 		return "", fmt.Errorf("invite: unsupported version %d", i.Version)
 	}
 	if len(i.Peer.Endpoints) > 65535 {
@@ -44,6 +50,7 @@ func (i Invite) Encode() (string, error) {
 	b.Write(i.Token[:])
 	binary.Write(&b, binary.BigEndian, i.ExpiresAt.Unix())
 	binary.Write(&b, binary.BigEndian, uint16(len(i.Peer.Endpoints)))
+	hasTicket := false
 	for _, e := range i.Peer.Endpoints {
 		for _, s := range []string{e.Kind, e.Addr} {
 			if len(s) > 65535 || !utf8.ValidString(s) {
@@ -53,9 +60,22 @@ func (i Invite) Encode() (string, error) {
 			b.WriteString(s)
 		}
 		b.Write(e.Hub[:])
+		if i.Version == 2 {
+			if len(e.Ticket) > maxTicketSize {
+				return "", fmt.Errorf("invite: ticket too large")
+			}
+			binary.Write(&b, binary.BigEndian, uint16(len(e.Ticket)))
+			b.WriteString(e.Ticket)
+			hasTicket = hasTicket || e.Ticket != ""
+		} else if e.Ticket != "" {
+			return "", fmt.Errorf("invite: ticket requires version 2")
+		}
 		if b.Len() > maxSize {
 			return "", fmt.Errorf("invite: record too large")
 		}
+	}
+	if i.Version == 2 && !hasTicket {
+		return "", fmt.Errorf("invite: version 2 requires a ticket")
 	}
 	return "renet1:" + encoding.EncodeToString(b.Bytes()), nil
 }
@@ -85,7 +105,7 @@ func DecodeAt(s string, now time.Time) (Invite, error) {
 		return i, fmt.Errorf("invite: version: %w", err)
 	}
 	i.Version = version
-	if version != 1 {
+	if version != 1 && version != 2 {
 		return Invite{}, fmt.Errorf("invite: unsupported version %d", version)
 	}
 	var expiry int64
@@ -99,6 +119,7 @@ func DecodeAt(s string, now time.Time) (Invite, error) {
 	if !now.Before(i.ExpiresAt) {
 		return Invite{}, ErrInviteExpired
 	}
+	hasTicket := false
 	for range int(count) {
 		var e transport.Endpoint
 		for _, dst := range []*string{&e.Kind, &e.Addr} {
@@ -121,10 +142,28 @@ func DecodeAt(s string, now time.Time) (Invite, error) {
 		if _, err := io.ReadFull(r, e.Hub[:]); err != nil {
 			return Invite{}, fmt.Errorf("invite: hub: %w", err)
 		}
+		if version == 2 {
+			var n uint16
+			if err := binary.Read(r, binary.BigEndian, &n); err != nil {
+				return Invite{}, fmt.Errorf("invite: ticket length: %w", err)
+			}
+			if n > maxTicketSize {
+				return Invite{}, fmt.Errorf("invite: ticket too large")
+			}
+			b := make([]byte, n)
+			if _, err := io.ReadFull(r, b); err != nil {
+				return Invite{}, fmt.Errorf("invite: ticket: %w", err)
+			}
+			e.Ticket = string(b)
+			hasTicket = hasTicket || n != 0
+		}
 		i.Peer.Endpoints = append(i.Peer.Endpoints, e)
 	}
 	if r.Len() != 0 {
 		return Invite{}, fmt.Errorf("invite: trailing bytes")
+	}
+	if version == 2 && !hasTicket {
+		return Invite{}, fmt.Errorf("invite: version 2 requires a ticket")
 	}
 	return i, nil
 }

@@ -56,6 +56,10 @@ func loadOrCreateIssuer(path string, link func(string, string) error) (*Issuer, 
 		return nil, fmt.Errorf("create temporary issuer key: %w", err)
 	}
 	defer os.Remove(f.Name())
+	if err := checkIssuerPermissions(f); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
 	data := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
 	_, err = f.Write(data)
 	closeErr := f.Close()
@@ -68,7 +72,7 @@ func loadOrCreateIssuer(path string, link func(string, string) error) (*Issuer, 
 	if err = link(f.Name(), path); errors.Is(err, os.ErrExist) {
 		return readIssuer(path)
 	} else if errors.Is(err, errors.ErrUnsupported) || errors.Is(err, syscall.EPERM) || (runtime.GOOS == "windows" && errors.Is(err, syscall.Errno(1))) {
-		// FAT may report EPERM on Unix or ERROR_INVALID_FUNCTION on Windows.
+		// Some network shares allow exclusive creation but not hard links.
 		out, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 		if errors.Is(err, os.ErrExist) {
 			return readIssuer(path)
@@ -76,7 +80,9 @@ func loadOrCreateIssuer(path string, link func(string, string) error) (*Issuer, 
 		if err != nil {
 			return nil, fmt.Errorf("create issuer key: %w", err)
 		}
-		_, err = out.Write(data)
+		if err = checkIssuerPermissions(out); err == nil {
+			_, err = out.Write(data)
+		}
 		if err == nil {
 			err = out.Sync()
 		}
@@ -96,14 +102,8 @@ func readIssuer(path string) (*Issuer, error) {
 		return nil, fmt.Errorf("open issuer key: %w", err)
 	}
 	defer f.Close()
-	if runtime.GOOS != "windows" {
-		info, err := f.Stat()
-		if err != nil {
-			return nil, fmt.Errorf("stat issuer key: %w", err)
-		}
-		if info.Mode().Perm()&0077 != 0 {
-			return nil, fmt.Errorf("insecure issuer key permissions: run chmod 600 %q", path)
-		}
+	if err := checkIssuerPermissions(f); err != nil {
+		return nil, err
 	}
 	for attempt := 0; ; attempt++ {
 		data, err := io.ReadAll(f)
@@ -120,6 +120,20 @@ func readIssuer(path string) (*Issuer, error) {
 			return nil, fmt.Errorf("rewind issuer key: %w", err)
 		}
 	}
+}
+
+func checkIssuerPermissions(f *os.File) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("stat issuer key: %w", err)
+	}
+	if info.Mode().Perm()&0077 != 0 {
+		return fmt.Errorf("insecure issuer key permissions: run chmod 600 %q; if the filesystem lacks POSIX permissions (e.g. FAT/exFAT), move the state directory to a filesystem that supports them", f.Name())
+	}
+	return nil
 }
 
 func parseIssuer(data []byte) (*Issuer, error) {

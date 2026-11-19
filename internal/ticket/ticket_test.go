@@ -272,11 +272,13 @@ func TestIssuerPermissions(t *testing.T) {
 	}
 	path := filepath.Join(t.TempDir(), "issuer.key")
 	_ = must(LoadOrCreateIssuer(path))
-	if err := os.Chmod(path, 0640); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := LoadOrCreateIssuer(path); err == nil || !strings.Contains(err.Error(), "chmod 600") {
-		t.Fatalf("permissions: %v", err)
+	for _, mode := range []os.FileMode{0640, 0777} {
+		if err := os.Chmod(path, mode); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadOrCreateIssuer(path); err == nil || !strings.Contains(err.Error(), "chmod 600") || !strings.Contains(err.Error(), "POSIX permissions") || !strings.Contains(err.Error(), "move the state directory") {
+			t.Fatalf("permissions %o: %v", mode, err)
+		}
 	}
 }
 func testIssuer(t *testing.T, link func(string, string) error) {

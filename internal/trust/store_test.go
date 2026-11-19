@@ -122,7 +122,7 @@ func TestPeerPersistenceAndFreshReads(t *testing.T) {
 	peer.Endpoints[0].Addr = "mutated"
 	got, err := s.Peer(t.Context(), id)
 	if err != nil || got.Endpoints[0].Addr != "localhost:47000" {
-		t.Fatalf("saved peer: %+v %v", got, err)
+		t.Fatalf("saved peer did not match: %v", err)
 	}
 	got.Endpoints[0].Addr = "caller mutation"
 	got, err = s.Peer(t.Context(), id)
@@ -138,7 +138,7 @@ func TestPeerPersistenceAndFreshReads(t *testing.T) {
 }
 
 func TestCorruptionFailsClosedAndLockIsReleased(t *testing.T) {
-	for _, raw := range []string{"", "{", `{"version":2,"trusted":{},"invites":{},"peers":{}}`, `{"version":1,"trusted":{},"invites":{},"peers":{}} {}`, `{"version":1,"trusted":null,"invites":{},"peers":{}}`, `{"version":1,"trusted":{},"invites":{"bad":1},"peers":{}}`} {
+	for _, raw := range []string{"", "{", `{"version":3,"trusted":{},"invites":{},"peers":{}}`, `{"version":1,"trusted":{},"invites":{},"peers":{}} {}`, `{"version":1,"trusted":null,"invites":{},"peers":{}}`, `{"version":1,"trusted":{},"invites":{"bad":1},"peers":{}}`} {
 		t.Run(raw, func(t *testing.T) {
 			s := openStore(t)
 			if err := os.WriteFile(s.path, []byte(raw), 0o600); err != nil {

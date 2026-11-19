@@ -44,12 +44,12 @@ func TestReadPeerDoesNotCreateOrMutateState(t *testing.T) {
 	}
 	got, err := ReadPeer(t.Context(), dir, peer.ID)
 	if err != nil || !reflect.DeepEqual(got, peer) {
-		t.Fatalf("read public peer: %+v %v", got, err)
+		t.Fatalf("read peer did not match: %v", err)
 	}
 	got.Endpoints[0].Addr = "mutated"
 	next, err := ReadPeer(t.Context(), dir, peer.ID)
 	if err != nil || !reflect.DeepEqual(next, peer) {
-		t.Fatalf("borrowed endpoints: %+v %v", next, err)
+		t.Fatalf("read changed saved endpoints: %v", err)
 	}
 	after, err := os.ReadFile(s.path)
 	if err != nil || !bytes.Equal(before, after) {

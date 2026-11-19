@@ -6,7 +6,7 @@
 
 `New(initial, actions)` 将 `initial.Role` 固定为视图的应用角色，整个生命周期内不提供角色选择入口。`SetConfig` 收到角色不匹配的配置时整份忽略，不替换表单、保存基线或待确认提交。
 
-- Client：宿主初始窗口 820×640，最小 680×560。主页面为阶段、RTT/流量/速率/活动隧道、Vehicle / Connection / Session 三组信息、邀请码输入和 Connect / Stop relay。网卡、记住的 Peer、测试偏好与连接测试放在 Settings。
+- Client：宿主初始窗口 820×640，最小 680×560。会话首页先显示阶段与操作区（车侧网卡选择和刷新、邀请码输入、Connect / Stop relay），下方显示 RTT/流量/速率/活动隧道及 Vehicle / Connection / Session 三组信息。记住的 Peer、测试偏好与连接测试放在 Settings。
 - Operator：宿主初始窗口 1080×760，最小 900×620。主页面呈现一个当前 Client，包含同组指标与车辆/链路信息、实际呈现端口与独占状态、Start listening / End session、邀请生成/复制、连接测试与结果。监听、公开端点、呈现 IP/端口和独占偏好放在 Settings。初始配置缺少公开端点或呈现 IP 时直接打开 Settings。
 - Settings 与 Log 是独立页面。顶部工具栏固定，`Settings`、`Log` 与 `Back to session` 的访问名称唯一；可从已滚到底部的日志直接返回会话。主操作在默认窗口、100% 缩放下无需滚动即可操作。150% 缩放及最小窗口下纵向滚动，窄布局将指标改为两列、信息组改为单列。
 - Log 按输入 Events 数组由旧到新的约定倒序呈现，最多 200 条；不放在日常操作页面。
@@ -55,11 +55,11 @@ view.SetState(ui.State{
 ## 表单、回执与凭据
 
 - 编辑值与保存基线分离；导航、`SetState` 与普通状态更新不覆盖未保存编辑。只有合法且与保存基线语义不同的值才能 Save；`06801` 与 `6801` 不触发重复保存。
-- Save 记住本次提交，等待匹配的 `SetConfig`；旧配置不能确认新保存。提交期间的新编辑保留。保存失败经 `State.Error` 呈现，再由 `Complete(ActionSave)` 解除等待；它只清 submitted，不修改 saved/draft。未保存或保存等待期间禁止启动与生成邀请。
+- Save 记住本次提交，等待匹配的 `SetConfig`；旧配置不能确认新保存。保存确认时保留提交期间的新编辑。保存失败经 `State.Error` 呈现，再由 `Complete(ActionSave)` 解除等待。首页网卡保存失败时，仅将草稿中的网卡名称和 IPv4 恢复为已保存值，可以重新选择同一网卡重试。Settings 保存失败时保留表单编辑。未保存或保存等待期间禁止启动与生成邀请。
 - Peer 不可编辑；同角色的 `SetConfig` 将最新 Peer 合入草稿和待确认提交，防止保存其他设置时清掉首次配对后记住的 Peer。
 - 点击后立即锁住对应请求。旧 Error、无关错误和其他动作的 Complete 不会解除等待。Connect / Listen、Refresh、Stop、Test、Invite 分别持有等待标记；Running/Stopping/Testing、匹配 Config 和新非空 Invitation 可按成功状态解除等待。生成中仅清空旧邀请码不会解除生成等待。
 - 运行、开始和停止期间禁止网络设置及偏好编辑；Settings 可查看，连接测试仍按实际连接和保存偏好准入。停止后修改配置，明确 Save 后在下一次启动生效。
-- 网卡下拉显示名称和 IPv4；Automatic 清空两个选择字段。刷新或固定网卡消失不替换选择；只固定名称/IP 的原配置也会保留。歧义交由 app 判断。
+- Client 会话首页的网卡下拉显示名称和 IPv4，选择后立即提交这两个字段；Automatic 清空两个字段。提交以已保存配置为基线，Settings 中其他未保存的编辑保留在草稿里。运行中或有保存在途时禁用网卡下拉。刷新或固定网卡消失时保留原选择，只固定名称或 IP 的配置也会保留。歧义交由 app 判断。
 - Client 支持系统粘贴/手动输入；controller 接受启动后清空临时邀请码。Operator 输出为只读单行编辑器，长码水平滚动、不撑宽布局；仅显式 Copy 才触发复制。邀请码不进入 Config、Events 或指标。传入的 Events、Notice、Error 应由 controller 保证不含凭据。
 
 保留动作访问名称：`Connect client`、`Start operator`、`Stop runtime`、`Generate invitation`、`Copy invitation`、`Test connection`、`Save settings`、`Refresh adapters`、`Quit Remote ENET`。输入框通过原生 Field 绑定标题，错误和阶段使用无障碍实时区域。Windows UIA 实机验收由整合器负责。
@@ -72,7 +72,7 @@ CGO_ENABLED=0 go test ./internal/ui
 CGO_ENABLED=1 go test -race ./internal/ui
 ```
 
-headless 测试真实导航、点击、粘贴、输入和网卡选择，保留保存/失败重试/旧回执/提交期间编辑/Peer 合并、无关完成隔离、清空旧邀请码不解锁、运行中禁用、未知与有效零指标、显式复制等回归。新增固定角色与错角色配置隔离、默认窗口主操作可见、独立 Settings/Log、200 条日志边界，以及最小窗口、150% 缩放、长邀请码和高像素密度测试。
+headless 测试真实导航、点击、粘贴、输入和首页网卡选择，覆盖网卡即时保存、回执确认后恢复连接按钮、保留其他草稿编辑及保存在途时禁用下拉。其他回归覆盖保存失败重试、旧回执、提交期间编辑、Peer 合并、无关完成隔离、清空旧邀请码、运行中禁用、未知与有效零指标、显式复制、固定角色、独立 Settings/Log、200 条日志边界，以及最小窗口、150% 缩放、长邀请码和高像素密度。
 
 可导出临时 PNG，均使用无真实凭据的测试夹具，不能提交截图到源码：
 
@@ -80,7 +80,7 @@ headless 测试真实导航、点击、粘贴、输入和网卡选择，保留�
 RENET_UI_PREVIEW_DIR=/tmp/wave6-ui-preview CGO_ENABLED=0 go test ./internal/ui -run TestWorkspacePreview -v
 ```
 
-输出 `client-100.png` / `client-150.png`（820×640）、`operator-100.png` / `operator-150.png`（1080×760），另有各端 `-settings.png`、`-log.png`。
+输出 `client-100.png` / `client-150.png`（820×640）、`client-min-100.png` / `client-min-150.png`（680×560）、`operator-100.png` / `operator-150.png`（1080×760），另有各端 `-settings.png`、`-log.png`。
 
 ## 浅色主题
 

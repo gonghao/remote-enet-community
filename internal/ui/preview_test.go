@@ -71,6 +71,16 @@ func TestWorkspacePreview(t *testing.T) {
 		click(t, tt, "Log")
 		writePreview(t, tt, filepath.Join(dir, role+"-log.png"))
 	}
+
+	cfg := settings.Default()
+	cfg.Client.NICName, cfg.Client.NICAddr = "Ethernet", "169.254.10.1"
+	client := New(cfg, actions)
+	client.SetState(State{NICs: previewState().NICs})
+	tt := ui.NewTester(client.Render, 680, 560)
+	input(t, tt, "Invitation code", "renet1:DEMO")
+	writePreview(t, tt, filepath.Join(dir, "client-min-100.png"))
+	tt.SetZoom(1.5)
+	writePreview(t, tt, filepath.Join(dir, "client-min-150.png"))
 }
 
 func writePreview(t *testing.T, tt *ui.Tester, path string) {

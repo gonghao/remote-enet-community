@@ -203,17 +203,15 @@ func (v *View) settingsPage(c *ui.Context) {
 	if v.locked() {
 		ui.Text(c, v.tr("Runtime active · stop before changing network settings.")).TextColor(amber).FontSize(11).Role(ui.RoleStatus)
 	}
-	if v.role == settings.RoleClient {
-		v.card(c.Key("client-settings"), "Vehicle network", "", func() {
-			v.nicSelect(c)
-			if v.saved.Client.Peer != "" {
-				v.value(c, "Remembered peer", v.saved.Client.Peer)
-			}
-		})
-	} else {
+	if v.role == settings.RoleOperator {
 		v.card(c.Key("operator-settings"), "Network & presentation", "", func() { v.operatorForm(c) })
 	}
-	v.card(c.Key("save-settings"), "Preferences", "", func() { v.saveControls(c) })
+	v.card(c.Key("save-settings"), "Preferences", "", func() {
+		if v.role == settings.RoleClient && v.saved.Client.Peer != "" {
+			v.value(c, "Remembered peer", v.saved.Client.Peer)
+		}
+		v.saveControls(c)
+	})
 	v.checksEntry(c)
 	if v.role == settings.RoleClient {
 		v.linkTest(c)

@@ -63,7 +63,8 @@ func (v *View) nicSelect(c *ui.Context) {
 			}
 		})
 		sel := ui.SelectBase(c.Key("adapter"), &selected)
-		sel.Trigger.Label(v.tr("Adapter selection")).Disabled(v.locked()).FillWidth().MinWidth(0).Height(32).Padding(8, 12).Background(inputSurface).Border(1, controlStroke).Radius(0).Children(func() {
+		disabled := v.locked() || v.submitted != nil || v.actions.Save == nil
+		sel.Trigger.Label(v.tr("Adapter selection")).Disabled(disabled).FillWidth().MinWidth(0).Height(32).Padding(8, 12).Background(inputSurface).Border(1, controlStroke).Radius(0).Children(func() {
 			ui.Text(c, choices[selected].label).Grow(1).MinWidth(0).SingleLine().TruncateMiddle()
 			ui.Text(c, "⌄").TextColor(muted)
 		})
@@ -79,9 +80,14 @@ func (v *View) nicSelect(c *ui.Context) {
 				}
 			})
 		})
-		if sel.Trigger.Changed() {
+		if !disabled && sel.Trigger.Changed() {
 			choice := choices[selected]
 			v.draft.Client.NICName, v.draft.Client.NICAddr = choice.name, choice.address
+			cfg := v.saved
+			cfg.Client.NICName, cfg.Client.NICAddr = choice.name, choice.address
+			v.submitted = &cfg
+			v.savingAdapter = true
+			v.actions.Save(cfg)
 		}
 		ui.Text(c, v.tr("Automatic requires one unambiguous adapter. Fixed selections are kept if an adapter disappears.")).FontSize(11).TextColor(muted)
 	})

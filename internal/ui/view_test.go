@@ -75,10 +75,11 @@ func operatorConfig() settings.Config {
 
 func TestClientInputAndLifecycle(t *testing.T) {
 	var connections []string
-	stops, refreshes, tests, quits := 0, 0, 0, 0
+	stops, refreshes, saves, tests, quits := 0, 0, 0, 0, 0
 	v := New(settings.Default(), Actions{
 		Connect: func(code string) { connections = append(connections, code) },
 		Stop:    func() { stops++ }, Refresh: func() { refreshes++ },
+		Save:     func(settings.Config) { saves++ },
 		TestLink: func() { tests++ }, Quit: func() { quits++ },
 	})
 	tt := ui.NewTester(v.Render, 1080, 1200)
@@ -89,8 +90,10 @@ func TestClientInputAndLifecycle(t *testing.T) {
 	if len(connections) != 0 || stops != 0 || tests != 0 {
 		t.Fatal("idle controls admitted an unavailable action")
 	}
-	click(t, tt, "Refresh adapters")
 	openSession(t, tt)
+	click(t, tt, "Refresh adapters")
+	v.Complete(ActionRefresh)
+	tt.Frame()
 	click(t, tt, "Invitation code")
 	if !tt.Focused("Invitation code") {
 		t.Fatal("invitation label did not focus the native editor")
@@ -105,17 +108,24 @@ func TestClientInputAndLifecycle(t *testing.T) {
 	if len(connections) != 1 || connections[0] != "test-only-code" || v.draft.Role != settings.RoleClient {
 		t.Fatalf("start did not guard repeat requests: calls=%d role=%s", len(connections), v.draft.Role)
 	}
-	s := State{Running: true, Runtime: app.Snapshot{Phase: app.PhaseWaitingNIC}}
+	s := State{
+		Running: true, Runtime: app.Snapshot{Phase: app.PhaseWaitingNIC},
+		NICs: []carside.NIC{{Name: "Ethernet", Address: netip.MustParseAddr("169.254.10.1")}},
+	}
 	v.SetState(s)
 	tt.Frame()
 	if !tt.HasText("Waiting for adapter") || v.invitation != "" {
 		t.Fatal("running state did not update stage or clear transient invitation")
 	}
 	input(t, tt, "Invitation code", "blocked")
-	openSettings(t, tt)
 	click(t, tt, "Refresh adapters")
+	click(t, tt, "Adapter selection")
+	if _, found := tt.Find("Ethernet · 169.254.10.1"); found {
+		t.Fatal("running client opened the adapter dropdown")
+	}
+	openSettings(t, tt)
 	click(t, tt, "Test connection")
-	if v.invitation != "" || refreshes != 1 || tests != 0 {
+	if v.invitation != "" || refreshes != 1 || saves != 0 || tests != 0 {
 		t.Fatal("running form or disconnected test accepted input")
 	}
 	s.Runtime.Phase = app.PhaseConnected
@@ -237,13 +247,11 @@ func TestNICSelectionSurvivesRefresh(t *testing.T) {
 	s := State{NICs: []carside.NIC{{Name: "USB LAN", Address: netip.MustParseAddr("169.254.20.1")}}}
 	v.SetState(s)
 	tt := ui.NewTester(v.Render, 1080, 1000)
-	openSettings(t, tt)
 	if !tt.HasText("Ethernet · 169.254.10.1 (saved selection)") || v.dirty() {
 		t.Fatal("missing fixed adapter silently changed the saved choice")
 	}
 	click(t, tt, "Adapter selection")
 	click(t, tt, "USB LAN · 169.254.20.1")
-	click(t, tt, "Save settings")
 	if saved.Client.NICName != "USB LAN" || saved.Client.NICAddr != "169.254.20.1" {
 		t.Fatalf("adapter selection was not saved: %+v", saved.Client)
 	}
@@ -255,9 +263,138 @@ func TestNICSelectionSurvivesRefresh(t *testing.T) {
 	}
 	click(t, tt, "Adapter selection")
 	click(t, tt, "Automatic")
-	click(t, tt, "Save settings")
 	if saved.Client.NICName != "" || saved.Client.NICAddr != "" {
 		t.Fatal("Automatic did not clear both selectors")
+	}
+}
+
+func TestClientAdapterSavePreservesSettingsDraft(t *testing.T) {
+	for _, editPreference := range []bool{false, true} {
+		t.Run(fmt.Sprintf("editPreference=%t", editPreference), func(t *testing.T) {
+			cfg := settings.Default()
+			var requests []settings.Config
+			connects := 0
+			v := New(cfg, Actions{
+				Save:    func(c settings.Config) { requests = append(requests, c) },
+				Connect: func(string) { connects++ },
+			})
+			state := State{NICs: []carside.NIC{
+				{Name: "Ethernet", Address: netip.MustParseAddr("169.254.10.1")},
+				{Name: "USB LAN", Address: netip.MustParseAddr("169.254.20.1")},
+			}}
+			v.SetState(state)
+			tt := ui.NewTester(v.Render, 820, 640)
+			input(t, tt, "Invitation code", "test-only-code")
+			if editPreference {
+				openSettings(t, tt)
+				click(t, tt, "Allow peer connection tests")
+				openSession(t, tt)
+			}
+
+			click(t, tt, "Adapter selection")
+			click(t, tt, "Ethernet · 169.254.10.1")
+			want := cfg
+			want.Client.NICName, want.Client.NICAddr = "Ethernet", "169.254.10.1"
+			if len(requests) != 1 || requests[0] != want || v.submitted == nil || v.draft.Client != want.Client {
+				t.Fatalf("adapter choice did not submit only the NIC fields: %+v", requests)
+			}
+			v.SetConfig(cfg)
+			tt.Frame()
+			click(t, tt, "Adapter selection")
+			if _, found := tt.Find("USB LAN · 169.254.20.1"); found || v.submitted == nil {
+				t.Fatal("the old configuration unlocked the pending adapter selection")
+			}
+			click(t, tt, "Connect client")
+			if connects != 0 || len(requests) != 1 {
+				t.Fatal("pending adapter save admitted an extra request")
+			}
+
+			v.SetConfig(want)
+			v.SetState(state)
+			v.Complete(ActionSave)
+			tt.Frame()
+			wantDraft := want
+			wantConnects := 1
+			if editPreference {
+				wantDraft.AllowLinkTest = !cfg.AllowLinkTest
+				wantConnects = 0
+			}
+			if v.submitted != nil || v.saved != want || v.draft != wantDraft || v.dirty() != editPreference {
+				t.Fatal("adapter save acknowledgement did not preserve the remaining edits")
+			}
+			click(t, tt, "Adapter selection")
+			if _, found := tt.Find("USB LAN · 169.254.20.1"); !found {
+				t.Fatal("acknowledgement did not re-enable the adapter dropdown")
+			}
+			tt.Key(0, ui.KeyEscape)
+			click(t, tt, "Connect client")
+			if connects != wantConnects {
+				t.Fatalf("Connect called %d times, want %d", connects, wantConnects)
+			}
+		})
+	}
+}
+
+func TestClientAdapterSaveFailureRestoresSelection(t *testing.T) {
+	for _, editPreference := range []bool{false, true} {
+		t.Run(fmt.Sprintf("editPreference=%t", editPreference), func(t *testing.T) {
+			cfg := settings.Default()
+			cfg.Client.NICName, cfg.Client.NICAddr = "Ethernet", "169.254.10.1"
+			var requests []settings.Config
+			v := New(cfg, Actions{
+				Save:    func(c settings.Config) { requests = append(requests, c) },
+				Connect: func(string) {},
+			})
+			state := State{NICs: []carside.NIC{
+				{Name: "Ethernet", Address: netip.MustParseAddr("169.254.10.1")},
+				{Name: "USB LAN", Address: netip.MustParseAddr("169.254.20.1")},
+			}}
+			v.SetState(state)
+			tt := ui.NewTester(v.Render, 820, 640)
+			input(t, tt, "Invitation code", "test-only-code")
+			wantDraft := cfg
+			if editPreference {
+				openSettings(t, tt)
+				click(t, tt, "Allow peer connection tests")
+				openSession(t, tt)
+				wantDraft.AllowLinkTest = !cfg.AllowLinkTest
+			}
+
+			click(t, tt, "Adapter selection")
+			click(t, tt, "USB LAN · 169.254.20.1")
+			wantSave := cfg
+			wantSave.Client.NICName, wantSave.Client.NICAddr = "USB LAN", "169.254.20.1"
+			if len(requests) != 1 || requests[0] != wantSave {
+				t.Fatalf("adapter choice did not submit a save: %+v", requests)
+			}
+
+			state.Error = "Settings could not be saved."
+			v.SetState(state)
+			v.Complete(ActionSave)
+			tt.Frame()
+			if v.submitted != nil || v.saved != cfg || v.draft != wantDraft || v.dirty() != editPreference {
+				t.Fatal("failed save did not restore the saved adapter while preserving other edits")
+			}
+			if v.canConnect() != !editPreference || !tt.HasText("Ethernet · 169.254.10.1") {
+				t.Fatal("failed save did not restore the adapter selection and expected connect availability")
+			}
+
+			click(t, tt, "Adapter selection")
+			click(t, tt, "USB LAN · 169.254.20.1")
+			if len(requests) != 2 || requests[1] != wantSave {
+				t.Fatalf("choosing the same adapter did not retry the save: %+v", requests)
+			}
+		})
+	}
+}
+
+func TestClientAdapterSelectionRequiresSaveAction(t *testing.T) {
+	v := New(settings.Default(), Actions{})
+	v.SetState(State{NICs: []carside.NIC{{Name: "Ethernet", Address: netip.MustParseAddr("169.254.10.1")}}})
+	tt := ui.NewTester(v.Render, 820, 640)
+	click(t, tt, "Adapter selection")
+	if _, found := tt.Find("Ethernet · 169.254.10.1"); found {
+		t.Fatal("adapter dropdown opened without a Save action")
 	}
 }
 
@@ -431,7 +568,12 @@ func TestClientPasteAtMinimumSize(t *testing.T) {
 			v := New(settings.Default(), Actions{Connect: func(code string) { connected = code }})
 			tt := ui.NewTester(v.Render, 680, 560)
 			tt.SetZoom(zoom)
-			scrollTo(t, tt, "Invitation code", 680, 560)
+			for _, label := range []string{"Adapter selection", "Refresh adapters", "Invitation code", "Connect client", "Stop runtime"} {
+				r, ok := tt.Find(label)
+				if !ok || r.X < 0 || r.Y < 0 || r.W <= 0 || r.H <= 0 || r.X+r.W > 680 || r.Y+r.H > 560 {
+					t.Errorf("primary control %q is outside the minimum window: %+v", label, r)
+				}
+			}
 			click(t, tt, "Invitation code")
 			code := "test-only-" + strings.Repeat("A", 1800)
 			tt.SetClipboard(code)
@@ -440,7 +582,6 @@ func TestClientPasteAtMinimumSize(t *testing.T) {
 			if !ok || r.X < 0 || r.X+r.W > 680 {
 				t.Fatalf("invitation input overflowed: %+v", r)
 			}
-			scrollTo(t, tt, "Connect client", 680, 560)
 			click(t, tt, "Connect client")
 			if connected != code {
 				t.Fatal("minimum-size client did not connect with the complete pasted code")

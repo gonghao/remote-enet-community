@@ -1,6 +1,6 @@
 # 路线图
 
-更新日期：2026-11-19。本文按依赖顺序列出社区仓库接下来的工作，不承诺具体日期。每一项完成后在对应的 Wave 文档或验收报告中记录证据，再更新本文状态。设计约束见 [DEPLOYMENT-MODES](DEPLOYMENT-MODES.md)、[CENTER-PROTOCOL](CENTER-PROTOCOL.md) 与 [DESIGN](DESIGN.md)。
+更新日期：2026-11-20。本文按依赖顺序列出社区仓库接下来的工作，不承诺具体日期。每一项完成后在对应的 Wave 文档或验收报告中记录证据，再更新本文状态。设计约束见 [DEPLOYMENT-MODES](DEPLOYMENT-MODES.md)、[CENTER-PROTOCOL](CENTER-PROTOCOL.md) 与 [DESIGN](DESIGN.md)。
 
 ## 范围
 
@@ -48,18 +48,35 @@
 
 ## R3 · 自建 Hub 与中心地址配置
 
-进度（2026-11-20）：开发中，设计见 [SELFHOST](SELFHOST.md)，已定稿。第一批 T1 票据、T2 Hub 准入策略、T8 pair-hub/1 与消息 17、T10 settings 版本 2 已开工。另修复 Operator 内嵌 Hub 可被当作开放中继的问题（commit 2934906）。
+已完成（离线测试与独立审查通过，人工台架验收待执行）。设计与实现记录见 [SELFHOST](SELFHOST.md)（第 14 节为两轮独立审查的逐条处理），冻结的接口见 [CONTRACTS · R3](CONTRACTS.md#r3-自建-hub-与中心地址配置2026-11-20-冻结)。另修复 Operator 内嵌 Hub 可被当作开放中继的问题（commit 2934906）；中心契约第八版已补入自建模式条文（commit 8e67f0c）。
 
-1. 独立 Hub 命令：基于现有 `internal/hub` 提供可单独部署的入口，两端都通过出站连接接入。
-2. 票据验签：Hub 配置验签公钥，强制校验票据；缺少配置时拒绝，不回退到无鉴权模式。
-3. 自建场景的授权方式：提供不依赖中心的签发工具，例如由自建者持有私钥、离线签发长期或短期票据。
-4. 中心地址配置：Client 和 Operator 支持配置中心地址，不同中心的信任根相互隔离，界面显示当前中心。
+交付物：
+
+1. 独立 Hub 命令：`cmd/renet-hub`（`init` / `fingerprint` / `check` / `serve` / `ticket inspect`），基于 `internal/hub` 的 `Policy` / `Grant` / `SetPolicy`；两端都出站连接；Unix 上 SIGHUP 重载。
+2. 票据验签：`internal/ticket`（`v = 2` 的 COSE 票据，向量由独立生成器产出）与 `internal/hubauth`（配置、签发者作用域、拒绝列表）；没有策略时 Hub 拒绝启动，不回退到无鉴权模式。
+3. 自建场景的授权：每台 Operator 持有只能为自己签票的签发密钥，`renetd issuer` 输出 Hub 配置条目，`renetd invite --hub` 离线签发邀请，运行中的 Operator 自动签 wait 票并在会话握手末尾下发、续期设备票（消息 17 `HubTicket`）。
+4. 首次配对：版本 2 邀请码，以及经 Hub 配对入口的「地址 + 8 位码」（`pair-hub/1`，Hub 指纹写入 PAKE）。
+5. 中心地址配置：settings 版本 2、显式切换、界面显示、`GET /v1/meta` 核对 `center_id`（`internal/center`）；登录与中心模式的功能属 R5。
+
+证据：
+
+| 范围 | 测试 |
+|---|---|
+| 票据编码与向量 | `internal/ticket`：`TestVectors`、`TestIssuer*` |
+| Hub 准入、配对入口与撤销 | `internal/hub`：`TestPairingEntry`、`TestReloadRevokesRoutes`、`TestPairedDialFirstByteDeadline`；`internal/hubauth`：`TestReloadCompatible` |
+| 端到端（真实 loopback Hub、Operator、Client） | `internal/integration/selfhost_test.go`：`TestSelfhostInviteExpiryAndRenewal`、`TestSelfhostWindow`、`TestSelfhostReloadRevokesClient`、`TestSelfhostBusyHandoff`、`TestSelfhostRestart` 等 |
+| 伪造 Hub | `TestSelfhostHubFingerprintBinding`、`TestSelfhostImpostorHubFailsPairing`，对照 `TestSelfhostTransparentForwarding` |
+| 中心 meta | `internal/center`：`TestFetchMetaAnonymous`、`TestFetchMetaRejectsRedirectAndHTTP` |
+
+遗留：人工台架验收（Hub 跑在家庭网络以外的主机，Operator 与 Client 都在 NAT 之后），已列入下方「并行验收线」。
 
 ## R4 · 中心协议契约定稿
 
 把 [CENTER-PROTOCOL](CENTER-PROTOCOL.md) 第 12 节的待定参数落成正式契约，包括 API 与版本协商、票据编码、续租与撤销、写请求幂等、入口回退。同时发布票据与 PAKE 的测试向量，供第三方中心验证兼容性。
 
 契约：[CENTER-CONTRACT](CENTER-CONTRACT.md)（2026-11-19 定稿，测试向量尚未生成）。第八版已加入自建模式相关条文。
+
+**下一项开发：** 契约已定稿而向量未生成，所以先做本节的测试向量（票据 `v = 1` 与中心 PAKE 应用向量，由独立生成器产出，并补充「`v = 2` 票据被中心 Hub 拒绝」的向量），再进入 R5。R3 的自建票据向量已有，可作为生成器与目录布局的参照。
 
 ## R5 · 各端接入中心
 
@@ -82,6 +99,7 @@
 | macOS 上的 Operator 功能 | HSFZ 抓取、全局快捷键 Cmd+Shift+M（可能需要“辅助功能”权限）、三语言切换、像素风界面只做过交叉构建，未在 Mac 实机验证 |
 | MGU 直连与 L3 呈现的实车验证 | 隔离 fixture 已验证，实车尚未验证 |
 | 编码与刷写经隧道的透明转发 | 未验收；只验证转发，由用户使用真实工具操作 |
+| 自建 Hub 的台架与公网验收 | 离线测试与独立审查已通过（[SELFHOST](SELFHOST.md) 第 14 节）。待在台架上用隔离的假车，Hub 跑在家庭网络以外的主机，Operator 与 Client 都位于 NAT 之后：分别用邀请码和数字码完成首次配对，重启两端后无码重连，按设备撤销后重载；记录版本、拓扑、结果与脱敏日志，不进入离线 CI |
 | 数字配对的 Mac GUI Client 与公网验收 | LAN 台架已通过；需在同网段或接车时验证 Mac GUI Client（含 rebase 后的紧凑窗口布局），并从家庭以外网络经 DDNS 走一遍首次配对与无码重连 |
 | 实车或公网下的长时运行 | 现有八小时结果只限 loopback / 内存设备 |
 

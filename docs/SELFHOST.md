@@ -1,6 +1,6 @@
 # R3 · 自建 Hub 与中心地址配置
 
-设计定稿，2026-11-20（提案 2026-11-19，第 13 节的两项已由负责人确认）。目标见 [ROADMAP · R3](ROADMAP.md#r3--自建-hub-与中心地址配置)，部署边界见 [DEPLOYMENT-MODES](DEPLOYMENT-MODES.md)，票据格式与 Hub 校验沿用 [CENTER-CONTRACT §8](CENTER-CONTRACT.md#8-票据)，配对消息与状态机沿用 [CENTER-CONTRACT §10](CENTER-CONTRACT.md#10-中心模式的首次配对) 与 [PAIRING](PAIRING.md)。本文定下契约 §17 留给 R3 的部分：自建模式下票据的字段、期限与撤销语义，独立 Hub 的命令与配置，签发方式，两端的连接流程，以及中心地址配置在 R5 之前做到哪一步。
+状态：已实现（2026-11-20），人工台架验收待执行。设计定稿于 2026-11-20（提案 2026-11-19，第 13 节的两项已由负责人确认）；实现中发现并修正的细节已就地写入各节，实现记录与审查处理见[第 14 节](#14-实现记录与审查处理)。目标见 [ROADMAP · R3](ROADMAP.md#r3--自建-hub-与中心地址配置)，部署边界见 [DEPLOYMENT-MODES](DEPLOYMENT-MODES.md)，票据格式与 Hub 校验沿用 [CENTER-CONTRACT §8](CENTER-CONTRACT.md#8-票据)，配对消息与状态机沿用 [CENTER-CONTRACT §10](CENTER-CONTRACT.md#10-中心模式的首次配对) 与 [PAIRING](PAIRING.md)。本文定下契约 §17 留给 R3 的部分：自建模式下票据的字段、期限与撤销语义，独立 Hub 的命令与配置，签发方式，两端的连接流程，以及中心地址配置在 R5 之前做到哪一步。
 
 一句话概括：自建票据使用 `v = 2`，字段集和准入规则都与中心票据分开，中心模式的检查一条不动。每台 Operator 持有一把只能为自己签票的签发密钥，Hub 配置列出这些公钥。Client 首次配对时，用邀请码里的短期不记名票据，或在 Operator 发码期间经 Hub 的配对入口，连到 Operator；配对成功后，Operator 在端到端会话里给 Client 签发绑定其设备指纹的长期票据，之后重连都用这张票据。票据只约束准入。撤销靠编辑 Hub 配置并重载，重载时立即关闭不再有效的连接。
 
@@ -108,7 +108,7 @@ Client ──出站 TLS（dial，target=Operator 指纹，token=票据）──�
 
 先在路由锁外完成 A 组检查，任一失败都回 `unauthorized`（状态 3）并关闭连接；原因只写调试日志，日志里只出现 `kid`、`jti` 和短指纹，不写完整票据。
 
-**A0 分流。** 如果 role = dial、target 等于本 Hub 指纹，并且没有启用 Embedded（独立 Hub 永远不启用），这条请求走配对入口：token 必须为空，配置里必须设了 `pairing_operator`，外层 TLS 设备不在 `deny.devices` 中。满足时产出「配对入口」Grant，直接进入锁内的 B2。其余请求走 A1–A10。
+**A0 分流。** 如果 role = dial、target 等于本 Hub 指纹，并且没有启用 Embedded（独立 Hub 永远不启用），这条请求**一律**走配对入口，不进入 A1–A10：token 必须为空，带 token 直接拒绝（没有合法的票据会指向 Hub 自己的指纹，单一路径更简单，也不给「票据加配对入口」的组合留解释空间）；配置里必须设了 `pairing_operator`；外层 TLS 设备不在 `deny.devices` 中。满足时产出「配对入口」Grant，直接进入锁内的 B2。其余请求走 A1–A11。
 
 | 步骤 | 检查 |
 |---|---|
@@ -122,17 +122,19 @@ Client ──出站 TLS（dial，target=Operator 指纹，token=票据）──�
 | A8 | 路由一致：`role` 等于路由头 role；dial 的 `peer` 等于 target（非零）；wait 的 target 必须为零 |
 | A9 | 签发者作用域（配置中该 `kid` 绑定的 `operator`）：wait 要求 `dev == operator`；dial 要求 `peer == operator`；带 `pair_until` 的 wait 还要求 `operator == pairing_operator` |
 | A10 | 时间，全部按有符号 64 位计算：`iat ≤ nbf < exp`；`iat ≤ now + skew`；`nbf − skew ≤ now ≤ exp + skew`；`exp − iat ≤ ticket_max_ttl_s`；不记名票据另须 `exp − iat ≤ bootstrap_max_ttl_s`；`pair_until` 须满足 `nbf ≤ pair_until ≤ exp` 且 `pair_until − iat ≤ pairing_window_max_s` |
-| A11 | 拒绝列表：`jti` 不在 `deny.jtis` 中；外层 TLS 设备指纹不在 `deny.devices` 中（对不记名票据同样适用） |
+| A11 | 拒绝列表：`jti` 不在 `deny.jtis` 中；外层 TLS 设备指纹不在 `deny.devices` 中。对所有票据类型都检查，包括不记名票据 |
 
 然后在路由锁内一次完成 B 组：
 
 | 步骤 | 检查与动作 |
 |---|---|
-| B1 | 用**当前**策略重新判定这个 Grant 仍然有效（锁外检查期间可能发生了重载，见 4.2）；重新读时间，核对 `now ≤ exp + skew` |
+| B1 | 用**当前**策略重新判定这个 Grant 仍然有效（锁外检查期间可能发生了重载，见 4.2），配对入口的 Grant 同样在锁内复查撤销；重新读时间，核对 `now ≤ exp + skew` |
 | B2 | wait：该设备已有 wait 时回 `busy`；否则登记 wait，附上 Grant（含 `pair_until + skew`）。普通 dial：目标没有 wait 回 `unknown-peer`，已配对回 `busy`。配对入口的 dial：`pairing_operator` 没有 wait 回 `unknown-peer`，已配对回 `busy`；wait 的 Grant 没有开放窗口或窗口已过回 `unauthorized`。以上拒绝都不改变任何状态 |
 | B3 | 把连接登记到撤销索引：wait 方在登记时登记，dial 方在配对时登记 |
 
 解锁后再写 `ok`，写失败则清理连接。
+
+**配对后的首字节期限。** 独立 Hub 把 dial 配对给 wait 之后，dial 方须在一个新的 `setup_limits.timeout`（缺省 10 秒）内发出至少一个字节，否则 Hub 关闭两端并释放 wait；Hub 读到首字节即清除期限，此后双方可以长期空闲。这是 6.3「每次占用最长 10 秒」的实际保证：没有它，持有窗口入口或有效票据的对端可以配对后保持静默，无限期占住 Operator 唯一的 wait。
 
 ### 3.5 与契约 §8.4 逐条对照
 
@@ -219,8 +221,8 @@ JSON 格式，UTF-8，至多 64 KiB，按 `settings` 的严格规则解码：未
 
 ### 4.2 启动与重载
 
-- `serve` 启动时依次：严格加载配置，加载身份（缺失即失败），构造策略，监听，然后打印 Hub 指纹、签发者数量、配对入口状态。
-- Unix 上收到 SIGHUP 时重新读取并完整校验配置。新配置不合法时记录错误，**继续使用旧配置**，不会退化到无鉴权。`identity_dir`、`listen`、`mode` 与旧值不同的配置视为不合法，这几项需要重启才能更改。合法时调用 `Server.SetPolicy` 原子替换（4.4），并记录被关闭的 wait 与转发的数量。
+- `serve` 启动时依次：严格加载配置，加载身份（用 `identity.LoadExisting`，只读：私钥缺失即失败，证书缺失或与私钥不符时在内存中重建、不落盘），构造策略，监听，然后打印 Hub 指纹、签发者数量、配对入口状态。
+- Unix 上收到 SIGHUP 时重新读取并完整校验配置。新配置不合法时记录错误，**继续使用旧配置**，不会退化到无鉴权。`identity_dir`、`listen`、`mode`、`setup_limits` 任一与旧值不同的配置视为不合法，这几项需要重启才能更改。合法时调用 `Server.SetPolicy` 原子替换（4.4），并记录被关闭的 wait 与转发的数量。
 - 不监视文件变化，也不支持 Windows 热重载；在 Windows 上重启 Hub 进程即可，已建立的连接随之断开，两端自动重连。
 
 ### 4.3 `renet-hub` 命令行
@@ -231,7 +233,7 @@ JSON 格式，UTF-8，至多 64 KiB，按 `settings` 的严格规则解码：未
 | `renet-hub fingerprint --identity-dir DIR` | 打印已有身份的指纹 |
 | `renet-hub check --config FILE` | 按 4.1 严格校验并检查身份可加载；打印每个签发者的 name、operator 短 ID、kid，以及配对入口状态。不合法时以非零状态退出，错误信息指明字段 |
 | `renet-hub serve --config FILE [--debug]` | 运行 Hub；`--debug` 打开准入拒绝原因的调试日志 |
-| `renet-hub ticket inspect --config FILE --ticket-file FILE` | 运维排障：解码票据并按当前配置和时间逐步执行 A2–A11，输出第一个失败的步骤。只读，不联网。票据从文件读取，避免写进 shell 历史 |
+| `renet-hub ticket inspect --config FILE --ticket-file FILE [--device FP] [--hub-fp FP]` | 运维排障：解码票据并按当前配置和时间离线执行 A2–A7、A9–A11，输出第一个失败的步骤。只读，不联网。票据从文件读取（无填充 base64url 文本，避免写进 shell 历史）。先验签，验签失败时只输出失败步骤与标注 unverified 的 `kid`，不展示票据字段。提供 `--hub-fp` 时不读取 Hub 私钥，可在没有 Hub 身份目录的机器上验票；省略 `--device` 时跳过 A7（外层 TLS 设备比对），对不记名票据还跳过 A11 的设备拒绝检查；A8（路由比对）因没有外层请求总是跳过，输出会逐项注明 |
 
 ### 4.4 `internal/hub` 的行为变化
 
@@ -247,7 +249,7 @@ JSON 格式，UTF-8，至多 64 KiB，按 `settings` 的严格规则解码：未
 
 **结论：每台 Operator 持有一把只能为自己签票的签发密钥，Hub 配置是唯一的信任根。** 不设可以给全 Hub 签票的总密钥。
 
-- 生成：Operator 进入 Hub 模式或执行 `renetd issuer` 时，如果 `state/operator/issuer.key` 不存在，就生成 Ed25519 密钥，以 PKCS#8 PEM 格式、0600 权限、O_EXCL 原子创建；并发创建时，后到者改为读取已有文件。签发密钥与设备身份密钥分开，只用于签票据（契约 §8.1）。
+- 生成：Operator 进入 Hub 模式或执行 `renetd issuer` 时，如果 `<Operator 状态目录>/issuer.key`（即 `state/operator/issuer.key`）不存在，就生成 Ed25519 密钥，以 PKCS#8 PEM 格式、0600 权限创建。发布方式为：先写同目录的临时文件（`O_EXCL`、0600），写完关闭后用硬链接独占发布到最终路径，不会暴露写了一半的文件；并发创建时，后到者（硬链接得到 `EEXIST`）改为读取已有文件。文件系统不支持硬链接（部分网络共享）时回退为 `O_EXCL` 直接创建，读取方对短暂可见的残缺 PEM 做有限次重试。非 Windows 上，读取与写入都要求文件权限不含组和其他位，不满足时报错并给出 `chmod 600` 提示；FAT / exFAT 等不支持 POSIX 权限的文件系统不受支持，错误提示建议把状态目录迁到支持的文件系统。签发密钥与设备身份密钥分开，只用于签票据（契约 §8.1）。
 - 授权：`renetd issuer --state-dir DIR [--name NAME]` 打印一行可以直接粘贴进 `issuers` 的 JSON 条目（`name`、`operator` = 本机设备指纹、`public_key`）。GUI 在 Operator 的 Hub 设置区显示同一条目，并提供复制按钮。
 - 作用域：Hub 按条目里的 `operator` 限制该密钥能签的票据（A9），所以一台 Operator 的密钥泄露不影响 Hub 上的其他 Operator。
 - 离线签发：`renetd invite --state-dir DIR --hub HOST:PORT --hub-fp FP [--ttl D]` 不需要 Operator 进程在运行，也不需要任何中心，直接用状态目录里的密钥签出不记名票据并生成邀请码。它与现有 `renetd invite` 一样，在信任文件锁下写入一次性令牌的哈希。邀请码有效期在 Hub 模式下限制为至多 24 小时。
@@ -263,9 +265,9 @@ JSON 格式，UTF-8，至多 64 KiB，按 `settings` 的严格规则解码：未
 
 | 字段 | direct | hub |
 |---|---|---|
-| `listen` | 必需（现状） | 忽略，不监听任何端口 |
-| `hub.addr` | 忽略 | 必需；Operator 实际连接的 Hub 地址 |
-| `hub.fp` | 忽略 | 必需；外层钉扎用，来自 `renet-hub init` 的输出。不做首次连接时信任（TOFU） |
+| `listen` | 必需（现状） | 不监听任何端口；CLI 与 `app.OperatorConfig` 要求 `Listen` 为空 |
+| `hub.addr` | **必须为空**（版本 2 校验拒绝非空，不是「忽略」） | 必需；Operator 实际连接的 Hub 地址 |
+| `hub.fp` | **必须为空** | 必需；外层钉扎用，来自 `renet-hub init` 的输出。不做首次连接时信任（TOFU） |
 | `endpoint` | 分享地址（现状） | 分享给 Client 的 Hub 公网地址；为空时用 `hub.addr`。例如 Operator 在内网用局域网地址连 Hub，Client 用 DDNS 名 |
 | `bind`、各端口、`exclusive` | 不变 | 不变 |
 
@@ -281,21 +283,23 @@ CLI：`renetd operator --hub HOST:PORT --hub-fp FP [--share-address HOST:PORT]`�
 
 ### 6.3 发码与配对窗口
 
-Hub 模式下生成数字码（R2 的 `pairing.Manager` 不变）之后，Operator 调用 `Connector.Refresh()`，丢弃尚未收到任何字节的空闲 wait，用带 `pair_until` = 码截止时间的新 wait 票重新注册。码被兑换、撤销或作废时，再 `Refresh()` 一次，注册不带窗口的 wait；码自然到期时，窗口由 Hub 按时间关闭，不需要额外动作。
+Hub 模式下生成数字码（R2 的 `pairing.Manager` 不变）之后，Operator 调用 `Connector.Refresh()`，丢弃尚未收到任何字节的空闲 wait（含正在签票或等待重试的注册），用带 `pair_until` = 码截止时间的新 wait 票重新注册。码被兑换、撤销或作废时，再 `Refresh()` 一次，注册不带窗口的 wait；码自然到期时，窗口由 Hub 按时间关闭，不需要额外动作。
 
+- 注册结果通过 `transport/hub` 的 `Options.OnRegister(hub, token, err)` 异步通知 Operator：每次注册尝试结束时调用一次，`token` 是该次所用 wait 票的副本（签发失败时为 nil），`err` 为 nil 表示 Hub 已确认；回调在独立协程里执行、不持有连接器的锁，多次调用之间不保证顺序，Close 之后也可能到达，因此必须快速返回。Operator 据此判断窗口是否被接受，并更新「已在 Hub 等待」状态（`Snapshot.HubWaiting`）。
 - 如果带窗口的注册得到 `unauthorized`（Hub 未设置 `pairing_operator`，或者指向的是别的 Operator），Operator 撤销该码，原因记为「Hub 未为本机开放数字配对」，并立即注册不带窗口的 wait。这样 Operator 保持可达，界面给出明确原因。
 - 正在会话中时没有空闲 wait，`Refresh()` 什么也不做；码要等当前会话结束、重新注册后才能使用。这与直连模式下内嵌 Hub 的单活动槽语义一致。
-- 窗口期内，任何知道 Hub 地址的人都能经配对入口占用这个 wait。占用者在内层面对的是 R2 的猜码预算，每次占用最长 10 秒（内层 setup 时限）；Hub 另有全局 setup 限流。这与直连模式下公网入口的暴露相当，但只在发码期间存在。
+- 窗口期内，任何知道 Hub 地址的人都能经配对入口占用这个 wait。占用者在内层面对的是 R2 的猜码预算，每次占用最长 10 秒：配对后 10 秒内必须发出首字节（3.4 的首字节期限，否则 Hub 关闭两端），之后受内层 setup 时限约束；Hub 另有全局 setup 限流。这与直连模式下公网入口的暴露相当，但只在发码期间存在。
+- GUI 生成的 Hub 邀请码有效期固定为 15 分钟（`renetd invite --ttl` 缺省同为 15 分钟，Hub 模式至多 24 小时，见第 5 节）。
 - 关闭 wait 与 Hub 刚把 dial 配对给它之间存在竞态：这时 Client 收到 EOF，按退避重试即可。`Refresh` 不会关闭已经开始内层握手的连接。
 
 ### 6.4 设备票下发：消息 17 `HubTicket`
 
 新增控制消息 17 `HubTicket`（Operator → Client，正文键 1 为字节串票据，≤ 1024 字节），以及 Hello 能力 `hub-ticket/1`。
 
-- Client 总是声明 `hub-ticket/1`。Operator 只在 Hub 模式下、且持有签发密钥时声明。
-- 双方协商出该能力时，Operator 在握手的最后一步发出 17：在已信任 Client 的 PairResult、原始邀请令牌的 PairResult(true)、或数字配对的 16 accepted 之后。Client 在 `session.Run` 返回之前读取并校验这条消息。校验不签名（Client 不知道签发公钥，验签由 Hub 完成），只用于防止保存无用或错位的票据：`v == 2`、role = dial、非不记名、`dev` = 本机指纹、`peer` = 内层对端指纹、`hub` = 本次连接所用端点的 Hub 指纹、`exp` 晚于当前时间。校验失败时，按「无法取得 Hub 授权」结束本次连接。
+- Client 总是声明 `hub-ticket/1`（因此直连 Hello 的原始字节与此前版本不同；配对 CI 按各自实际收到的原始 Hello 帧计算哈希，兼容旧端）。Operator 只在 Hub 模式下、且持有签发密钥（`session.Options.GrantTicket` 非 nil）时声明。
+- 双方协商出该能力时，Operator **在提交配对之前**先预签设备票：消耗一次性令牌、写入信任或兑换数字码都发生在签发成功之后。签发失败时 Operator 以 `session.ReasonHubTicket` 拒绝（PairResult 或 16 的原因为 `hub_ticket`），令牌不被消耗，Client 可以用同一邀请码重试。预签成功后，消息 17 仍在握手末尾发出：在已信任 Client 的 PairResult、原始邀请令牌的 PairResult(true)、或数字配对的 16 accepted 之后。Client 在 `session.Run` 返回之前读取并校验这条消息。Client 侧 session 选项为 `EndpointHub`（本次所用端点的 Hub 指纹，用于核对票据的 `hub`）与 `RequireHubTicket`（使用不记名邀请时置位：若未协商出 `hub-ticket/1`，以 `ReasonHubTicket` 失败，避免带着很快过期的不记名票保存配对）。校验不签名（Client 不知道签发公钥，验签由 Hub 完成），只用于防止保存无用或错位的票据：`v == 2`、role = dial、非不记名、`dev` = 本机指纹、`peer` = 内层对端指纹、`hub` = 本次连接所用端点的 Hub 指纹、`exp` 晚于当前时间。校验失败时，按「无法取得 Hub 授权」结束本次连接。
 - 旧版 Client 不声明该能力，Operator 也就不发送。即使收到未知编号，旧版 session 也只会跳过。
-- Operator 签发失败（例如签发密钥读取失败）时结束会话，并在运行诊断中记录。
+- Operator 签发失败（例如签发密钥读取失败）时按上述方式拒绝并结束会话，日志只记录 Client 短 ID，不含密钥路径或票据内容；应用层把本机签发密钥不可用单独分类为 `hub_issuer`（第 9 节）。
 - 日志只记录 Client 短 ID、`jti` 和 `exp`，便于自建者按 `jti` 或设备撤销。
 
 ## 7. Client 流程
@@ -306,7 +310,7 @@ Hub 模式下生成数字码（R2 的 `pairing.Manager` 不变）之后，Operat
 
 Hub 模式下的邀请码：Peer.ID = Operator 指纹；端点为 `{hub, 分享地址, Hub 指纹, 不记名票据}`；附一次性令牌和有效期。
 
-Client 的流程：外层钉住邀请码里的 Hub 指纹，dial 的 target = Operator 指纹，token = 不记名票据；内层 Expect = Operator 指纹；走现有的 PairToken 流程；收到 17 后保存对端，端点的 token 换成设备票，界面报告已连接。**如果所用端点的票据是不记名的，而握手没有带回有效的 17**，Client 不保存对端，以「无法取得 Hub 授权」结束：带着很快过期的不记名票保存配对，只会让下一次重连失败。
+Client 的流程：外层钉住邀请码里的 Hub 指纹，dial 的 target = Operator 指纹，token = 不记名票据；内层 Expect = Operator 指纹；走现有的 PairToken 流程；收到 17 后保存对端，端点的 token 换成设备票，界面报告已连接。**如果所用端点的票据是不记名的，而握手没有带回有效的 17**，Client 不保存对端，以「无法取得 Hub 授权」结束：带着很快过期的不记名票保存配对，只会让下一次重连失败。多端点邀请中，只把成功换得的设备票持久化到与本次路径（Hub 指纹加地址）匹配的端点，保留没有票据的端点（例如直连端点），丢弃其他未兑换的不记名票据；换得的设备票找不到匹配端点时同样按「无法取得 Hub 授权」处理。
 
 ### 7.2 「Hub 地址 + 8 位码」
 
@@ -326,8 +330,9 @@ Client 的流程：外层钉住邀请码里的 Hub 指纹，dial 的 target = Op
 ### 7.3 已保存配对的重连与续期
 
 - `transport.Endpoint` 新增 `Ticket string`，存放不透明的票据字节；用 string 是为了保持 Endpoint 可比较。`Connector.Dial` 对每个端点把它的 Ticket 作为 token 发出；内嵌 Hub 端点的 Ticket 为空。
-- 拨号前，Client 用不验签的解析读取所存票据的 `exp`，已过期就不再联网，直接显示「Hub 授权已到期或被撤销」。这只用于界面提示，准入仍以 Hub 的判定为准。
-- 连接成功并收到 17 之后，用新票替换本次所用端点的票据，在信任文件锁下原子写入。
+- 拨号前，Client 用不验签的解析读取所存票据的 `exp`，已过期的端点不再联网；所有候选端点都过期（且没有无票端点）时直接显示「Hub 授权已到期或被撤销」。只要还有别的可用端点，就继续用它们。这只用于界面提示，准入仍以 Hub 的判定为准。
+- 连接成功并收到 17 之后，用新票替换本次所用端点的票据：按 `PathInfo.Hub` 加 `PathInfo.Via` 定位端点，调用 `trust.Store.UpdateEndpointTicket(ctx, peer, hub, addr, ticket)` 在信任文件锁下原子写入；定位不到唯一端点则报错。
+- 判定授权失效：Hub 对持票 dial 回 `unauthorized` 只在**全部候选端点**都被拒绝授权时才停止重试并显示授权失效；只要有一个端点仍可重试（网络错误、`busy`、`unknown-peer` 等），就继续按退避重试，避免一条被撤销的路径让其他可用路径一并停摆。
 - `transport.PathInfo` 新增 `Hub`（外层钉住的指纹），用来确定本次所用的端点，并在界面上显示「经 Hub」。
 
 ### 7.4 存储
@@ -338,10 +343,10 @@ Client 的流程：外层钉住邀请码里的 Hub 指纹，dial 的 target = Op
 
 **R3 交付：**
 
-1. **配置。** `settings` 升为版本 2。顶层新增 `center: {"id": "", "api": []}`，两种角色共用。`id` 符合契约 §1 的 `[a-z0-9.-]{1,32}`；`api` 为 1–4 个绝对 `https://` URL，不含用户信息、查询和片段，每个至多 256 字节；`id` 为空当且仅当 `api` 为空。同一次升级加入 6.1 的 `operator.mode` 与 `operator.hub`。`Load` 读入版本 1 时在内存中补齐缺省值（`mode = "direct"`、`hub` 为空、`center` 为空）；读入版本 2 时按严格规则解码。`Save` 总是写版本 2，旧版程序读到后报「不支持的版本」，不会误读。社区构建的缺省中心为空；官方发行版通过构建参数注入缺省值（`-ldflags -X`，只在发行层配置，代码不分叉）。
+1. **配置。** `settings` 升为版本 2。顶层新增 `center: {"id": "", "api": []}`，两种角色共用。`id` 符合契约 §1 的 `[a-z0-9.-]{1,32}`；`api` 为 1–4 个绝对 `https://` URL，不含用户信息、查询和片段，每个至多 256 字节；`id` 为空当且仅当 `api` 为空。同一次升级加入 6.1 的 `operator.mode` 与 `operator.hub`。`Load` 读入版本 1 时在内存中补齐缺省值（`mode = "direct"`、`hub` 为空、`center` 取构建期缺省中心，社区构建为空）；读入版本 2 时按严格规则解码，其中显式保存的空中心优先于构建期缺省值。`Save` 总是写版本 2；旧版程序读版本 2 会报未知字段而拒绝加载（结果同样是拒绝，不会误读）。社区构建的缺省中心为空；官方发行版通过构建参数注入缺省值（`-ldflags -X`，只在发行层配置，代码不分叉）。
 2. **显式切换。** 中心与 `Client.Peer` 一样由控制器管理：`Save` 始终合入当前已保存的中心，表单不能顺带修改它；切换只能通过 `Controller.SetCenter(ctx, center)`，界面上经过确认对话框，并且只能在空闲时执行。
 3. **显示。** Client 与 Operator 的状态区显示「中心：未配置」或中心 ID，连接详情另外显示「连接方式：直连 / 经 Hub（地址、短指纹）」。自建 Hub 不是中心，两者分开显示。
-4. **核对。** 新包 `internal/center` 只实现无需签名的 `GET /v1/meta`。界面提供「检查中心」：逐个入口请求，单次超时 10 秒（契约 §14 的 `fallback_attempt_timeout`），核对返回的 `center_id` 与配置一致，结果按入口显示为已验证、不可达或标识不一致。只读，不发送任何身份信息，不保存结果。
+4. **核对。** 新包 `internal/center` 只实现无需签名的 `GET /v1/meta`。界面提供「检查中心」：逐个入口请求，单次超时 10 秒（契约 §14 的 `fallback_attempt_timeout`，逐入口各自计时），核对返回的 `center_id` 与配置一致，结果按入口显示为已验证、不可达或标识不一致。请求携带 `Renet-Client: <role>/<app_version>` 头（非 SemVer 的构建发送 `0.0.0-dev`），拒绝重定向，要求校验证书的 TLS，不带任何凭据。只读，不发送任何身份信息，不保存结果。
 5. **隔离规则（写入文档，R5 执行）。** 中心相关的状态一律存放在 `state/<role>/centers/<center_id>/` 下。直连与自建 Hub 的信任（`state/<role>/trust.json`）不随中心切换而变化，中心模式也不读取它。切换中心不迁移、不删除任何状态。设备身份仍为每个角色一份。
 6. **只有 8 位码的输入。** 配置了中心时，提示「暂不支持中心数字码」；未配置时，沿用 R2 的提示「请输入直连地址和端口」。不联网。
 
@@ -362,6 +367,7 @@ Client 的流程：外层钉住邀请码里的 Hub 指纹，dial 的 target = Op
 | 配对入口被拒（窗口未开或已过） | Client | 停止 | Code unavailable（R2 已有） | 数字码不可用 | 數字碼無法使用 |
 | `unknown-peer` | Client | 退避重试 | Operator offline | Operator 不在线 | Operator 不在線 |
 | `busy` | Client | 退避重试 | Operator busy（R2 已有） | Operator 忙 | Operator 忙碌中 |
+| 本机签发密钥不可用（读取或创建失败、权限不符） | Operator | 启动时读取失败则启动报错；运行中签 wait 票失败则在状态里显示该原因 | Issuer key on this device is unavailable. Check the state directory and file permissions. | 本机 Hub 签发密钥不可用，请检查状态目录与文件权限 | 本機 Hub 簽發金鑰無法使用，請檢查狀態目錄與檔案權限 |
 | 握手缺少 17，或 17 不合格 | Client | 停止，不保存 | Could not obtain hub authorization | 无法取得 Hub 授权 | 無法取得 Hub 授權 |
 | PAKE 失败（含 Hub 被替换） | Client | 同 R2 | Incorrect code or connection tampered（R2 已有） | 数字码不正确或连接被篡改 | 數字碼不正確或連線遭竄改 |
 | 设置界面 | Operator | — | Connection mode / Direct / Self-hosted hub / Hub address / Hub fingerprint / Hub authorization entry / Copy entry | 连接方式 / 直连 / 自建 Hub / Hub 地址 / Hub 指纹 / Hub 授权条目 / 复制条目 | 連線方式 / 直連 / 自建 Hub / Hub 位址 / Hub 指紋 / Hub 授權條目 / 複製條目 |
@@ -401,25 +407,25 @@ R3 不改变中心模式的任何字段、步骤或参数。以下修订已于 2
 
 ## 12. 实现任务
 
-每项都是一个可以独立提交的 commit，只改列出的包（及其测试和 `go.mod`）。每个提交都必须单独通过 `gofmt -l .`（无输出）、`go build ./...`、`go vet ./...`，并通过所改包的 `go test`。签名为草案，最终由整合者在 `docs/CONTRACTS.md` 中冻结。
+每项都是一个可以独立提交的 commit，只改列出的包（及其测试和 `go.mod`）。每个提交都必须单独通过 `gofmt -l .`（无输出）、`go build ./...`、`go vet ./...`，并通过所改包的 `go test`。「对外接口草案」一列保留设计时的草案；冻结后的签名以 [CONTRACTS · R3](CONTRACTS.md#r3-自建-hub-与中心地址配置2026-11-20-冻结) 与代码为准（实现与草案的差异：T9 另有 `EndpointHub`、`RequireHubTicket`、`Now`；T13 的 `FetchMeta` / `Check` 增加 `role`、`appVersion` 参数，`Meta` 增加 `MinAppVersion`；T5 增加 `Options.OnRegister`）。
 
-| # | 标题与包 | 对外接口草案 | 依赖 |
-|---|---|---|---|
-| T1 | `feat(ticket): 自建票据编解码、签名与签发密钥`，新包 `internal/ticket` | `type Kid [8]byte`；`KidOf(ed25519.PublicKey) Kid`；`type Claims struct{ Device, Peer, Hub identity.Fingerprint; Role uint8; IssuedAt, NotBefore, Expires, PairUntil time.Time; JTI [16]byte; Bearer bool }`；`Sign(ed25519.PrivateKey, Claims) ([]byte, error)`（签名前先按 3.2 校验）；`Verify(raw []byte, key func(Kid) (ed25519.PublicKey, bool)) (Kid, Claims, error)`（A2–A5，不含时间与路由）；`Inspect(raw []byte) (Kid, Claims, error)`（不验签，供 Client 提示与运维工具使用）；`LoadOrCreateIssuer(path string) (*Issuer, error)`；`(*Issuer).PublicKey()`、`Kid()`、`Wait(now time.Time, dev, hub identity.Fingerprint, pairUntil time.Time) ([]byte, error)`、`Dial(now time.Time, client, operator, hub identity.Fingerprint) ([]byte, error)`、`Bootstrap(now, expires time.Time, operator, hub identity.Fingerprint) ([]byte, [16]byte, error)`；常量 `WaitTTL = 10 * time.Minute`、`DialTTL = 30 * 24 * time.Hour` | 无 |
-| T2 | `feat(hub): 准入策略、配对入口与重载撤销`，`internal/hub`，同时修改依赖开放中继的测试 | `type Grant struct{ Ref any; Expires, PairingUntil time.Time }`；`type Policy interface{ Admit(dev identity.Fingerprint, req Request, now time.Time) (Grant, error); Valid(g Grant, dev identity.Fingerprint) bool; PairingOperator() identity.Fingerprint }`；`Options.Policy`、`Options.Now`；删除 `Authorize` / `AuthorizeToken`；`(*Server).SetPolicy(Policy)`；独立 Hub 无策略时 `Serve` 报错；同步改写 `PROTOCOL.md` | 无 |
-| T3 | `feat(hubauth): 自建 Hub 配置与准入策略`，新包 `internal/hubauth` | `type Config struct{…}`（字段见 4.1）；`Load(path string) (Config, error)`；`(Config).Validate() error`；`NewPolicy(cfg Config, hub identity.Fingerprint) (*Policy, error)`，实现 `hub.Policy`；`(Config).ReloadCompatible(old Config) error`；`Explain(cfg Config, hub identity.Fingerprint, raw []byte, dev identity.Fingerprint, now time.Time) error`，供 `inspect` 返回第一个失败的步骤 | T1、T2 |
-| T4 | `feat(renet-hub): 独立 Hub 命令`，新目录 `cmd/renet-hub` | 子命令 `init`、`fingerprint`、`check`、`serve`、`ticket inspect`（4.3）；Unix 上 SIGHUP 时调用 `Load`、`ReloadCompatible`、`NewPolicy`、`SetPolicy`；信号接线放在带构建约束的文件中 | T3 |
-| T5 | `feat(transport): 端点票据、wait 现签与引导拨号`，`internal/transport`、`internal/transport/hub` | `Endpoint.Ticket string`；`PathInfo.Hub identity.Fingerprint`；`hubtransport.Options.WaitToken func(ctx context.Context, hub identity.Fingerprint) ([]byte, error)`，替换静态的 `Options.Token`；`(*Connector).Refresh()`；`(*Connector).DialBootstrap(ctx context.Context, addr string) (transport.Session, identity.Fingerprint, error)`（返回会话与外层 H，内层 Expect 为零，按 O 是否等于 H 设定 Path）。保留 `DialDirectPair`，T9 迁移完调用方后删除 | T2（测试使用策略） |
-| T6 | `feat(trust): 信任文件版本 2 保存端点票据`，`internal/trust` | `SavePeer` / `Peer` / `ReadPeer` 透传 `Endpoint.Ticket`；按 7.4 选择写入的版本 | T5 |
-| T7 | `feat(invite): 邀请码版本 2 携带端点票据`，`internal/invite` | `Invite.Version` 可为 2；`Encode` 在有票据时要求版本 2、无票据时要求版本 1；`Decode` 接受 1 和 2 | T5 |
-| T8 | `feat(cpace): pair-hub/1 的 CI 绑定 Hub 指纹`，`internal/pairing/cpace`、`internal/proto` | `cpace.Binding` 增加 `Capability string` 与 `HubFP [32]byte`（`pair-direct/1` 时必须为零，`pair-hub/1` 时必须非零）；`proto.PairHubCapability = "pair-hub/1"`、`proto.HubTicketCapability = "hub-ticket/1"`、`TypeHubTicket = 17`、`HubTicket{Ticket []byte}`，严格读取，上限 1100 字节；补充应用向量 | 无 |
-| T9 | `feat(session): 经 Hub 的数字配对与设备票下发`，`internal/session` | `Options.HubFP identity.Fingerprint`（非零时数字配对只用 `pair-hub/1`）；`Options.GrantTicket func(client identity.Fingerprint) ([]byte, error)`（Operator；非 nil 时声明 `hub-ticket/1`）；Client 总是声明 `hub-ticket/1`；`(*Session).HubTicket() []byte`；17 的校验按 6.4 进行，失败归类为新的 `ReasonHubTicket` | T1、T8 |
-| T10 | `feat(settings): 配置版本 2，加入 Hub 模式与中心`，`internal/settings` | `Operator.Mode`、`Operator.Hub{Addr, FP}`；顶层 `Center{ID string; API []string}`；`Load` 升级版本 1；`Save` 写版本 2；缺省中心来自构建期变量 | 无 |
-| T11 | `feat(app): Operator Hub 模式与 Client 经 Hub 配对`，`internal/app`、`cmd/renetd` | `type HubConfig struct{ Addr string; FP identity.Fingerprint }`；`OperatorConfig.Hub *HubConfig`；`InviteConfig.Hub *HubConfig`；`IssuerEntry(ctx context.Context, stateDir, name string) (string, error)`；Operator 发码、撤销与兑换后调用 `Refresh`，并处理窗口被拒；Client 改用 `DialBootstrap` 并按 7.2 选择能力，保存、续期票据，本地检查到期，并分类错误；删除 `DialDirectPair`；`renetd operator --hub/--hub-fp/--share-address`、`renetd issuer`、`renetd invite --hub/--hub-fp` | T5、T6、T7、T9 |
-| T12 | `feat(desktop): Hub 模式设置、授权条目与中心显示`，`internal/desktop`、`internal/desktopui`、`internal/locales`、`internal/checkup` | `Controller.SetCenter(ctx context.Context, c settings.Center) error`；`Controller.IssuerEntry(ctx context.Context) (string, error)`；State 增加 Hub 等待状态与路径；补全第 9 节文案和错误映射；数字配对持久化的核对改为匹配 Hub 端点（`Hub != ID`，带 Ticket）；自检只做 Hub 外层钉扎检查 | T10、T11 |
-| T13 | `feat(center): 中心 meta 核对`，新包 `internal/center`，加上 desktop 的「检查中心」 | `type Meta struct{ CenterID string; APIVersions []string; ServerTime time.Time }`；`FetchMeta(ctx context.Context, client *http.Client, entry string) (Meta, error)`；`Check(ctx context.Context, c settings.Center) []EntryResult`；响应体上限 16 KiB。可以独立推迟，不阻塞 T1–T12 | T10、T12 |
-| T14 | `test(integration): 自建 Hub 端到端矩阵`，`internal/integration` | 第 10 节「端到端」的 ① 至 ⑩ | T3、T11 |
-| T15 | `docs: 自建 Hub 契约同步`，`docs/CONTRACTS.md`、`docs/DEPLOYMENT-MODES.md`、`docs/ROADMAP.md`、`internal/proto/README.md` | 冻结 T1–T13 的签名；更新部署模式的状态表与第 3 节的入口表；第 11 节的契约修订交给负责人决定 | T1–T14 |
+| # | 标题与包 | 对外接口草案 | 依赖 | 状态与提交 |
+|---|---|---|---|---|
+| T1 | `feat(ticket): 自建票据编解码、签名与签发密钥`，新包 `internal/ticket` | `type Kid [8]byte`；`KidOf(ed25519.PublicKey) Kid`；`type Claims struct{ Device, Peer, Hub identity.Fingerprint; Role uint8; IssuedAt, NotBefore, Expires, PairUntil time.Time; JTI [16]byte; Bearer bool }`；`Sign(ed25519.PrivateKey, Claims) ([]byte, error)`（签名前先按 3.2 校验）；`Verify(raw []byte, key func(Kid) (ed25519.PublicKey, bool)) (Kid, Claims, error)`（A2–A5，不含时间与路由）；`Inspect(raw []byte) (Kid, Claims, error)`（不验签，供 Client 提示与运维工具使用）；`LoadOrCreateIssuer(path string) (*Issuer, error)`；`(*Issuer).PublicKey()`、`Kid()`、`Wait(now time.Time, dev, hub identity.Fingerprint, pairUntil time.Time) ([]byte, error)`、`Dial(now time.Time, client, operator, hub identity.Fingerprint) ([]byte, error)`、`Bootstrap(now, expires time.Time, operator, hub identity.Fingerprint) ([]byte, [16]byte, error)`；常量 `WaitTTL = 10 * time.Minute`、`DialTTL = 30 * 24 * time.Hour` | 无 | 已完成：`e24994b`；后续 `6fa51fa`、`3a4429d`、`4060ba7` |
+| T2 | `feat(hub): 准入策略、配对入口与重载撤销`，`internal/hub`，同时修改依赖开放中继的测试 | `type Grant struct{ Ref any; Expires, PairingUntil time.Time }`；`type Policy interface{ Admit(dev identity.Fingerprint, req Request, now time.Time) (Grant, error); Valid(g Grant, dev identity.Fingerprint) bool; PairingOperator() identity.Fingerprint }`；`Options.Policy`、`Options.Now`；删除 `Authorize` / `AuthorizeToken`；`(*Server).SetPolicy(Policy)`；独立 Hub 无策略时 `Serve` 报错；同步改写 `PROTOCOL.md` | 无 | 已完成：`6936e5a`；后续 `4d353b6`（首字节期限） |
+| T3 | `feat(hubauth): 自建 Hub 配置与准入策略`，新包 `internal/hubauth` | `type Config struct{…}`（字段见 4.1）；`Load(path string) (Config, error)`；`(Config).Validate() error`；`NewPolicy(cfg Config, hub identity.Fingerprint) (*Policy, error)`，实现 `hub.Policy`；`(Config).ReloadCompatible(old Config) error`；`Explain(cfg Config, hub identity.Fingerprint, raw []byte, dev identity.Fingerprint, now time.Time) error`，供 `inspect` 返回第一个失败的步骤 | T1、T2 | 已完成：`902a7d1` |
+| T4 | `feat(renet-hub): 独立 Hub 命令`，新目录 `cmd/renet-hub` | 子命令 `init`、`fingerprint`、`check`、`serve`、`ticket inspect`（4.3）；Unix 上 SIGHUP 时调用 `Load`、`ReloadCompatible`、`NewPolicy`、`SetPolicy`；信号接线放在带构建约束的文件中 | T3 | 已完成：`4c7b86d`；配套 `59124ec`（只读身份加载）、`6465a63`、`aa4900a`（inspect） |
+| T5 | `feat(transport): 端点票据、wait 现签与引导拨号`，`internal/transport`、`internal/transport/hub` | `Endpoint.Ticket string`；`PathInfo.Hub identity.Fingerprint`；`hubtransport.Options.WaitToken func(ctx context.Context, hub identity.Fingerprint) ([]byte, error)`，替换静态的 `Options.Token`；`(*Connector).Refresh()`；`(*Connector).DialBootstrap(ctx context.Context, addr string) (transport.Session, identity.Fingerprint, error)`（返回会话与外层 H，内层 Expect 为零，按 O 是否等于 H 设定 Path）。保留 `DialDirectPair`，T11 迁移完调用方后删除 | T2（测试使用策略） | 已完成：`fc26b17`；后续 `b7b6876`（`OnRegister`） |
+| T6 | `feat(trust): 信任文件版本 2 保存端点票据`，`internal/trust` | `SavePeer` / `Peer` / `ReadPeer` 透传 `Endpoint.Ticket`；按 7.4 选择写入的版本 | T5 | 已完成：`c8f7bc9` |
+| T7 | `feat(invite): 邀请码版本 2 携带端点票据`，`internal/invite` | `Invite.Version` 可为 2；`Encode` 在有票据时要求版本 2、无票据时要求版本 1；`Decode` 接受 1 和 2 | T5 | 已完成：`42b242c` |
+| T8 | `feat(cpace): pair-hub/1 的 CI 绑定 Hub 指纹`，`internal/pairing/cpace`、`internal/proto` | `cpace.Binding` 增加 `Capability string` 与 `HubFP [32]byte`（`pair-direct/1` 时必须为零，`pair-hub/1` 时必须非零）；`proto.PairHubCapability = "pair-hub/1"`、`proto.HubTicketCapability = "hub-ticket/1"`、`TypeHubTicket = 17`、`HubTicket{Ticket []byte}`，严格读取，上限 1100 字节；补充应用向量 | 无 | 已完成：`e3ee91d` |
+| T9 | `feat(session): 经 Hub 的数字配对与设备票下发`，`internal/session` | `Options.HubFP identity.Fingerprint`（非零时数字配对只用 `pair-hub/1`）；`Options.GrantTicket func(client identity.Fingerprint) ([]byte, error)`（Operator；非 nil 时声明 `hub-ticket/1`）；Client 总是声明 `hub-ticket/1`；`(*Session).HubTicket() []byte`；17 的校验按 6.4 进行，失败归类为新的 `ReasonHubTicket` | T1、T8 | 已完成：`b4b07e6`；后续 `2b56ef2`（先签后提交） |
+| T10 | `feat(settings): 配置版本 2，加入 Hub 模式与中心`，`internal/settings` | `Operator.Mode`、`Operator.Hub{Addr, FP}`；顶层 `Center{ID string; API []string}`；`Load` 升级版本 1；`Save` 写版本 2；缺省中心来自构建期变量 | 无 | 已完成：`d50c84f` |
+| T11 | `feat(app): Operator Hub 模式与 Client 经 Hub 配对`，`internal/app`、`cmd/renetd` | `type HubConfig struct{ Addr string; FP identity.Fingerprint }`；`OperatorConfig.Hub *HubConfig`；`InviteConfig.Hub *HubConfig`；`IssuerEntry(ctx context.Context, stateDir, name string) (string, error)`；Operator 发码、撤销与兑换后调用 `Refresh`，并处理窗口被拒；Client 改用 `DialBootstrap` 并按 7.2 选择能力，保存、续期票据，本地检查到期，并分类错误；删除 `DialDirectPair`；`renetd operator --hub/--hub-fp/--share-address`、`renetd issuer`、`renetd invite --hub/--hub-fp` | T5、T6、T7、T9 | 已完成：`1421e7f`；后续 `3fb3fb8`、`abd565c`。`DialDirectPair` 在本项删除 |
+| T12 | `feat(desktop): Hub 模式设置、授权条目与中心显示`，`internal/desktop`、`internal/desktopui`、`internal/locales`、`internal/checkup` | `Controller.SetCenter(ctx context.Context, c settings.Center) error`；`Controller.IssuerEntry(ctx context.Context) (string, error)`；State 增加 Hub 等待状态与路径；补全第 9 节文案和错误映射；数字配对持久化的核对改为匹配 Hub 端点（`Hub != ID`，带 Ticket）；自检只做 Hub 外层钉扎检查 | T10、T11 | 已完成：`25d44e6`；文案 `e7a7955` |
+| T13 | `feat(center): 中心 meta 核对`，新包 `internal/center`，加上 desktop 的「检查中心」 | `type Meta struct{ CenterID string; APIVersions []string; ServerTime time.Time }`；`FetchMeta(ctx context.Context, client *http.Client, entry string) (Meta, error)`；`Check(ctx context.Context, c settings.Center) []EntryResult`；响应体上限 16 KiB。可以独立推迟，不阻塞 T1–T12 | T10、T12 | 已完成：`bd6f7c0`；后续 `37ae4db`（`Renet-Client` 头） |
+| T14 | `test(integration): 自建 Hub 端到端矩阵`，`internal/integration` | 第 10 节「端到端」的 ① 至 ⑩ | T3、T11 | 已完成：`979b1f9`、`6eb35a0`、`2c0d7a4`、`2a55a8b` |
+| T15 | `docs: 自建 Hub 契约同步`，`docs/CONTRACTS.md`、`docs/DEPLOYMENT-MODES.md`、`docs/ROADMAP.md`、`internal/proto/README.md` | 冻结 T1–T13 的签名；更新部署模式的状态表与第 3 节的入口表；第 11 节的契约修订交给负责人决定 | T1–T14 | 已完成：本次文档同步（见各文档的 git 提交） |
 
 依赖顺序：T1、T2、T8、T10 可以并行；T3 依赖 T1 和 T2；T4 依赖 T3；T5 依赖 T2；T6、T7 依赖 T5；T9 依赖 T1 和 T8；T11 依赖 T5、T6、T7、T9；T12 依赖 T10 和 T11；T13 依赖 T12；T14 依赖 T3 和 T11；最后是 T15。T2 改变了无策略时内嵌 Hub 的行为，必须在同一个提交里修改所有依赖开放中继的测试（`internal/hub`、`internal/transport/hub`、`internal/integration`，以及使用独立 Hub 的命令测试）。
 
@@ -429,3 +435,66 @@ R3 不改变中心模式的任何字段、步骤或参数。以下修订已于 2
 
 1. **R3 是否提供经 Hub 的「地址 + 8 位码」。** 推荐**提供**，采用第 6.3 节的方案：配置中指定一台 Operator，由它签名的窗口只在发码期间开放配对入口。理由：没有这个入口，自建用户只能使用长邀请码，失去 R2 刚做好的口述体验；配对入口是唯一不需要票据就能到达 Operator 的路由，但它只对一台指定的 Operator、只在码有效期内开放，暴露程度不超过直连模式，同时 Hub 指纹写入 CI，可以发现伪造的 Hub。不提供的话，可以删去 A0、键 15、`pairing_operator`、`Refresh` 和 `pair-hub/1`，工作量减少约四分之一。
 2. **签发私钥放在 Operator 机器上，R3 不支持私钥完全离线的手工模式。** 推荐**接受**。理由见第 5 节：设备票必须在首次配对后才能签出，手工模式意味着每次首次配对和每 30 天的续期都要人工往返；按 Operator 限定作用域之后，签发密钥泄露的影响不超过同一台机器上设备私钥泄露的影响。若需要手工模式，可以作为后续项增加 Client 导入票据文件和 `renet-hub ticket sign`，不影响本设计的票据格式。
+
+## 14. 实现记录与审查处理
+
+实现于 2026-11-20 完成，提交范围为 `ebc98d6..HEAD`，任务与提交对应关系见第 12 节。离线测试全部通过；人工台架验收（第 10 节最后一行）尚未执行，因此本文状态为「已实现，台架验收待执行」。
+
+### 14.1 与设计稿不同的实现细节
+
+设计稿在实现与审查中修订的地方都已写入各节正文，这里只列清单，便于对照：
+
+| 位置 | 修订 |
+|---|---|
+| 3.4 A0 | target 等于 Hub 指纹的请求一律走配对入口，带 token 直接拒绝；配对入口在锁内也复查撤销；A11 对所有票据类型检查 |
+| 3.4 末尾 | 新增配对后首字节期限（`setup_limits.timeout`，缺省 10 秒） |
+| 4.2 / 4.3 | 重载时 `setup_limits` 也需重启；`ticket inspect` 新增 `--hub-fp`、先验签、逐项注明跳过的步骤；身份用 `identity.LoadExisting` 只读加载 |
+| 5 | 签发密钥的发布方式（硬链接独占发布，不支持时回退 `O_EXCL`）与权限检查 |
+| 6.1 | 直连模式下 `hub` 字段必须为空 |
+| 6.3 / 6.4 | `OnRegister` 异步通知；先预签设备票再提交配对；`EndpointHub`、`RequireHubTicket`；Client 总是声明 `hub-ticket/1` |
+| 7.1 / 7.3 | 多端点邀请只持久化换得的设备票；续期按 `PathInfo.Hub` + `PathInfo.Via` 定位；全部候选端点都被拒才判定授权失效 |
+| 8 | 版本 1 升级使用构建期缺省中心；`Renet-Client` 头、拒绝重定向、逐入口 10 秒 |
+| 9 | 新增 `hub_issuer`（本机签发密钥不可用） |
+
+### 14.2 独立审查与处理
+
+实现期间做了两轮独立只读审查（DeepSeek）。每条意见的结论如下，「修复」均带回归测试。
+
+第一批：
+
+| 编号 | 意见 | 处理 |
+|---|---|---|
+| M1 | 中心没有纳入 `Save` 的合并，表单保存可能顺带改写中心 | 修复（T12，`25d44e6`）：`Save` 始终合入当前已保存的中心，切换只走 `Controller.SetCenter` |
+| M2 | 文件系统不支持硬链接时签发密钥无法创建 | 修复（`6fa51fa`）：硬链接返回不支持或无权限时回退为 `O_EXCL` 直接创建，读取方对短暂的残缺 PEM 做有限次重试 |
+| L1 | 票据解码接受非最短编码的 CBOR | 修复（`6fa51fa`）：严格校验确定性编码，非最短编码一律拒绝 |
+| L2 | 签发密钥读取时不检查权限 | 修复（`6fa51fa` 读取时检查，`3a4429d` 扩展到创建并改进提示）：读写都检查，见第 5 节 |
+| L3 | 消息 17 是否会被投递给应用层的 `OnMessage` | 无需改：T9 已覆盖 |
+| L4 | `internal/settings/README.md` 未反映版本 2 | 修复（`6fa51fa`）：README 已写明版本升级、Hub 模式校验与构建期缺省中心 |
+| — | 票据向量的生成器没有入库，向量无法复现 | 修复（`6fa51fa`）：`internal/ticket/testdata/gen/generate.py` 与 `testdata/README.md` 入库，向量由它独立产出 |
+| — | 若干测试缺口 | 补齐 |
+| — | 公开仓库守卫的豁免按整个文件放行 | 修复（`6fa51fa`，取代 `0e71259` 的文件级条目）：改为按行豁免（只放行 PEM 头字面量） |
+
+第二批：
+
+| 编号 | 意见 | 处理 |
+|---|---|---|
+| S1 | 静默的 dial 配对后可以无限期占住 Operator 的 wait | 修复（`4d353b6`）：配对后首字节期限，见 3.4 |
+| C1 | target 等于 Hub 指纹且带 token 的请求应如何处理 | **不改实现，以本文 A0 规则为准**：没有合法票据的 peer 会是 Hub 指纹，直接拒绝；单一路径更简单，不留组合歧义 |
+| C2 / C3 | `ticket inspect` 在验签前展示字段；需要 Hub 私钥才能验票；跳过的检查没有说明 | 修复（`6465a63`、`aa4900a`）：`--hub-fp` 离线验票；先验签，失败只输出步骤与 unverified 的 `kid`；逐项注明跳过的检查 |
+| C4 | FAT / exFAT 上权限检查无法通过 | 明确不支持（`3a4429d`）：改进错误提示，建议迁移状态目录 |
+| C5 | 嵌套映射的键序是否符合核心确定性编码 | 核对后无缺陷：RFC 8949 §4.2.1 的键序是字节字典序，与 CoreDet 一致；补充固定该顺序的测试（`4060ba7`） |
+| C6 | 指纹格式过于宽松 | 不改：契约 §1 要求接受不带 `-` 的形式 |
+| C7 | 令牌在设备票签发失败时已被消耗（令牌被烧） | 修复（`2b56ef2`）：先签后提交，见 6.4 |
+| — | 多端点场景中一个端点被拒就判定授权失效；本机签发密钥错误被归入网络错误 | 修复（`3fb3fb8`、`abd565c`）：全部候选端点都被拒才判定失效；新增 `hub_issuer` 分类（文案 `e7a7955`） |
+| — | 测试缺口 | 补齐（`2a55a8b`：强制领票、持票准入、配对入口改派） |
+
+### 14.3 端到端测试证据
+
+第 10 节「端到端」矩阵在 `internal/integration/selfhost_test.go` 中实现，每个用例都起真实的 loopback Hub、Operator 与 Client 运行时：`TestSelfhostInviteExpiryAndRenewal`（邀请码过期后用设备票重连、续期换票）、`TestSelfhostWindow`（数字码窗口）、`TestSelfhostReloadRevokesClient`（`deny.devices` 重载后切断并停止重试）、`TestSelfhostUnauthorizedWait`（Operator 未被授权）、`TestSelfhostExpiredBeforeDial`（本地票据过期不联网）、`TestSelfhostBusyHandoff`（会话中的 `busy` 与交接）、`TestSelfhostRestart`（Hub 重启后重新注册与重连）、`TestSelfhostNonDesignatedOperator`（非指定 Operator 发码时撤销码并保持可达）、`TestSelfhostHubFingerprintBinding`（两端看到的 Hub 指纹不同则 PAKE 失败）、`TestSelfhostSecretSurfaces`（票据与码不出现在日志与状态里）。
+
+另记 T14 的两项拓扑测试：`TestSelfhostImpostorHubFailsPairing` 用完整拓扑验证伪造 Hub 终止外层、再以自己的设备经真 Hub 的配对入口转发内层字节时，PAKE 失败，两端都不写入信任（第 10 节「端到端」③）；`TestSelfhostTransparentForwarding` 是它的对照：只在 TCP 层原样转发、外层 TLS 仍直达真 Hub 时，Client 在新地址上认证到真 Hub，配对成功并保存设备票与新地址，说明上一条的失败来自 `hub_fp` 绑定，而不是转发本身。
+
+### 14.4 未验证与遗留
+
+- 人工台架验收尚未执行，范围见第 10 节最后一行；结果记录后在此补充。
+- Windows 上没有热重载（4.2）；签发密钥的 Windows ACL 不检查（只在非 Windows 上检查权限位）。

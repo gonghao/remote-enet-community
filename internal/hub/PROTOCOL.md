@@ -62,7 +62,7 @@ Hub 在同一把路由锁内用**当前策略**的 `Valid` 复核撤销条件，
 
 `hubtransport.Register(wrap)` 在应用启动时注册 `"hub"`，只调用一次；显式注入解决基础层 `Config.Options` 只能传字符串、不能传函数的问题。注册表工厂接受 `listen`，较复杂配置直接调用 `New(Options)`。
 
-- `Options.Endpoints` 是 Acceptor 的独立 Hub wait 候选；`Options.Token` 是这些 Hub 的可选鉴权材料。候选和 token 在 New 时拷贝。
+- `Options.Endpoints` 是 Acceptor 的独立 Hub wait 候选，在 New 时拷贝。每次注册前调用 `Options.WaitToken(ctx, hub)` 现签 token（nil 时发送空 token），Connector 对每个候选使用该端点自己的 `Endpoint.Ticket` 作为 dial token。`Options.OnRegister(hub, token, err)` 在每次注册尝试结束后异步调用，不持有连接器的锁，调用之间不保证顺序，Close 之后也可能到达，因此必须快速返回。`Refresh` 作废尚未收到任何字节的空闲注册，让调用方换一张票据重新注册。`DialBootstrap` 返回外层候选指纹 H，内层 Expect 为零，由调用方按内层实际对端是否等于 H 决定配对能力。
 - `Options.Listen` 创建并拥有内嵌 Hub listener；`Options.Embedded` 可从外部服务器接收连接。两者同时提供时使用同一个 Embedded。提供 Embedded 时 Acceptor 使用它，不同时注册 Endpoints。
 - Connector 并发尝试 PeerInfo 的所有 hub 候选；完整 Wrap 首个成功者获胜。返回前取消并回收其他候选，关闭其连接和已生成的 Session。全部失败时用 `errors.Join` 保留可识别的底层原因。
 - 内嵌路径以 `Endpoint.Hub == PeerInfo.ID` 识别，Path 为 direct；其他路径为 relay 且 Via 为 Hub 地址。外层钉扎与内层期望身份分别校验，不能用路径分类代替认证。

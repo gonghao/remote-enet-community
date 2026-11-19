@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -165,5 +167,54 @@ func TestNetworkRetryIsCancelable(t *testing.T) {
 	defer logs.mu.Unlock()
 	if bytes.Contains(logs.buf.Bytes(), []byte(code)) {
 		t.Fatal("logs contain invitation")
+	}
+}
+
+func TestPairFile(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, content string) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	direct, err := readPairFile(write("ok", "10.0.5.107:47000 0482 7193\n"))
+	if err != nil || direct.Address != "10.0.5.107:47000" || direct.Code != "04827193" {
+		t.Fatalf("direct pair = %+v, %v", direct, err)
+	}
+	if _, err := readPairFile(write("oversized", "10.0.5.107:47000 04827193"+strings.Repeat(" ", 4096))); err == nil || err.Error() != "--pair-file exceeds 4 KiB" {
+		t.Fatalf("oversized pair file: %v", err)
+	}
+	for name, content := range map[string]string{"code-only": "0482 7193", "bad-code": "10.0.5.107:47000 0482719", "bad-host": "bad_host:47000 04827193"} {
+		t.Run(name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			err := run(t.Context(), []string{"client", "--state-dir", t.TempDir(), "--pair-file", write(name, content)}, &stdout, &stderr)
+			if err == nil {
+				t.Fatal("invalid pair file accepted")
+			}
+			if strings.Contains(err.Error()+stderr.String(), "0482") {
+				t.Fatal("numeric code leaked")
+			}
+		})
+	}
+	var stdout, stderr bytes.Buffer
+	if err := run(t.Context(), []string{"client", "--state-dir", t.TempDir(), "--pair-file", write("ok2", "10.0.5.107:47000 04827193"), "--peer", "x"}, &stdout, &stderr); err == nil {
+		t.Fatal("multiple pairing sources accepted")
+	}
+}
+
+func TestPairFileReadFailureDoesNotEchoPath(t *testing.T) {
+	for _, args := range [][]string{{"0482 7193"}, {"0482", "7193"}, {filepath.Join(t.TempDir(), "04827193")}} {
+		var stdout, stderr bytes.Buffer
+		flags := append([]string{"client", "--state-dir", t.TempDir(), "--pair-file"}, args...)
+		err := run(t.Context(), flags, &stdout, &stderr)
+		if err == nil {
+			t.Fatal("invalid --pair-file path accepted")
+		}
+		output := err.Error() + stdout.String() + stderr.String()
+		if strings.Contains(output, "0482") || strings.Contains(output, "7193") {
+			t.Fatal("numeric code leaked from --pair-file path")
+		}
 	}
 }

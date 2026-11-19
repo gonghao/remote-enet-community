@@ -9,6 +9,7 @@ import (
 	"net"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -149,6 +150,23 @@ func TestServerOwnBudgetAndSlowReader(t *testing.T) {
 	}
 }
 
+func TestServerRequestBudgetStartsAtRequest(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		a, b := pipe(t)
+		done := make(chan error, 1)
+		go func() { done <- Serve(t.Context(), b) }()
+		synctest.Wait()
+		time.Sleep(2 * time.Millisecond)
+		result, err := Run(t.Context(), a, Options{Samples: 1, PayloadBytes: probeBytes, Timeout: time.Millisecond})
+		if err != nil || result.Samples != 1 {
+			t.Fatalf("%+v %v", result, err)
+		}
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
 func TestServerHardBudgetBeforeRequest(t *testing.T) {
 	t.Parallel()
 	a, b := pipe(t)
@@ -209,6 +227,21 @@ func TestBlackholeCancellationAndCleanup(t *testing.T) {
 				t.Fatal("client did not close stream")
 			}
 		})
+	}
+}
+
+// Model the interval after the deadline but before the timer publishes Err.
+type pendingDeadline struct {
+	context.Context
+	deadline time.Time
+}
+
+func (ctx pendingDeadline) Deadline() (time.Time, bool) { return ctx.deadline, true }
+
+func TestEOFBeforeDeadlineNotification(t *testing.T) {
+	ctx := pendingDeadline{t.Context(), time.Now()}
+	if err := failure(ctx, io.EOF); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("EOF at deadline: %v", err)
 	}
 }
 

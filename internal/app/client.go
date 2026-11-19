@@ -4,14 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/netip"
 	"os"
 	"strings"
 	"time"
 
 	"remote-enet/internal/carside"
+	"remote-enet/internal/identity"
 	"remote-enet/internal/invite"
 	"remote-enet/internal/observe"
+	"remote-enet/internal/pairing/cpace"
 	"remote-enet/internal/session"
 	"remote-enet/internal/transport"
 	hubtransport "remote-enet/internal/transport/hub"
@@ -30,7 +33,15 @@ func (r *Runtime) RunClient(ctx context.Context, cfg ClientConfig) (err error) {
 	if err := r.begin(session.RoleClient); err != nil {
 		return err
 	}
-	defer func() { r.finish(err) }()
+	if cfg.Logger == nil {
+		cfg.Logger = slog.Default()
+	}
+	defer func() {
+		if err != nil && !errors.Is(err, context.Canceled) {
+			cfg.Logger.Warn("client stopped", "error", err)
+		}
+		r.finish(err)
+	}()
 	if err := cfg.defaults(); err != nil {
 		return err
 	}
@@ -51,12 +62,19 @@ func (r *Runtime) RunClient(ctx context.Context, cfg ClientConfig) (err error) {
 		return err
 	}
 	r.update(func(s *Snapshot) { s.Device, s.Peer = id.Fingerprint(), peer.ID })
-	cfg.Logger.Info("client ready", "device", id.Fingerprint().String(), "operator", peer.ID.String())
+	operatorID := "pending"
+	if !peer.ID.IsZero() {
+		operatorID = peer.ID.String()
+	}
+	cfg.Logger.Info("client ready", "device", id.Fingerprint().String(), "operator", operatorID)
 	return r.clientLoop(ctx, cfg, connector, peer, token, store)
 }
 
 func clientPeer(ctx context.Context, cfg ClientConfig, store *trust.Store) (transport.PeerInfo, [16]byte, error) {
 	var token [16]byte
+	if cfg.DirectPair != nil {
+		return transport.PeerInfo{}, token, nil
+	}
 	if !cfg.Peer.IsZero() {
 		peer, err := store.Peer(ctx, cfg.Peer)
 		if err != nil {
@@ -103,7 +121,12 @@ func validatePeer(peer transport.PeerInfo) error {
 	return nil
 }
 
-func (r *Runtime) clientLoop(ctx context.Context, cfg ClientConfig, connector transport.Connector, peer transport.PeerInfo, token [16]byte, store *trust.Store) error {
+type clientConnector interface {
+	transport.Connector
+	DialDirectPair(context.Context, string) (transport.Session, error)
+}
+
+func (r *Runtime) clientLoop(ctx context.Context, cfg ClientConfig, connector clientConnector, peer transport.PeerInfo, token [16]byte, store *trust.Store) error {
 	delay := cfg.RetryMin
 	for {
 		if err := ctx.Err(); err != nil {
@@ -114,7 +137,7 @@ func (r *Runtime) clientLoop(ctx context.Context, cfg ClientConfig, connector tr
 			r.update(func(s *Snapshot) {
 				s.NIC, s.Gateway, s.VIN = carside.NIC{}, netip.Addr{}, ""
 			})
-			if err := r.clientWait(ctx, cfg, PhaseWaitingNIC, err, cfg.NICCheckInterval); err != nil {
+			if err := r.clientWait(ctx, cfg, PhaseWaitingNIC, err.Error(), cfg.NICCheckInterval); err != nil {
 				return err
 			}
 			continue
@@ -123,7 +146,7 @@ func (r *Runtime) clientLoop(ctx context.Context, cfg ClientConfig, connector tr
 			if !errors.Is(err, errEnumeration) {
 				return fmt.Errorf("select vehicle interface; specify --nic and --nic-addr if ambiguous: %w", err)
 			}
-			if err := r.clientWait(ctx, cfg, PhaseBackoff, err, delay); err != nil {
+			if err := r.clientWait(ctx, cfg, PhaseBackoff, err.Error(), delay); err != nil {
 				return err
 			}
 			delay = nextDelay(delay, cfg.RetryMax)
@@ -133,12 +156,12 @@ func (r *Runtime) clientLoop(ctx context.Context, cfg ClientConfig, connector tr
 			s.Phase, s.NIC, s.Gateway, s.VIN = PhaseDiscovering, nic, netip.Addr{}, ""
 			s.NextRetry = time.Time{}
 		})
-		gateways, err := cfg.Hooks.Discover(ctx, carside.DiscoverOptions{NIC: nic, Destinations: cfg.DiscoveryDestinations, Timeout: cfg.DiscoveryTimeout})
+		gateways, err := cfg.Hooks.Discover(ctx, carside.DiscoverOptions{NIC: nic, Destinations: cfg.DiscoveryDestinations, Timeout: cfg.DiscoveryTimeout, Logger: cfg.Logger})
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			if err := r.clientWait(ctx, cfg, PhaseBackoff, fmt.Errorf("discover vehicle: %w", err), delay); err != nil {
+			if err := r.clientWait(ctx, cfg, PhaseBackoff, fmt.Sprintf("discover vehicle: %v", err), delay); err != nil {
 				return err
 			}
 			delay = nextDelay(delay, cfg.RetryMax)
@@ -148,7 +171,7 @@ func (r *Runtime) clientLoop(ctx context.Context, cfg ClientConfig, connector tr
 			return fmt.Errorf("found %d gateways; isolate one vehicle or use a unicast --discovery-target", len(gateways))
 		}
 		if len(gateways) == 0 {
-			if err := r.clientWait(ctx, cfg, PhaseWaitingVehicle, errors.New("no gateway found; waiting for vehicle"), cfg.DiscoveryRetryInterval); err != nil {
+			if err := r.clientWait(ctx, cfg, PhaseWaitingVehicle, "no gateway found; waiting for vehicle", cfg.DiscoveryRetryInterval); err != nil {
 				return err
 			}
 			continue
@@ -162,7 +185,7 @@ func (r *Runtime) clientLoop(ctx context.Context, cfg ClientConfig, connector tr
 			if !errors.Is(err, errEnumeration) {
 				return err
 			}
-			if err := r.clientWait(ctx, cfg, PhaseBackoff, err, delay); err != nil {
+			if err := r.clientWait(ctx, cfg, PhaseBackoff, err.Error(), delay); err != nil {
 				return err
 			}
 			delay = nextDelay(delay, cfg.RetryMax)
@@ -172,7 +195,12 @@ func (r *Runtime) clientLoop(ctx context.Context, cfg ClientConfig, connector tr
 		r.update(func(s *Snapshot) {
 			s.Phase, s.Gateway, s.VIN = PhaseConnecting, gateway.Address, gateway.Identification.VIN
 		})
-		connected, fatal, err := r.clientConnection(ctx, connector, peer, token, store, nic, gateway, cfg)
+		saved, connected, fatal, err := r.clientConnection(ctx, connector, peer, token, store, nic, gateway, cfg)
+		if saved != nil {
+			peer, cfg.DirectPair = *saved, nil
+		} else if cfg.DirectPair != nil {
+			return fmt.Errorf("%w: %w", classifyPairingError(err), err)
+		}
 		if connected {
 			token = [16]byte{}
 			delay = cfg.RetryMin
@@ -188,7 +216,14 @@ func (r *Runtime) clientLoop(ctx context.Context, cfg ClientConfig, connector tr
 			continue
 		}
 		cfg.Logger.Warn("client connection ended; retrying", "error", err, "retry_in", delay)
-		if err := r.clientWait(ctx, cfg, PhaseBackoff, err, delay); err != nil {
+		message := sessionEndMessage(session.RoleClient, err)
+		switch {
+		case errors.Is(err, identity.ErrFingerprintMismatch):
+			message = string(PairingErrorKind("identity_mismatch"))
+		case errors.Is(err, hubtransport.ErrPeerBusy):
+			message = string(PairingErrorKind("busy"))
+		}
+		if err := r.clientWait(ctx, cfg, PhaseBackoff, message, delay); err != nil {
 			return err
 		}
 		delay = nextDelay(delay, cfg.RetryMax)
@@ -203,12 +238,10 @@ func selectNIC(ctx context.Context, cfg ClientConfig) (carside.NIC, error) {
 	return carside.SelectNICFrom(nics, cfg.NICName, cfg.NICAddr)
 }
 
-func (r *Runtime) clientWait(ctx context.Context, cfg ClientConfig, phase Phase, cause error, delay time.Duration) error {
+func (r *Runtime) clientWait(ctx context.Context, cfg ClientConfig, phase Phase, message string, delay time.Duration) error {
 	r.update(func(s *Snapshot) {
 		s.Phase, s.NextRetry = phase, time.Now().Add(delay)
-		if cause != nil {
-			s.LastError = cause.Error()
-		}
+		s.LastError = message
 	})
 	return cfg.Hooks.Wait(ctx, delay)
 }
@@ -220,7 +253,9 @@ func nextDelay(delay, maximum time.Duration) time.Duration {
 	return delay * 2
 }
 
-func (r *Runtime) clientConnection(ctx context.Context, connector transport.Connector, peer transport.PeerInfo, token [16]byte, store *trust.Store, nic carside.NIC, gateway carside.Gateway, cfg ClientConfig) (connected, fatal bool, err error) {
+func (r *Runtime) clientConnection(ctx context.Context, connector clientConnector, peer transport.PeerInfo, token [16]byte, store *trust.Store, nic carside.NIC, gateway carside.Gateway, cfg ClientConfig) (saved *transport.PeerInfo, connected, fatal bool, err error) {
+	direct := cfg.DirectPair
+	cfg.DirectPair = nil
 	connectionCtx, cancel := context.WithCancelCause(ctx)
 	metrics := &measurements{runtime: r, direction: observe.Inbound}
 	monitorDone := make(chan error, 1)
@@ -238,14 +273,19 @@ func (r *Runtime) clientConnection(ctx context.Context, connector transport.Conn
 			fatal = !errors.Is(monitorErr, ErrNICChanged) && !errors.Is(monitorErr, carside.ErrNICUnavailable)
 		}
 	}()
-	ts, err := connector.Dial(connectionCtx, peer)
+	var ts transport.Session
+	if direct != nil {
+		ts, err = connector.DialDirectPair(connectionCtx, direct.Address)
+	} else {
+		ts, err = connector.Dial(connectionCtx, peer)
+	}
 	if err != nil {
-		return false, false, err
+		return nil, false, false, err
 	}
 	forwarder, err := carside.NewForwarder(nic, cfg.Logger, carside.WithObserver(metrics))
 	if err != nil {
 		ts.Close(err)
-		return false, true, err
+		return nil, false, true, err
 	}
 	defer func() {
 		cancel(context.Canceled)
@@ -254,19 +294,47 @@ func (r *Runtime) clientConnection(ctx context.Context, connector transport.Conn
 		metrics.end(err)
 		r.deactivate()
 	}()
-	s, err := session.Run(connectionCtx, ts, session.Options{Role: session.RoleClient, Initiator: true, AppVersion: "dev", Token: token, OnTunnel: forwarder.HandleTunnel, OnRTT: metrics.onRTT, AllowLinkTest: cfg.AllowLinkTest, Logger: cfg.Logger})
-	if err != nil {
-		return false, false, err
+	var code string
+	if direct != nil {
+		code = direct.Code
+		direct.Code = "" // defaults made a private copy for this run.
 	}
-	metrics.start()
+	s, err := session.Run(connectionCtx, ts, session.Options{
+		Role: session.RoleClient, Initiator: true, AppVersion: "dev", Token: token,
+		DigitalCode: code, LocalFP: r.Snapshot().Device, OnTunnel: forwarder.HandleTunnel,
+		OnRTT: metrics.onRTT, AllowLinkTest: cfg.AllowLinkTest, Logger: cfg.Logger,
+	})
+	if err != nil {
+		return nil, false, false, err
+	}
+	if direct != nil {
+		if s.PairingOutcome() != session.DigitalPaired {
+			return nil, false, true, session.ReasonInterrupted
+		}
+		peer = transport.PeerInfo{ID: ts.Peer(), Endpoints: []transport.Endpoint{{Kind: "hub", Addr: direct.Address, Hub: ts.Peer()}}}
+	} else {
+		metrics.start()
+	}
 	if err := store.SavePeer(connectionCtx, peer); err != nil {
 		if connectionCtx.Err() != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
-			return true, false, context.Cause(connectionCtx)
+			return saved, true, false, context.Cause(connectionCtx)
 		}
-		return true, true, fmt.Errorf("save paired operator: %w", err)
+		if direct != nil {
+			return nil, false, true, cpace.ReasonStoreFailed
+		}
+		return saved, true, true, fmt.Errorf("save paired operator: %w", err)
+	}
+	if direct != nil {
+		metrics.start()
+		saved = &peer
+		if cfg.Hooks.OnPaired != nil {
+			copyPeer := peer
+			copyPeer.Endpoints = append([]transport.Endpoint(nil), peer.Endpoints...)
+			cfg.Hooks.OnPaired(copyPeer)
+		}
 	}
 	if err := s.Send(gateway.VehicleState(nic, 1)); err != nil {
-		return true, false, err
+		return saved, true, false, err
 	}
 	generation := r.activate(connectionCtx, s, ts.Path())
 	cfg.Logger.Info("client connected", "operator", peer.ID.String(), "path", ts.Path().Kind, "gateway", gateway.Address.String(), "vin", gateway.Identification.VIN, "generation", generation)
@@ -275,12 +343,17 @@ func (r *Runtime) clientConnection(ctx context.Context, connector transport.Conn
 	for {
 		select {
 		case <-connectionCtx.Done():
-			return true, false, context.Cause(connectionCtx)
 		case <-s.Done():
-			return true, false, s.Err()
 		case <-tick.C:
 			r.update(func(*Snapshot) {})
+			continue
 		}
+		// The session may close with ctx.Err() before this loop observes
+		// cancellation. Prefer the cause regardless of which channel won.
+		if cause := context.Cause(connectionCtx); cause != nil {
+			return saved, true, false, cause
+		}
+		return saved, true, false, s.Err()
 	}
 }
 

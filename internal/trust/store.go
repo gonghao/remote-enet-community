@@ -327,3 +327,17 @@ func (s *Store) save(st *state) error {
 	}
 	return nil
 }
+
+// Remember commits direct pairing without consuming an invitation.
+func (s *Store) Remember(ctx context.Context, peer identity.Fingerprint) error {
+	if peer.IsZero() {
+		return fmt.Errorf("trust: peer identity required")
+	}
+	return s.access(ctx, func(st *state) (bool, error) {
+		if st.Trusted[peer.String()] {
+			return false, nil
+		}
+		st.Trusted[peer.String()] = true
+		return true, nil
+	})
+}

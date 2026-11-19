@@ -9,6 +9,10 @@ func New() *Runtime
 func IssueInvite(ctx context.Context, cfg InviteConfig) (string, error)
 func (r *Runtime) RunClient(ctx context.Context, cfg ClientConfig) error
 func (r *Runtime) RunOperator(ctx context.Context, cfg OperatorConfig) error
+func (r *Runtime) IssueNumericCode(ctx context.Context) (pairing.Display, error)
+func (r *Runtime) NumericCodeStatus() pairing.Status
+func (r *Runtime) NumericCodeDisplay(ctx context.Context, generation uint64) (pairing.Display, error)
+func (r *Runtime) RevokeNumericCode(ctx context.Context, generation uint64) error
 func (r *Runtime) Snapshot() Snapshot
 func (r *Runtime) Subscribe(ctx context.Context) <-chan Snapshot
 func (r *Runtime) WithSession(ctx context.Context, fn func(context.Context, uint64, *session.Session) error) error
@@ -28,7 +32,9 @@ func carside.SelectNICFrom(nics []carside.NIC, name string, addr netip.Addr) (ca
 
 ## 连接与恢复
 
-- `ClientConfig` 三选一：邀请码、UTF-8 邀请文件（支持 BOM）、已配对指纹。配对后保存对端；成功握手后重连不再携带 token。Operator 仍先查信任，再原子消费一次性 token。
+- `ClientConfig` 接受邀请码、UTF-8 邀请文件（支持 BOM）、已配对指纹或 `DirectPair`，每次选择一项。原始邀请成功握手后保存对端，重连时清除 token。
+- 数字配对在网卡和唯一网关就绪后拨号一次。验证对端确认并成功保存地址与指纹后，同步调用 `ClientHooks.OnPaired`。随后断线走指纹重连。首次兑换失败时，调用方可用 `errors.As` 提取 `PairingErrorKind`。
+- Operator 监听期间用 `ShareAddress` 指定分享地址，留空时无法发码。`NumericCodeStatus` 只返回无秘密状态，显示或复制需显式获取当前代次的 `Display`。停止监听后原码失效。
 - 客户端默认发现超时 3 秒、无车重试 1 秒、网卡检查 1 秒、网络退避 100 毫秒至 5 秒。app 的时长零值使用默认值，负值报错。CLI 新增 `--discovery-retry`、`--nic-check`，均须为正数。
 - 无网卡、所选固定 IP 不在、无车辆均进入等待。每次发现/重连重新枚举；发现完成后再次验证源地址/前缀，避免用发现期间失效的地址拨号。多候选网卡、多网关直接停止。
 - 连接期间只重新枚举本机网卡。确认名称/地址/前缀变化或所选地址消失时，取消旧代次，关闭旧 transport 和车辆 TCP，等待 forwarder 退出后重新发现。不重放旧隧道请求。

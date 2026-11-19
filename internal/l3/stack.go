@@ -92,7 +92,11 @@ func Start(ctx context.Context, device packetio.Device, opts Options) (*Stack, e
 	ctx, cancel := context.WithCancel(ctx)
 	s := &Stack{ctx: ctx, cancel: cancel, device: device, opts: opts, pending: make(map[stack.TransportEndpointID]bool), done: make(chan struct{})}
 	s.net = stack.New(stack.Options{NetworkProtocols: []stack.NetworkProtocolFactory{ipv4.NewProtocol}, TransportProtocols: []stack.TransportProtocolFactory{tcp.NewProtocol}})
-	s.link = channel.New(opts.MaxConnections, uint32(device.MTU()), "")
+	// The channel endpoint drops the tail of a TCP burst when full. Size
+	// for one maximum TCP window plus its ACKs, independently of admission.
+	mss := device.MTU() - header.IPv4MaximumHeaderSize - header.TCPHeaderMaximumSize
+	windowPackets := (tcp.MaxBufferSize + mss - 1) / mss
+	s.link = channel.New(2*windowPackets, uint32(device.MTU()), "")
 	if err := s.net.CreateNIC(1, s.link); err != nil {
 		cancel()
 		s.net.Destroy()

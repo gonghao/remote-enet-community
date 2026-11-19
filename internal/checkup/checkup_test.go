@@ -301,3 +301,42 @@ func TestEndpointValidationAndReportProjection(t *testing.T) {
 		t.Fatal("mutated report input")
 	}
 }
+
+func TestDirectInputCheckIsLocal(t *testing.T) {
+	const secret = "00001234"
+	b := backend{
+		lookup: func(context.Context, string) ([]netip.Addr, error) {
+			t.Fatal("direct input triggered DNS")
+			return nil, nil
+		},
+		dial: func(context.Context, string) (io.Closer, error) {
+			t.Fatal("direct input triggered TCP")
+			return nil, nil
+		},
+	}
+	for _, tc := range []struct {
+		code   string
+		status Status
+	}{
+		{DirectInputValid, Pass},
+		{DirectInputInvalidHost, Failed},
+		{DirectInputInvalidPort, Failed},
+		{DirectInputInvalidCode, Failed},
+		{DirectInputAddressRequired, Warning},
+	} {
+		t.Run(tc.code, func(t *testing.T) {
+			in := Input{Config: settings.Default(), PeerCode: tc.code}
+			// Even stale pinned endpoints must not be probed for direct input.
+			in.Endpoints = []transport.Endpoint{{Kind: "hub", Addr: "fixture.invalid:47000", Hub: identity.Fingerprint{1}}}
+			r := run(t.Context(), in, b)
+			f := finding(t, r, "peer_configuration", 0)
+			if !r.Complete || len(r.Findings) != 2 || f.Status != tc.status || f.Code != tc.code {
+				t.Fatal("unexpected local finding")
+			}
+			output, err := JSON(r)
+			if err != nil || !strings.Contains(string(output), tc.code) || strings.Contains(string(output), secret) {
+				t.Fatal("unexpected exported finding")
+			}
+		})
+	}
+}

@@ -21,6 +21,9 @@ import (
 	"time"
 )
 
+// ErrFingerprintMismatch identifies a peer that failed its configured pin.
+var ErrFingerprintMismatch = errors.New("fingerprint mismatch")
+
 // Fingerprint is SHA-256 over the 32 raw bytes of an Ed25519 public key.
 type Fingerprint [sha256.Size]byte
 

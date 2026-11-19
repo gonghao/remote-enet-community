@@ -21,12 +21,14 @@ import (
 	"remote-enet/internal/transport"
 )
 
-// Match the desktop host's Client sizes in internal/desktopui/product.go.
+// Match the desktop host's window sizes in internal/desktopui/product.go.
 const (
-	clientWidth     = 440
-	clientHeight    = 700
-	clientMinWidth  = 420
-	clientMinHeight = 480
+	clientWidth       = 440
+	clientHeight      = 700
+	clientMinWidth    = 420
+	clientMinHeight   = 480
+	operatorMinWidth  = 900
+	operatorMinHeight = 620
 )
 
 // Preview fixtures contain no real invitations, device identities or vehicle data.
@@ -69,6 +71,7 @@ func TestWorkspacePreview(t *testing.T) {
 	actions := Actions{Save: func(settings.Config) {}, Connect: func(string) {}, Listen: func() {}, Stop: func() {}, IssueInvite: func() {}, TestLink: func() {}, Copy: func(string) {}, Refresh: func() {}, Quit: func() {}}
 	clientState := clientPreviewState()
 	clientState.Notice = "Interfaces refreshed."
+	clientState.Runtime.LastError = "Operator disconnected."
 	for _, role := range []string{settings.RoleClient, settings.RoleOperator} {
 		cfg := operatorConfig()
 		cfg.Role = role
@@ -78,6 +81,8 @@ func TestWorkspacePreview(t *testing.T) {
 		width, height := clientWidth, clientHeight
 		if role == settings.RoleOperator {
 			width, height = 1080, 760
+			state.Notice = "Settings saved."
+			state.Runtime.LastError = "Client disconnected."
 		} else {
 			state = clientState
 		}
@@ -91,6 +96,18 @@ func TestWorkspacePreview(t *testing.T) {
 		writePreview(t, tt, filepath.Join(dir, role+"-settings.png"))
 		click(t, tt, "Log")
 		writePreview(t, tt, filepath.Join(dir, role+"-log.png"))
+		if role == settings.RoleOperator {
+			click(t, tt, "Open HSFZ capture")
+			writePreview(t, tt, filepath.Join(dir, "operator-capture.png"))
+			state.Runtime.Phase = app.PhaseListening
+			state.Runtime.LastError = "Runtime stopped with an error. Check runtime diagnostics."
+			v.SetState(state)
+			v.page = sessionPage
+			tt = ui.NewTester(v.Render, operatorMinWidth, operatorMinHeight)
+			writePreview(t, tt, filepath.Join(dir, "operator-min-100.png"))
+			tt.SetZoom(1.5)
+			writePreview(t, tt, filepath.Join(dir, "operator-min-150.png"))
+		}
 	}
 
 	cfg := settings.Default()
@@ -103,9 +120,12 @@ func TestWorkspacePreview(t *testing.T) {
 		writePreview(t, tt, filepath.Join(dir, "client-"+language+"-100.png"))
 	}
 	client.SetLanguage("en")
-	client.SetState(State{NICs: previewState().NICs})
+	client.SetState(State{
+		NICs: clientState.NICs, Notice: clientState.Notice,
+		Runtime: app.Snapshot{LastError: "Runtime stopped with an error. Check runtime diagnostics."},
+	})
 	tt := ui.NewTester(client.Render, clientMinWidth, clientMinHeight)
-	input(t, tt, "Invitation code", "renet1:DEMO")
+	input(t, tt, "Invite or address:port and code", "renet1:DEMO")
 	writePreview(t, tt, filepath.Join(dir, "client-min-100.png"))
 	tt.SetZoom(1.5)
 	writePreview(t, tt, filepath.Join(dir, "client-min-150.png"))

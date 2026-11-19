@@ -6,6 +6,8 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"remote-enet/internal/brand"
+	"remote-enet/internal/identity"
+	"remote-enet/internal/locales"
 	"remote-enet/internal/settings"
 )
 
@@ -25,6 +27,7 @@ const (
 	logPage
 	capturePage
 	checksPage
+	peerDetailsPage
 )
 
 // Render builds native controls; the host owns window sizing and invalidation.
@@ -40,6 +43,14 @@ func (v *View) Render(c *ui.Context) {
 			}
 			ui.Column(c).FillWidth().Padding(vertical, horizontal).Gap(gap).Children(func() {
 				switch v.page {
+				case peerDetailsPage:
+					v.pageTitle(c, "Peer details", "")
+					v.card(c.Key("peer-id"), "Full peer ID", "", func() {
+						ui.Text(c, v.detailsPeer.String()).FillWidth().MinWidth(0).Font("monospace")
+						if ui.Button(c.Key("copy-peer-id"), v.tr("Copy full peer ID")).Disabled(v.actions.Copy == nil).Clicked() {
+							v.actions.Copy(v.detailsPeer.String())
+						}
+					})
 				case settingsPage:
 					v.settingsPage(c)
 				case capturePage:
@@ -105,8 +116,12 @@ func (v *View) header(c *ui.Context) {
 		}
 		ui.Text(c, v.tr(title)).Grow(1).MinWidth(0).SingleLine().TruncateMiddle().FontSize(16).Bold()
 		if v.page != sessionPage {
-			if button("back", "Back", "Back to session").Clicked() {
-				v.page = sessionPage
+			destination, label := sessionPage, "Back to session"
+			if v.page == peerDetailsPage && v.peerDetailsFrom == settingsPage {
+				destination, label = settingsPage, "Back to settings"
+			}
+			if button("back", "Back", label).Clicked() {
+				v.page = destination
 			}
 		}
 		if button("settings", "Settings", "Settings").Disabled(v.page == settingsPage).Clicked() {
@@ -138,26 +153,60 @@ func (v *View) card(c *ui.Context, title, subtitle string, fn func()) {
 func (v *View) pageTitle(c *ui.Context, title, subtitle string) {
 	ui.Column(c).FillWidth().MinWidth(0).Gap(4).Children(func() {
 		ui.Text(c, v.tr(title)).FontSize(18).Bold()
-		ui.Text(c, v.tr(subtitle)).TextColor(muted).FontSize(11)
+		if subtitle != "" {
+			ui.Text(c, v.tr(subtitle)).TextColor(muted).FontSize(11)
+		}
 	})
 }
 
 func (v *View) messages(c *ui.Context) {
-	if v.state.Error != "" {
-		v.banner(c.Key("error"), "Action failed", v.tr(v.state.Error), c.Theme().Danger, errorSurface, ui.RoleAlert)
+	errText := v.tr(v.state.Error)
+	runtimeError := locales.RuntimeErrorText(v.language, v.state.Runtime.LastError)
+	updates := func() {
+		if errText != "" {
+			v.banner(c.Key("error"), "Action failed", errText, c.Theme().Danger, errorSurface, ui.RoleAlert)
+		}
+		if v.state.Notice != "" {
+			v.banner(c.Key("notice"), "Update", v.tr(v.state.Notice), blue, infoSurface, ui.RoleStatus)
+		}
 	}
-	if v.state.Notice != "" {
-		v.banner(c.Key("notice"), "Update", v.tr(v.state.Notice), blue, infoSurface, ui.RoleStatus)
+	runtimeMessage := func() {
+		if runtimeError != "" && runtimeError != errText {
+			v.banner(c.Key("runtime-error"), "Runtime message", runtimeError, amber, warningSurface, ui.RoleStatus)
+		}
 	}
-	if v.state.Runtime.LastError != "" && v.state.Runtime.LastError != v.state.Error {
-		v.banner(c.Key("runtime-error"), "Runtime message", v.state.Runtime.LastError, amber, warningSurface, ui.RoleStatus)
+	if v.page == sessionPage {
+		// Operator has room to share a line and needs the vertical space for pairing at 150%.
+		if v.role == settings.RoleOperator {
+			ui.Row(c.Key("session-messages")).FillWidth().Height(16).Shrink(0).Gap(4).Children(func() {
+				updates()
+				runtimeMessage()
+			})
+			return
+		}
+		ui.Column(c.Key("session-messages")).FillWidth().Height(32).Shrink(0).Children(func() {
+			ui.Row(c.Key("updates")).FillWidth().Height(16).Shrink(0).Gap(4).Children(updates)
+			ui.Row(c.Key("runtime-message")).FillWidth().Height(16).Shrink(0).Children(runtimeMessage)
+		})
+		return
 	}
+	updates()
+	runtimeMessage()
 }
 
 func (v *View) banner(c *ui.Context, title, message string, text, fill ui.Color, role ui.Role) {
-	ui.Row(c).FillWidth().Padding(8, 12).Gap(8).Radius(0).Background(fill).TextColor(text).Role(role).Children(func() {
+	row := ui.Row(c).Radius(0).Background(fill).TextColor(text).Role(role)
+	if v.page == sessionPage {
+		row.Grow(1).Basis(0).MinWidth(0).Height(16).Padding(0, 8).Gap(4).AlignItems(ui.Center).Tooltip(message)
+	} else {
+		row.FillWidth().Padding(8, 12).Gap(8)
+	}
+	row.Children(func() {
 		ui.Text(c, v.tr(title)).Bold().FontSize(11).Shrink(0)
-		ui.Text(c, message).Grow(1).MinWidth(0).FontSize(11)
+		label := ui.Text(c, message).Grow(1).MinWidth(0).FontSize(11)
+		if v.page == sessionPage {
+			label.SingleLine().TruncateMiddle()
+		}
 	})
 }
 
@@ -175,7 +224,9 @@ func (v *View) startControls(c *ui.Context) {
 			}
 			if ui.PrimaryButton(c.Key("connect"), v.tr(label)).Label(v.tr("Connect client")).Grow(1).Height(height).Disabled(!v.canConnect()).Clicked() {
 				v.connecting = true
-				v.actions.Connect(strings.TrimSpace(v.invitation))
+				input := strings.TrimSpace(v.invitation)
+				v.clearPairingInput()
+				v.actions.Connect(input)
 			}
 		} else {
 			label := "Start listening"
@@ -196,6 +247,7 @@ func (v *View) startControls(c *ui.Context) {
 		}
 		if ui.Button(c.Key("stop"), v.tr(label)).Label(v.tr("Stop runtime")).Grow(1).Height(height).TextColor(c.Theme().Danger).Disabled(!v.canStop()).Clicked() {
 			v.stopping = true
+			v.ClearPairingSecrets()
 			v.actions.Stop()
 		}
 	})
@@ -210,9 +262,9 @@ func (v *View) startControls(c *ui.Context) {
 	case v.dirty():
 		status = "Unsaved changes · open Settings and save before starting."
 	case client && strings.TrimSpace(v.invitation) == "":
-		status = "Leave the invitation empty to use the remembered peer."
+		status = "Leave the pairing input empty to use the remembered peer."
 		if v.saved.Client.Peer == "" {
-			status = "Paste an invitation from your operator to connect."
+			return
 		}
 	case v.role == settings.RoleOperator && (v.saved.Operator.Endpoint == "" || v.saved.Operator.Bind == ""):
 		status = "Open Settings to save a public endpoint and presentation IPv4."
@@ -236,7 +288,8 @@ func (v *View) settingsPage(c *ui.Context) {
 	}
 	v.card(c.Key("save-settings"), "Preferences", "", func() {
 		if v.role == settings.RoleClient && v.saved.Client.Peer != "" {
-			v.value(c, "Remembered peer", v.saved.Client.Peer)
+			peer, _ := identity.ParseFingerprint(v.saved.Client.Peer)
+			v.peerValue(c.Key("remembered-peer"), "Remembered peer", peer)
 		}
 		v.saveControls(c)
 	})

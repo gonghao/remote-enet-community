@@ -32,12 +32,18 @@ func local(t *testing.T) *identity.Local {
 
 func start(t *testing.T, o Options) (*Server, string, context.CancelFunc) {
 	t.Helper()
-	if o.Logger == nil {
-		o.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
-	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
+	}
+	s, cancel := startOnListener(t, o, ln)
+	return s, ln.Addr().String(), cancel
+}
+
+func startOnListener(t *testing.T, o Options, ln net.Listener) (*Server, context.CancelFunc) {
+	t.Helper()
+	if o.Logger == nil {
+		o.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	s := NewServer(o)
@@ -54,7 +60,7 @@ func start(t *testing.T, o Options) (*Server, string, context.CancelFunc) {
 			t.Error("Serve leaked handlers on shutdown")
 		}
 	})
-	return s, ln.Addr().String(), cancel
+	return s, cancel
 }
 
 func connect(t *testing.T, addr string, hub, device *identity.Local, req Request) net.Conn {

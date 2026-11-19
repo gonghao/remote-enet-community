@@ -116,7 +116,7 @@ func verifyPeer(cs tls.ConnectionState, expect identity.Fingerprint) error {
 		return fmt.Errorf("hub: invalid self-signature: %w", err)
 	}
 	if !expect.IsZero() && fp != expect {
-		return errors.New("hub: fingerprint mismatch")
+		return fmt.Errorf("hub: %w", identity.ErrFingerprintMismatch)
 	}
 	return nil
 }
@@ -127,6 +127,33 @@ func Connect(ctx context.Context, addr string, local *identity.Local, hubID iden
 	if local == nil || hubID.IsZero() {
 		return nil, errors.New("hub: local identity and hub fingerprint required")
 	}
+	return withOuterTLS(ctx, addr, local, hubID, func(conn *tls.Conn) error {
+		return connectOuter(conn, req)
+	})
+}
+
+// ConnectBootstrap self-dials the verified certificate holder on this socket.
+// Its fingerprint is a candidate identity until direct pairing completes.
+func ConnectBootstrap(ctx context.Context, addr string, local *identity.Local) (net.Conn, identity.Fingerprint, error) {
+	if local == nil {
+		return nil, identity.Fingerprint{}, errors.New("hub: local identity required")
+	}
+	var hubID identity.Fingerprint
+	conn, err := withOuterTLS(ctx, addr, local, identity.Fingerprint{}, func(conn *tls.Conn) error {
+		verifiedID, err := identity.FingerprintOfCert(conn.ConnectionState().PeerCertificates[0])
+		if err != nil || verifiedID.IsZero() {
+			panic("hub: verified certificate must have a nonzero fingerprint")
+		}
+		hubID = verifiedID
+		return connectOuter(conn, Request{Role: RoleDial, Target: hubID})
+	})
+	if err != nil {
+		return nil, identity.Fingerprint{}, err
+	}
+	return conn, hubID, nil
+}
+
+func withOuterTLS(ctx context.Context, addr string, local *identity.Local, hubID identity.Fingerprint, route func(*tls.Conn) error) (net.Conn, error) {
 	ctx, cancel := context.WithTimeout(ctx, setupTimeout)
 	defer cancel()
 	raw, err := (&net.Dialer{}).DialContext(ctx, "tcp", addr)
@@ -138,7 +165,7 @@ func Connect(ctx context.Context, addr string, local *identity.Local, hubID iden
 		MaxVersion:   tls.VersionTLS13,
 		Certificates: []tls.Certificate{local.Cert},
 		NextProtos:   []string{ALPN},
-		// The pinned Ed25519 identity replaces CA and hostname validation.
+		// Device certificate verification replaces CA and hostname validation.
 		InsecureSkipVerify: true,
 		VerifyConnection:   func(cs tls.ConnectionState) error { return verifyPeer(cs, hubID) },
 	})
@@ -155,23 +182,8 @@ func Connect(ctx context.Context, addr string, local *identity.Local, hubID iden
 	if err := conn.HandshakeContext(ctx); err != nil {
 		return nil, fmt.Errorf("hub: TLS handshake: %w", err)
 	}
-	if err := writeRequest(conn, req); err != nil {
-		return nil, fmt.Errorf("hub: send request: %w", err)
-	}
-	var status [1]byte
-	if _, err := io.ReadFull(conn, status[:]); err != nil {
-		return nil, fmt.Errorf("hub: read status: %w", err)
-	}
-	switch status[0] {
-	case statusOK:
-	case statusBusy:
-		return nil, ErrPeerBusy
-	case statusUnknownPeer:
-		return nil, ErrUnknownPeer
-	case statusUnauthorized:
-		return nil, ErrUnauthorized
-	default:
-		return nil, fmt.Errorf("hub: invalid status %d", status[0])
+	if err := route(conn); err != nil {
+		return nil, err
 	}
 	if !stop() || ctx.Err() != nil {
 		return nil, ctx.Err()
@@ -181,6 +193,28 @@ func Connect(ctx context.Context, addr string, local *identity.Local, hubID iden
 	}
 	success = true
 	return &connection{Conn: conn, raw: raw, done: make(chan struct{})}, nil
+}
+
+func connectOuter(conn *tls.Conn, req Request) error {
+	if err := writeRequest(conn, req); err != nil {
+		return fmt.Errorf("hub: send request: %w", err)
+	}
+	var status [1]byte
+	if _, err := io.ReadFull(conn, status[:]); err != nil {
+		return fmt.Errorf("hub: read status: %w", err)
+	}
+	switch status[0] {
+	case statusOK:
+		return nil
+	case statusBusy:
+		return ErrPeerBusy
+	case statusUnknownPeer:
+		return ErrUnknownPeer
+	case statusUnauthorized:
+		return ErrUnauthorized
+	default:
+		return fmt.Errorf("hub: invalid status %d", status[0])
+	}
 }
 
 func serverTLS(local *identity.Local) *tls.Config {

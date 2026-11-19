@@ -16,6 +16,8 @@ import (
 	"remote-enet/internal/identity"
 	"remote-enet/internal/linktest"
 	"remote-enet/internal/observe"
+	"remote-enet/internal/pairing"
+	"remote-enet/internal/pairing/cpace"
 	"remote-enet/internal/session"
 	"remote-enet/internal/settings"
 )
@@ -41,6 +43,8 @@ type controlledRuntime struct {
 	release    chan struct{}
 	finish     chan error
 	test       func(context.Context, uint64) (linktest.Result, error)
+	numeric    *pairing.Manager
+	issue      func(context.Context) (pairing.Display, error)
 }
 
 func newRuntime() *controlledRuntime {
@@ -93,7 +97,40 @@ func (f *controlledRuntime) RunClient(ctx context.Context, cfg app.ClientConfig)
 }
 
 func (f *controlledRuntime) RunOperator(ctx context.Context, cfg app.OperatorConfig) error {
+	manager := pairing.NewManager(pairing.Config{Address: cfg.ShareAddress})
+	f.mu.Lock()
+	f.numeric = manager
+	f.mu.Unlock()
+	defer manager.Close()
 	return f.run(runCall{ctx: ctx, operator: cfg})
+}
+
+func (f *controlledRuntime) numericManager() *pairing.Manager {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.numeric
+}
+
+func (f *controlledRuntime) IssueNumericCode(ctx context.Context) (pairing.Display, error) {
+	if f.issue != nil {
+		return f.issue(ctx)
+	}
+	return f.numericManager().Issue()
+}
+
+func (f *controlledRuntime) NumericCodeStatus() pairing.Status {
+	if manager := f.numericManager(); manager != nil {
+		return manager.Status()
+	}
+	return pairing.Status{Reason: cpace.ReasonUnavailable}
+}
+
+func (f *controlledRuntime) NumericCodeDisplay(_ context.Context, generation uint64) (pairing.Display, error) {
+	return f.numericManager().Display(generation)
+}
+
+func (f *controlledRuntime) RevokeNumericCode(ctx context.Context, generation uint64) error {
+	return f.numericManager().Revoke(ctx, generation)
 }
 
 func (f *controlledRuntime) TestLinkForGeneration(ctx context.Context, generation uint64, _ linktest.Options) (linktest.Result, error) {

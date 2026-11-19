@@ -204,6 +204,10 @@ func TestOperatorInvalidStateIsLocalButBindFailureIsFatal(t *testing.T) {
 
 type testConnector struct{ session transport.Session }
 
+func (testConnector) DialDirectPair(context.Context, string) (transport.Session, error) {
+	panic("unexpected bootstrap dial on a pinned connection")
+}
+
 func (c testConnector) Dial(context.Context, transport.PeerInfo) (transport.Session, error) {
 	return c.session, nil
 }
@@ -239,7 +243,7 @@ func TestClientPersistsPeerAndFailsClosedOnSaveError(t *testing.T) {
 			nic, gateway := gatewayState(t)
 			done := make(chan connectionResult, 1)
 			go func() {
-				connected, fatal, err := New().clientConnection(ctx, testConnector{a}, peer, [16]byte{}, store, nic, gateway, connectionConfig(nic))
+				_, connected, fatal, err := New().clientConnection(ctx, testConnector{a}, peer, [16]byte{}, store, nic, gateway, connectionConfig(nic))
 				done <- connectionResult{connected, fatal, err}
 			}()
 			var s *session.Session
@@ -283,4 +287,93 @@ func TestClientPersistsPeerAndFailsClosedOnSaveError(t *testing.T) {
 			}
 		})
 	}
+}
+
+type clientConnectedHandler struct {
+	slog.Handler
+	connected chan struct{}
+	resume    chan struct{}
+}
+
+func (h clientConnectedHandler) Handle(ctx context.Context, record slog.Record) error {
+	if record.Message == "client connected" {
+		close(h.connected)
+		<-h.resume
+	}
+	return h.Handler.Handle(ctx, record)
+}
+
+func TestClientRecordsNICChangeWhenSessionAlreadyEnded(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	store, _ := storeForTest(t)
+	a, b := memtransport.Pair(t, identity.Fingerprint{1}, identity.Fingerprint{2})
+	server := make(chan error, 1)
+	go func() {
+		_, err := session.Run(ctx, b, session.Options{
+			Role: session.RoleOperator, Trusted: func(identity.Fingerprint) bool { return true },
+		})
+		server <- err
+	}()
+	nic, gateway := gatewayState(t)
+	checkNIC := make(chan struct{})
+	cfg := connectionConfig(nic)
+	cfg.Hooks.Wait = func(ctx context.Context, _ time.Duration) error {
+		select {
+		case <-checkNIC:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	cfg.Hooks.Interfaces = func(context.Context) ([]carside.NIC, error) {
+		changed := nic
+		changed.Address = netip.MustParseAddr("127.0.0.2")
+		return []carside.NIC{changed}, nil
+	}
+	handler := clientConnectedHandler{
+		Handler: quietLogger().Handler(), connected: make(chan struct{}), resume: make(chan struct{}, 1),
+	}
+	defer close(handler.resume)
+	cfg.Logger = slog.New(handler)
+	peer := transport.PeerInfo{ID: identity.Fingerprint{2}, Endpoints: []transport.Endpoint{{Kind: "hub", Addr: "localhost:47000", Hub: identity.Fingerprint{2}}}}
+	r := New()
+	done := make(chan connectionResult, 1)
+	go func() {
+		_, connected, fatal, err := r.clientConnection(ctx, testConnector{a}, peer, [16]byte{}, store, nic, gateway, cfg)
+		done <- connectionResult{connected, fatal, err}
+	}()
+	if err := <-server; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-handler.connected:
+	case <-ctx.Done():
+		t.Fatal("client did not connect")
+	}
+	r.mu.Lock()
+	active := r.active
+	r.mu.Unlock()
+	close(checkNIC)
+	select {
+	case <-active.s.Done():
+	case <-ctx.Done():
+		t.Fatal("session did not end after NIC change")
+	}
+	if !errors.Is(active.s.Err(), context.Canceled) || !errors.Is(context.Cause(active.ctx), ErrNICChanged) {
+		t.Fatalf("expected both end signals, got session=%v connection=%v", active.s.Err(), context.Cause(active.ctx))
+	}
+	handler.resume <- struct{}{}
+	if got := result(t, done); !got.connected || got.fatal || !errors.Is(got.err, ErrNICChanged) {
+		t.Fatalf("connection result: %+v", got)
+	}
+	for _, event := range r.Snapshot().Metrics.Events {
+		if event.Kind == "session-end" {
+			if event.Error != ErrNICChanged.Error() {
+				t.Fatalf("recorded session end: %q", event.Error)
+			}
+			return
+		}
+	}
+	t.Fatal("missing session-end event")
 }

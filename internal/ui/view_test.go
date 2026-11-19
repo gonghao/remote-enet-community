@@ -94,8 +94,8 @@ func TestClientInputAndLifecycle(t *testing.T) {
 	click(t, tt, "Refresh adapters")
 	v.Complete(ActionRefresh)
 	tt.Frame()
-	click(t, tt, "Invitation code")
-	if !tt.Focused("Invitation code") {
+	click(t, tt, "Invite or address:port and code")
+	if !tt.Focused("Invite or address:port and code") {
 		t.Fatal("invitation label did not focus the native editor")
 	}
 	tt.SetClipboard("  test-only-code  ")
@@ -117,7 +117,7 @@ func TestClientInputAndLifecycle(t *testing.T) {
 	if !tt.HasText("Waiting for adapter") || v.invitation != "" {
 		t.Fatal("running state did not update stage or clear transient invitation")
 	}
-	input(t, tt, "Invitation code", "blocked")
+	input(t, tt, "Invite or address:port and code", "blocked")
 	click(t, tt, "Refresh adapters")
 	click(t, tt, "Adapter selection")
 	if _, found := tt.Find("Ethernet · 169.254.10.1"); found {
@@ -284,7 +284,7 @@ func TestClientAdapterSavePreservesSettingsDraft(t *testing.T) {
 			}}
 			v.SetState(state)
 			tt := ui.NewTester(v.Render, clientWidth, clientHeight)
-			input(t, tt, "Invitation code", "test-only-code")
+			input(t, tt, "Invite or address:port and code", "test-only-code")
 			if editPreference {
 				openSettings(t, tt)
 				click(t, tt, "Allow peer connection tests")
@@ -351,7 +351,7 @@ func TestClientAdapterSaveFailureRestoresSelection(t *testing.T) {
 			}}
 			v.SetState(state)
 			tt := ui.NewTester(v.Render, clientWidth, clientHeight)
-			input(t, tt, "Invitation code", "test-only-code")
+			input(t, tt, "Invite or address:port and code", "test-only-code")
 			wantDraft := cfg
 			if editPreference {
 				openSettings(t, tt)
@@ -593,17 +593,17 @@ func TestClientPasteAtMinimumSize(t *testing.T) {
 			v := New(settings.Default(), Actions{Connect: func(code string) { connected = code }})
 			tt := ui.NewTester(v.Render, clientMinWidth, clientMinHeight)
 			tt.SetZoom(zoom)
-			for _, label := range []string{"Adapter selection", "Refresh adapters", "Invitation code", "Connect client", "Stop runtime"} {
+			for _, label := range []string{"Adapter selection", "Refresh adapters", "Invite or address:port and code", "Connect client", "Stop runtime"} {
 				r, ok := tt.Find(label)
 				if !ok || r.X < 0 || r.Y < 0 || r.W <= 0 || r.H <= 0 || r.X+r.W > clientMinWidth || r.Y+r.H > clientMinHeight {
 					t.Errorf("primary control %q is outside the minimum window: %+v", label, r)
 				}
 			}
-			click(t, tt, "Invitation code")
+			click(t, tt, "Invite or address:port and code")
 			code := "test-only-" + strings.Repeat("A", 1800)
 			tt.SetClipboard(code)
 			tt.Command("paste")
-			r, ok := tt.Find("Invitation code")
+			r, ok := tt.Find("Invite or address:port and code")
 			if !ok || r.X < 0 || r.X+r.W > clientMinWidth {
 				t.Fatalf("invitation input overflowed: %+v", r)
 			}
@@ -646,6 +646,77 @@ func TestResponsiveScrollAndLongInvitation(t *testing.T) {
 					t.Fatal("events inaccessible after scrolling")
 				}
 			})
+		}
+	}
+}
+
+func TestPeerIDDetailsAndCopy(t *testing.T) {
+	peer := identity.Fingerprint{1, 2, 3, 4, 5, 6}
+	for _, entry := range []struct {
+		name, button, back string
+		operator, saved    bool
+	}{
+		{name: "status card", button: "Peer details", back: "Back to session"},
+		{name: "current client", button: "Current client details", back: "Back to session", operator: true},
+		{name: "remembered peer", button: "Peer details", back: "Back to settings", saved: true},
+	} {
+		for _, language := range []string{"en", "zh-Hans", "zh-Hant"} {
+			for _, zoom := range []float32{1, 1.5} {
+				t.Run(fmt.Sprintf("%s/%s/%.1f", entry.name, language, zoom), func(t *testing.T) {
+					cfg := settings.Default()
+					if entry.operator {
+						cfg = operatorConfig()
+					}
+					if entry.saved {
+						cfg.Client.Peer = peer.String()
+					}
+					var copied string
+					v := New(cfg, Actions{Copy: func(s string) { copied = s }})
+					v.SetLanguage(language)
+					if !entry.saved {
+						v.SetState(State{Running: true, Runtime: app.Snapshot{Phase: app.PhaseConnected, Peer: peer}})
+					}
+					width, height := 680, 560
+					if entry.operator {
+						width, height = 900, 620
+					}
+					tt := ui.NewTester(v.Render, width, height)
+					tt.SetZoom(zoom)
+					if entry.saved {
+						click(t, tt, v.tr("Settings"))
+					}
+					want := peer.Short()
+					if entry.operator {
+						want = v.tr("Current client · %s", want)
+					}
+					if !tt.HasText(want) || tt.HasText(peer.String()) {
+						t.Fatalf("expected %q and no full peer ID", want)
+					}
+					button := v.tr(entry.button)
+					scrollTo(t, tt, button, float32(width), float32(height))
+					click(t, tt, button)
+					if !tt.HasText(peer.String()) || copied != "" {
+						t.Fatal("details should reveal the full peer ID without copying it")
+					}
+					click(t, tt, v.tr("Copy full peer ID"))
+					if copied != peer.String() {
+						t.Fatalf("copied %q, want %q", copied, peer)
+					}
+					click(t, tt, v.tr(entry.back))
+					if !tt.HasText(want) || tt.HasText(peer.String()) {
+						t.Fatal("back did not return to the short ID")
+					}
+					if entry.operator {
+						scrollTo(t, tt, button, float32(width), float32(height))
+						click(t, tt, button)
+						v.SetState(State{Running: true, Runtime: app.Snapshot{Phase: app.PhaseListening}})
+						tt.Frame()
+						if v.page != sessionPage || !v.detailsPeer.IsZero() || tt.HasText(peer.Short()) || tt.HasText(peer.String()) {
+							t.Fatal("disconnect retained the client details")
+						}
+					}
+				})
+			}
 		}
 	}
 }

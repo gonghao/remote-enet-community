@@ -119,6 +119,14 @@ EOF
 
 连接后 Operator 日志显示本地监听地址。模拟工具向 `127.0.0.1:26811/udp` 发完整探测 `00 00 00 00 00 11` 可获得原始发现应答；诊断与控制 TCP 分别为 `26801` 和 `26811`。真实 E-Sys／ISTA 自动发现通常使用标准端口，不能由此高位端口测试推断其兼容性。
 
+也可以用数字码首次配对。在 Operator 桌面端生成数字码，将「复制地址和数字码」得到的一行写入仅本人可读的 UTF-8 文件，格式为 `host:port 1234 5678`，文件最多 4 KiB。用 `--pair-file` 传入文件路径，配对后删除临时文件。`--pair-file` 与 `--invite-file`、`--invite`、`--peer` 互斥。
+
+```sh
+./bin/renetd client --state-dir /tmp/remote-enet-demo/client \
+  --pair-file /tmp/remote-enet-demo/pair.txt --nic-addr 127.0.0.1 \
+  --discovery-target 127.0.0.2:16811 --discovery-timeout 300ms
+```
+
 首次配对成功后，Client 会保存 Operator 的指纹和端点。后续不需要旧邀请码，复制 Operator 日志里的完整 `device` 指纹并使用：
 
 ```sh

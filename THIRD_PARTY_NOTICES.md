@@ -10,11 +10,13 @@
 
 | 组件 | 固定版本 | 上游许可/范围 | 许可原文 |
 |---|---|---|---|
+| [filippo.io/edwards25519](https://pkg.go.dev/filippo.io/edwards25519@v1.1.0) | `v1.1.0` | BSD-3-Clause | [LICENSE](third_party/licenses/go/filippo.io/edwards25519/LICENSE) |
 | [github.com/ebitengine/purego](https://pkg.go.dev/github.com/ebitengine/purego@v0.11.1) | `v0.11.1` | Apache-2.0 | [LICENSE](third_party/licenses/go/github.com/ebitengine/purego/LICENSE) |
 | [github.com/egoist/mygo](https://pkg.go.dev/github.com/egoist/mygo@v0.9.1) | `v0.9.1` | MIT；内部 shader 另附 Apache-2.0 | [LICENSE](third_party/licenses/go/github.com/egoist/mygo/LICENSE)、[LICENSE](third_party/licenses/go/github.com/egoist/mygo/internal/shader/LICENSE) |
 | [github.com/fxamacker/cbor/v2](https://pkg.go.dev/github.com/fxamacker/cbor/v2@v2.10.0) | `v2.10.0` | MIT | [LICENSE](third_party/licenses/go/github.com/fxamacker/cbor/v2/LICENSE) |
 | [github.com/go-text/typesetting](https://pkg.go.dev/github.com/go-text/typesetting@v0.3.5) | `v0.3.5` | Unlicense OR BSD-3-Clause；HarfBuzz 另附 MIT | [LICENSE](third_party/licenses/go/github.com/go-text/typesetting/LICENSE)、[LICENSE](third_party/licenses/go/github.com/go-text/typesetting/harfbuzz/LICENSE) |
 | [github.com/google/btree](https://pkg.go.dev/github.com/google/btree@v1.1.2) | `v1.1.2` | Apache-2.0 | [LICENSE](third_party/licenses/go/github.com/google/btree/LICENSE) |
+| [github.com/gtank/ristretto255](https://pkg.go.dev/github.com/gtank/ristretto255@v0.2.0) | `v0.2.0` | BSD-3-Clause | [LICENSE](third_party/licenses/go/github.com/gtank/ristretto255/LICENSE) |
 | [github.com/hashicorp/yamux](https://pkg.go.dev/github.com/hashicorp/yamux@v0.1.2) | `v0.1.2` | MPL-2.0 | [LICENSE](third_party/licenses/go/github.com/hashicorp/yamux/LICENSE) |
 | [github.com/x448/float16](https://pkg.go.dev/github.com/x448/float16@v0.8.4) | `v0.8.4` | MIT | [LICENSE](third_party/licenses/go/github.com/x448/float16/LICENSE) |
 | [golang.org/x/crypto](https://pkg.go.dev/golang.org/x/crypto@v0.57.0) | `v0.57.0` | BSD-3-Clause（Go Authors） | [LICENSE](third_party/licenses/go/golang.org/x/crypto/LICENSE) |

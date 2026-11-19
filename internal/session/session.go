@@ -3,10 +3,12 @@ package session
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -41,8 +43,12 @@ type Options struct {
 	AllowLinkTest bool
 	Trusted       func(identity.Fingerprint) bool
 	// AcceptToken owns atomic token consumption and persistence of trust.
-	AcceptToken func(identity.Fingerprint, [16]byte) bool
-	Token       [16]byte
+	AcceptToken    func(identity.Fingerprint, [16]byte) bool
+	Token          [16]byte
+	DigitalCode    string
+	DigitalManager DigitalResponder
+	LocalFP        identity.Fingerprint
+	Remember       func(context.Context, identity.Fingerprint) error
 	// Callbacks must return when ctx is canceled. OnMessage must not block.
 	OnTunnel  func(context.Context, proto.OpenTunnel, transport.Stream)
 	OnMessage func(any)
@@ -69,6 +75,7 @@ type Session struct {
 	sent    time.Time
 	// NegotiatedCapabilities is immutable after Run returns.
 	NegotiatedCapabilities []string
+	outcome                PairingOutcome
 	linkTestNegotiated     bool
 	linkTestIn             atomic.Bool
 	linkTestOut            atomic.Bool
@@ -91,6 +98,10 @@ func Run(ctx context.Context, ts transport.Session, o Options) (*Session, error)
 		o.Logger = slog.Default()
 	}
 	o.Capabilities = linkTestCapabilities(o.Capabilities, o.AllowLinkTest)
+	o.Capabilities = slices.DeleteFunc(o.Capabilities, func(v string) bool { return v == proto.PairDirectCapability })
+	if o.Role == RoleClient && o.DigitalCode != "" || o.Role == RoleOperator && o.DigitalManager != nil {
+		o.Capabilities = append(o.Capabilities, proto.PairDirectCapability)
+	}
 	runCtx, cancel := context.WithCancel(ctx)
 	s := &Session{ts: ts, opts: o, ctx: runCtx, cancel: cancel, done: make(chan struct{})}
 	go func() {
@@ -108,16 +119,26 @@ func Run(ctx context.Context, ts transport.Session, o Options) (*Session, error)
 	hctx, hcancel := context.WithTimeout(ctx, handshakeTimeout)
 	stop := context.AfterFunc(hctx, func() { s.finish(hctx.Err()) })
 	err := s.handshake(hctx)
+	s.opts.DigitalCode = ""
 	stop()
-	if hctx.Err() != nil {
-		err = hctx.Err()
-	} else if err != nil && !errors.Is(err, ErrPairing) && !errors.Is(err, ErrVersion) {
-		if transportErr := ts.Err(); transportErr != nil && !errors.Is(err, transportErr) {
+	handshakeContextErr := hctx.Err()
+	protocolErr := errors.Is(err, ErrPairing) || errors.Is(err, ErrVersion)
+	if !protocolErr {
+		if handshakeContextErr != nil {
+			err = handshakeContextErr
+		} else if transportErr := ts.Err(); err != nil && transportErr != nil && !errors.Is(err, transportErr) {
 			err = fmt.Errorf("%w: %w", transportErr, err)
 		}
 	}
 	hcancel()
 	if err != nil {
+		if o.Role == RoleClient && o.DigitalCode != "" && !protocolErr {
+			// Hello and transport errors can contain unauthenticated peer text.
+			err = pairingFailure(ReasonInterrupted)
+			if handshakeContextErr != nil {
+				err = fmt.Errorf("%w: %w", err, handshakeContextErr)
+			}
+		}
 		s.finish(err)
 		return nil, fmt.Errorf("session: handshake: %w", err)
 	}
@@ -131,6 +152,9 @@ func Run(ctx context.Context, ts transport.Session, o Options) (*Session, error)
 	go s.acceptLoop()
 	return s, nil
 }
+
+const invalidPairingToken = "invalid pairing token"
+
 func (s *Session) handshake(ctx context.Context) error {
 	var err error
 	if s.opts.Initiator {
@@ -142,16 +166,19 @@ func (s *Session) handshake(ctx context.Context) error {
 		return err
 	}
 	local := proto.Hello{ProtoVersion: proto.Version, Role: string(s.opts.Role), AppVersion: s.opts.AppVersion, Capabilities: s.opts.Capabilities}
+	localHash, peerHash := sha256.New(), sha256.New()
+	writer := io.MultiWriter(s.control, localHash)
+	reader := io.TeeReader(s.control, peerHash)
 	var msg any
 	if s.opts.Initiator {
-		if err = proto.Write(s.control, local); err != nil {
+		if err = proto.Write(writer, local); err != nil {
 			return err
 		}
-		msg, err = proto.Read(s.control, proto.MaxFrameLen)
+		msg, err = proto.Read(reader, proto.MaxFrameLen)
 	} else {
-		msg, err = proto.Read(s.control, proto.MaxFrameLen)
+		msg, err = proto.Read(reader, proto.MaxFrameLen)
 		if err == nil {
-			err = proto.Write(s.control, local)
+			err = proto.Write(writer, local)
 		}
 	}
 	if err != nil {
@@ -165,7 +192,7 @@ func (s *Session) handshake(ctx context.Context) error {
 		return fmt.Errorf("%w: peer %d, local %d", ErrVersion, hello.ProtoVersion, proto.Version)
 	}
 	if (s.opts.Role == RoleClient && hello.Role != string(RoleOperator)) || (s.opts.Role == RoleOperator && hello.Role != string(RoleClient)) {
-		return fmt.Errorf("session: unexpected peer role %q", hello.Role)
+		return errors.New("session: unexpected peer role")
 	}
 	for _, cap := range s.opts.Capabilities {
 		for _, remote := range hello.Capabilities {
@@ -177,6 +204,16 @@ func (s *Session) handshake(ctx context.Context) error {
 				break
 			}
 		}
+	}
+	if slices.Contains(s.NegotiatedCapabilities, proto.PairDirectCapability) {
+		if err := s.digital(ctx, [32]byte(localHash.Sum(nil)), [32]byte(peerHash.Sum(nil))); err != nil {
+			return err
+		}
+		s.outcome = DigitalPaired
+		return nil
+	}
+	if s.opts.Role == RoleClient && s.opts.DigitalCode != "" || s.opts.Role == RoleOperator && slices.Contains(hello.Capabilities, proto.PairDirectCapability) {
+		return pairingFailure(ReasonUnsupported)
 	}
 	if s.opts.Role == RoleClient {
 		if s.opts.Token != [16]byte{} {
@@ -193,7 +230,10 @@ func (s *Session) handshake(ctx context.Context) error {
 			return fmt.Errorf("session: expected PairResult, got %T", msg)
 		}
 		if !result.Accepted {
-			return fmt.Errorf("%w: %s", ErrPairing, result.Reason)
+			if result.Reason == invalidPairingToken {
+				return fmt.Errorf("%w: %s", ErrPairing, invalidPairingToken)
+			}
+			return ErrPairing
 		}
 		return nil
 	}
@@ -208,7 +248,7 @@ func (s *Session) handshake(ctx context.Context) error {
 	}
 	result := proto.PairResult{Accepted: trusted}
 	if !trusted {
-		result.Reason = "invalid pairing token"
+		result.Reason = invalidPairingToken
 	}
 	if err := proto.Write(s.control, result); err != nil {
 		if !trusted {
@@ -280,7 +320,7 @@ func (s *Session) readControl() {
 				s.opts.OnRTT(sample)
 			}
 		case proto.PairToken: // A trusted peer may still send an invitation token.
-		case proto.Hello, proto.PairResult, proto.OpenTunnel:
+		case proto.Hello, proto.PairResult, proto.OpenTunnel, proto.PairShareA, proto.PairShareB, proto.PairConfirmA, proto.PairConfirmB:
 			s.finish(fmt.Errorf("session: unexpected control message %T", m))
 			return
 		default:

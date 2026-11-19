@@ -5,8 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -19,6 +17,7 @@ import (
 	"remote-enet/internal/identity"
 	"remote-enet/internal/linktest"
 	"remote-enet/internal/netpriv"
+	"remote-enet/internal/pairing"
 	"remote-enet/internal/settings"
 	"remote-enet/internal/transport"
 	"remote-enet/internal/trust"
@@ -52,6 +51,8 @@ type State struct {
 	Running, Stopping, Testing bool
 	DirectWorking              bool
 	Invitation, Notice, Error  string
+	NumericCode                pairing.Status
+	PairingHint                string
 	NICs                       []carside.NIC
 	TestResult                 linktest.Result
 	Events                     []string
@@ -65,6 +66,10 @@ type appRuntime interface {
 	Snapshot() app.Snapshot
 	Subscribe(context.Context) <-chan app.Snapshot
 	TestLinkForGeneration(context.Context, uint64, linktest.Options) (linktest.Result, error)
+	IssueNumericCode(context.Context) (pairing.Display, error)
+	NumericCodeStatus() pairing.Status
+	NumericCodeDisplay(context.Context, uint64) (pairing.Display, error)
+	RevokeNumericCode(context.Context, uint64) error
 }
 
 type dependencies struct {
@@ -117,21 +122,22 @@ type subscription struct {
 // A run remains reserved until its runtime, subscription and borrowed workers
 // have all exited, including when a Stop caller abandons its wait.
 type Controller struct {
-	mu        sync.Mutex
-	ctx       context.Context
-	cancel    context.CancelFunc
-	done      chan struct{}
-	closed    bool
-	opts      Options
-	deps      dependencies
-	state     State
-	run       *running
-	invite    *issuingInvite
-	check     *checkingConnection
-	subs      map[*subscription]struct{}
-	gate      chan struct{}
-	ops       sync.WaitGroup
-	stopEpoch uint64
+	mu             sync.Mutex
+	ctx            context.Context
+	cancel         context.CancelFunc
+	done           chan struct{}
+	closed         bool
+	opts           Options
+	deps           dependencies
+	state          State
+	run            *running
+	invite         *issuingInvite
+	check          *checkingConnection
+	subs           map[*subscription]struct{}
+	gate           chan struct{}
+	ops            sync.WaitGroup
+	stopEpoch      uint64
+	codeGeneration uint64
 }
 
 // New's context owns all subsequent runtimes. Individual request contexts do
@@ -214,6 +220,7 @@ func (c *Controller) Snapshot() State {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.refreshCaptureLocked()
+	c.refreshNumericCodeLocked()
 	return cloneState(c.state)
 }
 
@@ -223,6 +230,7 @@ func (c *Controller) Subscribe(ctx context.Context) <-chan State {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.refreshCaptureLocked()
+	c.refreshNumericCodeLocked()
 	sub := &subscription{ch: make(chan State, 1)}
 	if ctx.Err() != nil {
 		close(sub.ch)
@@ -293,6 +301,7 @@ func (c *Controller) Save(ctx context.Context, cfg settings.Config) error {
 	}
 	c.state.Checkup = checkup.Report{}
 	c.state.Invitation = ""
+	c.state.NumericCode = pairing.Status{}
 	c.successLocked("Settings saved.")
 	return nil
 }
@@ -340,6 +349,10 @@ func (c *Controller) availableLocked(ctx context.Context, idle bool) error {
 func (c *Controller) operation(ctx context.Context, idle bool) (context.Context, func(), uint64, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.operationLocked(ctx, idle)
+}
+
+func (c *Controller) operationLocked(ctx context.Context, idle bool) (context.Context, func(), uint64, error) {
 	if err := c.availableLocked(ctx, idle); err != nil {
 		return nil, nil, 0, err
 	}
@@ -416,5 +429,3 @@ func wait(ctx context.Context, done <-chan struct{}) error {
 		return ctx.Err()
 	}
 }
-
-func quietLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }

@@ -11,6 +11,7 @@ import (
 
 	"remote-enet/internal/carside"
 	"remote-enet/internal/identity"
+	"remote-enet/internal/invite"
 	"remote-enet/internal/secure"
 	"remote-enet/internal/transport"
 	hubtransport "remote-enet/internal/transport/hub"
@@ -20,16 +21,22 @@ import (
 // system enumeration, UDP discovery and timers. All hooks must honor ctx;
 // Wait can be called concurrently by the connection monitor and retry loop.
 type ClientHooks struct {
+	// OnPaired runs synchronously after the numeric peer is durable.
+	OnPaired   func(transport.PeerInfo)
 	Interfaces func(context.Context) ([]carside.NIC, error)
 	Discover   func(context.Context, carside.DiscoverOptions) ([]carside.Gateway, error)
 	Wait       func(context.Context, time.Duration) error
 }
+
+// DirectPair contains credentials for one explicit bootstrap dial.
+type DirectPair struct{ Address, Code string }
 
 // ClientConfig accepts exactly one pairing source. Zero durations use defaults;
 // negative durations are configuration errors. NICAddr is never substituted.
 type ClientConfig struct {
 	StateDir               string
 	AllowLinkTest          bool
+	DirectPair             *DirectPair
 	Invite                 string
 	InviteFile             string
 	Peer                   identity.Fingerprint
@@ -50,13 +57,28 @@ func (c *ClientConfig) defaults() error {
 		return fmt.Errorf("app: client state directory required")
 	}
 	choices := 0
-	for _, set := range []bool{c.Invite != "", c.InviteFile != "", !c.Peer.IsZero()} {
+	for _, set := range []bool{c.Invite != "", c.InviteFile != "", !c.Peer.IsZero(), c.DirectPair != nil} {
 		if set {
 			choices++
 		}
 	}
 	if choices != 1 {
-		return fmt.Errorf("app: choose exactly one of invitation, invitation file or paired peer")
+		return fmt.Errorf("app: choose exactly one of invitation, invitation file, paired peer or direct pairing")
+	}
+	if d := c.DirectPair; d != nil {
+		addr, err := invite.ParseAddress(d.Address)
+		if err != nil {
+			return err
+		}
+		if len(d.Code) != 8 {
+			return invite.ErrInvalidCode
+		}
+		for _, digit := range d.Code {
+			if digit < '0' || digit > '9' {
+				return invite.ErrInvalidCode
+			}
+		}
+		c.DirectPair = &DirectPair{Address: addr, Code: d.Code}
 	}
 	if c.NICAddr.IsValid() && !unicastIPv4(c.NICAddr) {
 		return fmt.Errorf("app: NIC address must be unicast IPv4")

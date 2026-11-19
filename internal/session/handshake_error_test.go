@@ -44,10 +44,16 @@ type handshakeStream struct {
 	dropAfterRead  bool
 	dropAfterWrite int
 	cause          error
+	afterRead      func()
 }
 
 func (s *handshakeStream) Read(p []byte) (int, error) {
 	n, err := s.input.Read(p)
+	if s.afterRead != nil && s.input.Len() == 0 {
+		afterRead := s.afterRead
+		s.afterRead = nil
+		afterRead()
+	}
 	if s.dropAfterRead && s.input.Len() == 0 {
 		s.dropAfterRead = false
 		s.owner.drop(s.cause)
@@ -156,5 +162,26 @@ func TestHandshakeErrorSurvivesTransportShutdown(t *testing.T) {
 				t.Fatalf("transport cause was lost: %v", err)
 			}
 		})
+	}
+}
+
+func TestLegacyPairingRejectionWhitelistsPeerReason(t *testing.T) {
+	for _, tc := range []struct {
+		reason string
+		want   string
+	}{
+		{invalidPairingToken, "session: handshake: session: pairing rejected: invalid pairing token"},
+		{"remote text with a fake 0482 7193 code", "session: handshake: session: pairing rejected"},
+		{"expired", "session: handshake: session: pairing rejected"},
+	} {
+		ts := &handshakeTransport{done: make(chan struct{}), closed: make(chan struct{})}
+		ts.stream = &handshakeStream{owner: ts, input: bytes.NewReader(encodedMessages(t,
+			proto.Hello{ProtoVersion: proto.Version, Role: string(RoleOperator)},
+			proto.PairResult{Reason: tc.reason},
+		))}
+		_, err := Run(t.Context(), ts, Options{Role: RoleClient, Initiator: true})
+		if !errors.Is(err, ErrPairing) || err.Error() != tc.want {
+			t.Errorf("legacy rejection = %v, want %q", err, tc.want)
+		}
 	}
 }

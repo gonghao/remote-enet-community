@@ -39,7 +39,7 @@ func TestSubscriptionsCoalesceAndReturnIndependentSnapshots(t *testing.T) {
 	failure := errors.New("latest error")
 	r.finish(failure)
 	stopped := <-slow
-	if stopped.Phase != PhaseStopped || stopped.LastError != failure.Error() {
+	if stopped.Phase != PhaseStopped || stopped.LastError != "Runtime stopped with an error. Check runtime diagnostics." {
 		t.Fatalf("missing final snapshot: %+v", stopped)
 	}
 	if _, ok := <-slow; ok {

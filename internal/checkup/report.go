@@ -61,7 +61,7 @@ func JSON(r Report) ([]byte, error) {
 		if !findingIDs[id] {
 			id = "unknown"
 		}
-		if !findingCodes[code] {
+		if _, direct := directInputStatus(code); !direct && !findingCodes[code] {
 			code = "unknown"
 		}
 		switch status {

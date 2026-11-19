@@ -18,6 +18,7 @@
 | 公网入口、TLS 钉扎、配对复连、peer-only echo | [Wave 17](WAVE17.md) |
 | F20 实车只读：E-Sys 建连及 FA / SVT / ECU 读取，ISTA 识别及 ECU 树 | [F20 只读验收](research/f20-readonly-2026-11-18.md) |
 | AGPL-3.0-only 与第三方许可随包携带 | [OPEN-SOURCE-READINESS](OPEN-SOURCE-READINESS.md) |
+| 直连数字配对（地址 + 8 位码，CPace -21）与 LAN 台架验收 | [PAIRING](PAIRING.md)、PR #2 |
 
 ## R1 · 公开仓库与发行基础
 
@@ -29,11 +30,13 @@
 | 版本与发布 | 版本号与 tag 规则、对应版本源码的获取入口、CI 构建制品 |
 | 签名与更新 | macOS Developer ID 与公证、Windows Authenticode、签名更新清单；只属于官方发行层，功能代码不分叉 |
 
-## R2 · 直连数字配对（下一项开发）
+## R2 · 直连数字配对（已完成，设计见 [PAIRING](PAIRING.md)）
+
+状态（2026-11-19）：经 PR #2 合并。1–6 已实现，离线测试与独立审查通过。7 已完成 LAN 台架：Windows GUI Operator + Linux CLI Client + 假网关，覆盖首次配对、无码重连、旧码重用、猜错计数与第 5 次成功、撤销、次数用尽、过期和复制格式。Mac GUI Client 与公网验证移入下方「并行验收线」；Mac 经 WG 访问台架时无法发现非同链路网关，属车端有意限制。独立密码学复核列为后续项，不阻塞发布。
 
 目标：Client 输入「地址:端口 + 8 位数字码」即可完成首次配对，原始邀请码保留。
 
-1. PAKE 选型（候选 CPace / SPAKE2）：纯 Go、无 cgo，评估维护状态与审计情况，在引入依赖的 commit 中写明理由。
+1. PAKE 选型：已定为 CPace（固定草案 -21）+ `github.com/gtank/ristretto255`，理由见 [PAIRING §1](PAIRING.md#1-密码套件选择)；引入依赖的 commit 中写明理由。
 2. 配对握手：密钥确认覆盖双方设备公钥指纹；配对成功后沿用现有信任存储，钉住对端指纹。
 3. Operator 侧：数字码只保存在内存中，设置有效期、单码失败次数和总尝试预算，成功或超出预算后立即作废；可以撤销。
 4. Client 侧：同一个输入框识别原始邀请码或「地址 + 数字码」，并给出明确的错误原因。
@@ -41,7 +44,7 @@
 6. 测试：猜错与次数用尽、码过期、并发兑换、中间人中转、配对后重连无需码。只使用 loopback 和内存传输。
 7. 验收：先用隔离假车，再在家庭以外网络做一次公网验证。
 
-## R3 · 自建 Hub 与中心地址配置
+## R3 · 自建 Hub 与中心地址配置（下一项开发）
 
 1. 独立 Hub 命令：基于现有 `internal/hub` 提供可单独部署的入口，两端都通过出站连接接入。
 2. 票据验签：Hub 配置验签公钥，强制校验票据；缺少配置时拒绝，不回退到无鉴权模式。
@@ -72,19 +75,19 @@
 | macOS 上的 Operator 功能 | HSFZ 抓取、全局快捷键 Cmd+Shift+M（可能需要“辅助功能”权限）、三语言切换、像素风界面只做过交叉构建，未在 Mac 实机验证 |
 | MGU 直连与 L3 呈现的实车验证 | 隔离 fixture 已验证，实车尚未验证 |
 | 编码与刷写经隧道的透明转发 | 未验收；只验证转发，由用户使用真实工具操作 |
+| 数字配对的 Mac GUI Client 与公网验收 | LAN 台架已通过；需在同网段或接车时验证 Mac GUI Client（含 rebase 后的紧凑窗口布局），并从家庭以外网络经 DDNS 走一遍首次配对与无码重连 |
 | 实车或公网下的长时运行 | 现有八小时结果只限 loopback / 内存设备 |
 
 ## 小修与加固（来自代码审查遗留）
 
+2026-11-19 已完成：Client 会话结束原因改用 `context.Cause`、车端发现的部分发送失败补 warn 日志、`renet-tuncheck` 报告改为原子 0600 写入、Peer ID 默认显示短 ID。
+
+2026-11-19 另完成：Operator / Client 提示区固定高度，消息变化不再挤动下方控件；linktest 请求预算改为收齐请求后起算，并在 I/O 错误时核对本地截止时间，修正超时被判为中断；L3 出口队列按一个最大 TCP 窗口及其 ACK 定容（原误用最大连接数，默认仅 64 包，大流量时尾部丢包）；Operator 抓取测试等待录制完成再停止。三个偶发失败修复前后：8/400 → 0/400、2/15 → 0/40（-race）、3/200 → 0/200（-race）。
+
 | 项目 | 说明 |
 |---|---|
-| Client 会话结束原因 | `internal/app` 的 `clientConnection` 在网卡变化断开时，两个 `select` 分支可能同时就绪；`session.Run` 结束时用的是 `ctx.Err()` 而非 `context.Cause`，结束原因有时记成 `context canceled`，影响 Log 与诊断导出的排障。重试与 LastError 不受影响 |
-| 车端发现的部分发送失败 | `carside.Discover` 向多个目的地发送时，只要有一个成功，其他目的地的失败既不返回也不记日志。应补 warn 日志；2026-11-18 实车排查广播走错网卡时正需要这类信息 |
-| `renet-tuncheck` 报告写入 | `writeReport` 直接 `os.WriteFile`，覆盖已有文件时保留原权限，README 的 0600 说法不准确；改为与 `renet-labprobe` 相同的原子写 |
-| Peer ID 显示 | 现在状态卡、当前客户端、已记住的对端都显示完整指纹。改为默认显示短 ID（已有 `Fingerprint.Short()`，即前两组），完整 ID 放进详情并可复制。设备名目前协议里没有，需在握手中新增字段，属于协议变更，单独设计 |
+| 设备名 | Peer ID 已改为默认显示短 ID、详情页可复制完整 ID；设备名目前协议里没有，需在握手中新增字段，属于协议变更，单独设计 |
 | settings 可选加固（Wave 5 审查，当时有意未做） | 路径以分隔符结尾时留下空目录；rename 后未 fsync 父目录；监听地址接受 `[]:47000`；`NICName` 未拒绝 U+202E 等 Cf 类控制字符；缺字段报错不指明字段 |
-| linktest 超时竞争 | `TestPublicRuntimesReconnectAndReleasePresenter` 在 CI 上偶发失败（2026-11-19，PR #1 两次，重跑通过）。用 1ms 超时测连接测试时，服务端预算从 `Serve` 入口起算，可能先于客户端到期并关闭流，客户端读到 EOF 时自身 ctx 尚未超时，结果被归为 `ErrTransport` 而非超时。可考虑服务端预算从收到请求起算或加少量余量，改动涉及 linktest 预算语义，单独设计 |
-| operator 抓取测试偶发失败 | `TestCapturePresenterLifecycleAndDiscovery` 在 CI race 任务偶发失败一次（2026-11-19，`capture_test.go:148`，`starts=4` 且 frames 计数不符），重跑通过；需确认断言是否依赖未同步的时序 |
 
 ## 研究项（未排期）
 

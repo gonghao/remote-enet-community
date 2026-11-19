@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/netip"
 	"sort"
@@ -19,6 +20,7 @@ type DiscoverOptions struct {
 	NIC          NIC
 	Destinations []netip.AddrPort
 	Timeout      time.Duration
+	Logger       *slog.Logger
 }
 
 // IdentRaw retains the complete UDP datagram, including its six-byte envelope.
@@ -75,25 +77,8 @@ func Discover(ctx context.Context, o DiscoverOptions) ([]Gateway, error) {
 		}
 		return nil, fmt.Errorf("carside: set discovery deadline: %w", err)
 	}
-	var sent bool
-	var sendErr error
-	seen := make(map[netip.AddrPort]struct{}, len(destinations))
-	for _, target := range destinations {
-		if _, duplicate := seen[target]; duplicate {
-			continue
-		}
-		seen[target] = struct{}{}
-		if _, err := conn.WriteToUDPAddrPort(hsfz.IdentRequest, target); err != nil {
-			sendErr = fmt.Errorf("carside: send discovery to %s: %w", target, err)
-		} else {
-			sent = true
-		}
-	}
-	if !sent {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		return nil, sendErr
+	if err := sendDiscovery(ctx, o, destinations, conn.WriteToUDPAddrPort); err != nil {
+		return nil, err
 	}
 	gateways := make(map[netip.Addr]Gateway)
 	buffer := make([]byte, 65535)
@@ -133,6 +118,35 @@ func Discover(ctx context.Context, o DiscoverOptions) ([]Gateway, error) {
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Address.Compare(result[j].Address) < 0 })
 	return result, nil
+}
+
+func sendDiscovery(ctx context.Context, o DiscoverOptions, destinations []netip.AddrPort, write func([]byte, netip.AddrPort) (int, error)) error {
+	logger := o.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	var sent bool
+	var sendErr error
+	seen := make(map[netip.AddrPort]struct{}, len(destinations))
+	for _, target := range destinations {
+		if _, duplicate := seen[target]; duplicate {
+			continue
+		}
+		seen[target] = struct{}{}
+		if _, err := write(hsfz.IdentRequest, target); err != nil {
+			logger.WarnContext(ctx, "discovery send failed", "destination", target, "interface", o.NIC.Name, "source", o.NIC.Address, "error", err)
+			sendErr = fmt.Errorf("carside: send discovery to %s: %w", target, err)
+		} else {
+			sent = true
+		}
+	}
+	if !sent {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return sendErr
+	}
+	return nil
 }
 
 // VehicleState copies the full identification datagram independently of the gateway cache.

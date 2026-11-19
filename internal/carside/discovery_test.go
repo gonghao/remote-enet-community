@@ -3,7 +3,10 @@ package carside
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
 	"net"
 	"net/netip"
 	"testing"
@@ -141,5 +144,45 @@ func TestDiscoverRejectsInvalidConfiguration(t *testing.T) {
 	cancel()
 	if _, err := Discover(ctx, DiscoverOptions{NIC: testNIC()}); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
+	}
+}
+
+func TestSendDiscoveryLogsFailedDestination(t *testing.T) {
+	bad := netip.MustParseAddrPort("127.0.0.2:6811")
+	good := netip.MustParseAddrPort("127.0.0.3:6811")
+	sendErr := errors.New("test send failure")
+	nic := testNIC()
+	for _, allFail := range []bool{false, true} {
+		var logs bytes.Buffer
+		o := DiscoverOptions{NIC: nic, Logger: slog.New(slog.NewJSONHandler(&logs, nil))}
+		targets := []netip.AddrPort{bad, bad}
+		if !allFail {
+			targets = append(targets, good)
+		}
+		err := sendDiscovery(t.Context(), o, targets, func(packet []byte, target netip.AddrPort) (int, error) {
+			if target == bad {
+				return 0, sendErr
+			}
+			return len(packet), nil
+		})
+		if allFail && !errors.Is(err, sendErr) || !allFail && err != nil {
+			t.Fatalf("allFail=%v: %v", allFail, err)
+		}
+		var record map[string]any
+		decoder := json.NewDecoder(&logs)
+		if err := decoder.Decode(&record); err != nil {
+			t.Fatal(err)
+		}
+		for key, want := range map[string]string{
+			"level": "WARN", "destination": bad.String(), "interface": nic.Name,
+			"source": nic.Address.String(), "error": sendErr.Error(),
+		} {
+			if record[key] != want {
+				t.Errorf("%s = %v, want %q", key, record[key], want)
+			}
+		}
+		if err := decoder.Decode(&record); err != io.EOF {
+			t.Fatalf("expected exactly one warning, got %v (%v)", record, err)
+		}
 	}
 }

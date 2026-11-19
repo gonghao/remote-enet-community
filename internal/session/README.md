@@ -11,3 +11,5 @@ Client 的非零 Token 在 Hello 后发送；零 Token 不发送。Operator 对�
 RTT 使用本地单调时钟计算，Pong 必须匹配待处理 Ping 的序号和时间戳；最多保留一个待处理探测。默认每秒检查并发送 Ping，不设独立心跳断开阈值。
 
 `Options.AllowLinkTest` 默认为 false，只有显式开启才自动声明 `linktest/1`；手写 Capabilities 不绕过该开关。双方协商成功后，`TestLink(ctx, linktest.Options) (linktest.Result, error)` 才打开专用流；不支持返回 `linktest.ErrUnsupported`。测试使用空 Target/Origin 的既有 OpenTunnel 头，在 session 内终止，永不进入 `OnTunnel`。每方向一个并发槽，单次取消/超时/协议错误只关闭该测试流；服务端有独立硬截止时间。限额、错误和结果含义见 [linktest 协议](../linktest/README.md)。`NegotiatedCapabilities` 仍是调用方只读的能力列表，测试权限保存在内部，外部修改这个列表不能启用测试。
+
+Client 通过 `Options.DigitalCode` 发起一次数字配对，Operator 通过 `DigitalManager` 声明能力。两端注入本机 `LocalFP`，传输提供内层 TLS exporter。数字配对优先于已信任快捷路径，缺少能力时结束本次连接。Operator 验证客户端标签后，通过尝试对象的 Commit 调用 `Remember(ctx, clientFP)`；落盘成功才发送 Operator 标签。Client 验证该标签后，成功返回的 Session 才报告 `PairingOutcome() == DigitalPaired`。其余成功连接报告 Legacy。数字拒绝用 `errors.As` 提取 `cpace.Reason`；本地缺少对端能力为 `session.ReasonUnsupported`，未知远端原因映射为 `session.ReasonInterrupted`。

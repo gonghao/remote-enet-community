@@ -93,6 +93,13 @@ func (s *shell) ready() {
 		actions.IssueInvite = func() {
 			s.submit(renetui.ActionInvite, func(ctx context.Context) error { _, err := s.controller.IssueInvite(ctx); return err })
 		}
+		actions.IssueNumericCode = s.issueNumericCode
+		actions.CopyNumericCode = s.copyNumericCode
+		actions.RevokeNumericCode = func(generation uint64) {
+			s.submit(renetui.ActionRevokeNumericCode, func(ctx context.Context) error {
+				return s.controller.RevokeNumericCode(ctx, generation)
+			})
+		}
 	}
 	s.view = renetui.New(s.state.Config, actions)
 
@@ -130,6 +137,8 @@ func (s *shell) ready() {
 		if s.quitReady {
 			return
 		}
+		s.view.ClearPairingSecrets()
+		s.invalidate()
 		if e.SessionEnding {
 			s.quitting = true
 			s.releaseCaptureShortcut()
@@ -182,6 +191,10 @@ func (s *shell) ready() {
 // repeated clicks bounded. Stop has one reserved, coalesced request so it
 // can cancel pending work even when all ordinary action slots are occupied.
 func (s *shell) submit(action renetui.Action, fn func(context.Context) error) bool {
+	return s.submitWithCompletion(action, fn, nil)
+}
+
+func (s *shell) submitWithCompletion(action renetui.Action, fn func(context.Context) error, complete func()) bool {
 	if s.quitting {
 		return false
 	}
@@ -190,6 +203,10 @@ func (s *shell) submit(action renetui.Action, fn func(context.Context) error) bo
 	}
 	if (action == renetui.ActionStop || action == renetui.ActionStopCapture) && s.captureCancel != nil {
 		s.captureCancel()
+	}
+	if action == renetui.ActionStop && s.view != nil {
+		s.view.ClearPairingSecrets()
+		s.invalidate()
 	}
 	if action == renetui.ActionStop || action == renetui.ActionStopCapture {
 		s.releaseCaptureShortcut()
@@ -259,6 +276,9 @@ func (s *shell) submit(action renetui.Action, fn func(context.Context) error) bo
 				s.commandErr = operationMessage(err, s.state.Error)
 				s.applyState()
 				s.view.Complete(action)
+				if err == nil && complete != nil && !s.stopPending {
+					complete()
+				}
 			} else {
 				s.applyState()
 			}
@@ -270,6 +290,13 @@ func (s *shell) submit(action renetui.Action, fn func(context.Context) error) bo
 func (s *shell) applyState() {
 	s.syncCaptureShortcut()
 	errText, notice := s.displayMessage(s.state.Error), s.displayMessage(s.state.Notice)
+	runtime := s.state.Runtime
+	if s.state.PairingHint != "" {
+		errText += " " + s.tr(s.state.PairingHint)
+		if runtime.LastError == s.state.Error {
+			runtime.LastError = ""
+		}
+	}
 	systemNotice := s.tr(s.systemNotice)
 	if s.commandNotice != "" {
 		notice = s.displayMessage(s.commandNotice)
@@ -286,12 +313,13 @@ func (s *shell) applyState() {
 	s.view.SetLanguage(s.language)
 	s.view.SetConfig(s.state.Config)
 	s.view.SetState(renetui.State{
-		Runtime: s.state.Runtime, Running: s.state.Running,
+		Runtime: runtime, Running: s.state.Running,
 		Stopping: s.state.Stopping, Testing: s.state.Testing,
 		DirectWorking: s.state.DirectWorking,
 		Capture:       s.state.Capture,
 		Invitation:    s.state.Invitation, Notice: notice, Error: errText,
-		NICs: s.state.NICs, TestResult: s.state.TestResult, Events: s.state.Events,
+		NumericCode: s.state.NumericCode,
+		NICs:        s.state.NICs, TestResult: s.state.TestResult, Events: s.state.Events,
 		Permission:                       s.permission,
 		CaptureMarkerShortcut:            s.captureShortcutKeys,
 		CaptureMarkerShortcutUnavailable: s.captureShortcutUnavailable,

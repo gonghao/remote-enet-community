@@ -5,7 +5,7 @@
 ## 当前范围
 
 - Go 1.27.3、`CGO_ENABLED=0`、`mygo_nowebview`，Linux amd64 / Windows amd64 / macOS arm64 的 `./cmd/...` 实际依赖并集。
-- 17 个第三方 Go 模块、Go toolchain 的 LICENSE/PATENTS、Wintun 0.14.1 预编译条款、Pixel Code Bold 2.2 OFL。
+- 桌面构建基线的 17 个第三方 Go 模块、数字配对新增的 ristretto255 与 edwards25519、Go toolchain 的 LICENSE/PATENTS、Wintun 0.14.1 预编译条款、Pixel Code Bold 2.2 OFL。
 - 已发现的 mygo shader、go-text HarfBuzz 和 gVisor AUTHORS/附加条款分别保留。未链接的模块图条目不自动加入，未来新增构建目标需重新核对。
 
 ## 更新流程

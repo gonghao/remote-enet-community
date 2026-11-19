@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/netip"
 	"os"
@@ -145,6 +146,9 @@ func TestProductionOperatorCanIssueWhileListeningAndRestart(t *testing.T) {
 	}
 	cancel()
 	first := stateWhere(t, c, func(s State) bool { return s.Runtime.Phase == app.PhaseListening })
+	if first.Notice != "" {
+		t.Errorf("listening retained a startup notice: %q", first.Notice)
+	}
 	code, err := c.IssueInvite(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -253,7 +257,7 @@ func TestLoopbackFixtureUnavailable(t *testing.T) {
 
 func TestRealAppsPairRememberReconnectTestAndRelease(t *testing.T) {
 	ident := hsfz.Identification{VIN: "WBAXXXXXXX0000001", DiagAddr: 0x10, MAC: [6]byte{1, 2, 3, 4, 5, 6}}
-	zgw, err := fakezgw.Start(t.Context(), netip.MustParseAddr(loopbackGatewayAddress), fakezgw.Profile{Ident: ident}, fakezgw.WithPorts(0, 0, 0), fakezgw.WithLogger(quietLogger()))
+	zgw, err := fakezgw.Start(t.Context(), netip.MustParseAddr(loopbackGatewayAddress), fakezgw.Profile{Ident: ident}, fakezgw.WithPorts(0, 0, 0), fakezgw.WithLogger(slog.New(slog.DiscardHandler)))
 	if err != nil {
 		if loopbackFixtureUnavailable(err) {
 			t.Skipf("fixture requires unassigned %s TCP/UDP listeners; host cannot bind it without an address alias, which carside would reject as a local target: %v", loopbackGatewayAddress, err)

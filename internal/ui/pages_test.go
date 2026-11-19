@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -75,7 +76,7 @@ func assertRoleControls(t *testing.T, tt *ui.Tester, role string) {
 	if role == settings.RoleClient {
 		absent = append(absent, "Start operator", "Generate invitation", "Copy invitation", "Generated invitation", "Public endpoint", "Exclusive diagnostic tool access")
 	} else {
-		absent = append(absent, "Connect client", "Invitation code", "Adapter selection", "Refresh adapters")
+		absent = append(absent, "Connect client", "Invite or address:port and code", "Adapter selection", "Refresh adapters")
 	}
 	for _, label := range absent {
 		if _, found := tt.Find(label); found {
@@ -97,7 +98,7 @@ func TestDashboardPrimaryControlsAreVisible(t *testing.T) {
 				}
 				v.SetState(state)
 				width, height := clientWidth, clientHeight
-				labels := []string{"Connect client", "Stop runtime", "Invitation code", "Adapter selection", "Refresh adapters", "Settings", "Log"}
+				labels := []string{"Connect client", "Stop runtime", "Invite or address:port and code", "Adapter selection", "Refresh adapters", "Settings", "Log"}
 				if role == settings.RoleOperator {
 					width, height = 1080, 760
 					labels = []string{"Start operator", "Stop runtime", "Generate invitation", "Copy invitation", "Test connection", "Settings", "Log"}
@@ -116,6 +117,73 @@ func TestDashboardPrimaryControlsAreVisible(t *testing.T) {
 				}
 				if !tt.HasText("VEHICLE") || !tt.HasText("CONNECTION") || !tt.HasText("SESSION") {
 					t.Fatal("dashboard did not expose all three information groups")
+				}
+			})
+		}
+	}
+}
+
+func TestSessionControlsStayInPlaceWhenMessagesChange(t *testing.T) {
+	for _, role := range []string{settings.RoleClient, settings.RoleOperator} {
+		for _, zoom := range []float32{1, 1.5} {
+			t.Run(fmt.Sprintf("%s/%.1f", role, zoom), func(t *testing.T) {
+				cfg := operatorConfig()
+				cfg.Role = role
+				width, height := clientMinWidth, clientMinHeight
+				labels := []string{"Adapter selection", "Invite or address:port and code", "Connect client"}
+				if role == settings.RoleOperator {
+					width, height = operatorMinWidth, operatorMinHeight
+					labels = []string{"Start operator"}
+					if zoom == 1 {
+						labels = append(labels, "Generate numeric code", "Generate invitation")
+					}
+				}
+				v := New(cfg, Actions{})
+				tt := ui.NewTester(v.Render, width, height)
+				tt.SetZoom(zoom)
+				positions := make([]float32, len(labels))
+				for i, label := range labels {
+					bounds, ok := tt.Find(label)
+					if !ok || bounds.Y < 0 || bounds.H <= 0 || bounds.Y+bounds.H > float32(height) {
+						t.Fatalf("control %q is outside the minimum window: %+v", label, bounds)
+					}
+					positions[i] = bounds.Y
+				}
+				const notice, runtimeMessage = "Interfaces refreshed.", "Client disconnected."
+				for _, sample := range []struct {
+					name, notice, runtimeMessage, actionError string
+				}{
+					{name: "notice only", notice: notice},
+					{name: "runtime only", runtimeMessage: runtimeMessage},
+					{name: "both messages", notice: notice, runtimeMessage: runtimeMessage},
+					{name: "long messages and error", notice: strings.Repeat(notice+" ", 20),
+						runtimeMessage: strings.Repeat(runtimeMessage+" ", 20), actionError: "Action failed."},
+					{name: "cleared"},
+				} {
+					v.SetState(State{Notice: sample.notice, Error: sample.actionError,
+						Runtime: app.Snapshot{LastError: sample.runtimeMessage}})
+					tt.Frame()
+					for i, label := range labels {
+						bounds, ok := tt.Find(label)
+						if !ok || bounds.Y != positions[i] {
+							t.Errorf("%s: control %q moved from y=%v to y=%v (found=%t)", sample.name, label, positions[i], bounds.Y, ok)
+						}
+					}
+					for _, title := range []struct {
+						label, message string
+					}{{"Update", sample.notice}, {"Runtime message", sample.runtimeMessage}, {"Action failed", sample.actionError}} {
+						bounds, found := tt.Find(title.label)
+						if visible := found && bounds.W > 0 && bounds.H > 0; visible != (title.message != "") {
+							t.Errorf("%s: banner %q visible = %t", sample.name, title.label, visible)
+						}
+						if found && sample.name == "long messages and error" && title.label != "Action failed" {
+							tt.Move(bounds.X+bounds.W/2, bounds.Y+bounds.H/2)
+							tt.Advance(time.Second)
+							if _, shown := tt.AccessByRole(ui.RoleTooltip, title.message); !shown {
+								t.Errorf("banner %q did not show its full message on hover", title.label)
+							}
+						}
+					}
 				}
 			})
 		}
@@ -190,9 +258,9 @@ func TestClientSettingsPreserveInvitationAndEdits(t *testing.T) {
 	cfg.Client.Peer = (identity.Fingerprint{1}).String()
 	v := New(cfg, Actions{Save: func(c settings.Config) { saved = c }})
 	tt := ui.NewTester(v.Render, clientWidth, clientHeight)
-	input(t, tt, "Invitation code", "test-only-paste")
+	input(t, tt, "Invite or address:port and code", "test-only-paste")
 	openSettings(t, tt)
-	if !tt.HasText("Remembered peer") || !tt.HasText(cfg.Client.Peer) {
+	if !tt.HasText("Remembered peer") || !tt.HasText((identity.Fingerprint{1}).Short()) {
 		t.Fatal("Settings did not show the remembered peer")
 	}
 	click(t, tt, "Allow peer connection tests")

@@ -50,3 +50,37 @@ func Text(tag, source string, args ...any) string {
 	}
 	return text
 }
+
+var pairingMessages = map[string]string{
+	"unavailable":       "Code unavailable",
+	"expired":           "Code expired",
+	"exhausted":         "Attempts exhausted",
+	"rate_limited":      "Try again later",
+	"busy":              "Operator busy",
+	"confirmation":      "Code or peer confirmation failed",
+	"store_failed":      "Could not save pairing",
+	"dns":               "Address lookup failed",
+	"timeout":           "Connection timed out",
+	"unsupported":       "Numeric pairing unsupported",
+	"identity_mismatch": "Device identity mismatch",
+	"interrupted":       "Pairing interrupted",
+}
+
+// PairingMessage accepts only fixed reason codes.
+func PairingMessage(reason string) string { return pairingMessages[reason] }
+
+// RuntimeErrorText translates application-owned messages among runtime diagnostics.
+func RuntimeErrorText(tag, message string) string {
+	switch message {
+	case "Client disconnected.", "Client connection could not be accepted.", "Client session ended with an error.",
+		"Operator disconnected.", "Operator session ended with an error.",
+		"Pairing rejected.", "Incompatible protocol version.", "Runtime stopped with an error. Check runtime diagnostics.":
+		return Text(tag, message)
+	}
+	for _, key := range pairingMessages {
+		if message == key {
+			return Text(tag, key)
+		}
+	}
+	return message
+}

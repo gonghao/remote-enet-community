@@ -137,6 +137,8 @@ func TestCheckFindingVocabularyIsLocalized(t *testing.T) {
 		for _, source := range []string{
 			checkHint("target_conflict", settings.RoleOperator), checkTitle("mgu_permission"),
 			checkStatus(checkup.Skipped), "Connection checks canceled: connection settings changed.",
+			checkHint(checkup.DirectInputValid, settings.RoleClient), checkHint(checkup.DirectInputInvalidHost, settings.RoleClient), checkHint(checkup.DirectInputInvalidPort, settings.RoleClient),
+			checkHint(checkup.DirectInputInvalidCode, settings.RoleClient), checkHint(checkup.DirectInputAddressRequired, settings.RoleClient),
 		} {
 			if locales.Text(tag, source) == source {
 				t.Errorf("untranslated %s: %s", tag, source)

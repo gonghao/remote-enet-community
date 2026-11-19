@@ -75,6 +75,8 @@ func (v *View) numericCodeControls(c *ui.Context) {
 	case status.Generation != 0:
 		message := "Code unavailable"
 		switch status.Reason {
+		case cpace.Reason(app.HubPairingDisabled):
+			message = "Hub numeric pairing is not enabled for this device"
 		case "", cpace.ReasonExpired:
 			message = "Code expired"
 		case cpace.ReasonBudgetExhausted:

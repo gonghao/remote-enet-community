@@ -1,9 +1,10 @@
 package ui
 
 import (
+	"strings"
+
 	"github.com/egoist/mygo/i18n"
 	"github.com/egoist/mygo/ui"
-	"strings"
 
 	"remote-enet/internal/locales"
 )
@@ -18,6 +19,10 @@ func (v *View) tr(source string, args ...any) string {
 func (v *View) validationMessage(err error) string {
 	message := err.Error()
 	switch {
+	case strings.HasPrefix(message, "settings: operator.hub.addr:"):
+		return v.tr("Hub address must include a host and port.")
+	case strings.HasPrefix(message, "settings: operator.hub.fp"):
+		return v.tr("Enter the full Hub fingerprint.")
 	case strings.HasPrefix(message, "settings: operator.listen:"):
 		return v.tr("Listen address must be a valid IP or hostname followed by a port.")
 	case strings.HasPrefix(message, "settings: operator.endpoint:"):

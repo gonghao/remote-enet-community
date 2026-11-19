@@ -2,10 +2,12 @@ package ui
 
 import (
 	"net/netip"
+	"strings"
 
 	"github.com/egoist/mygo/ui"
 
 	"remote-enet/internal/carside"
+	"remote-enet/internal/settings"
 )
 
 func (v *View) field(c *ui.Context, label, placeholder string, value *string, disabled bool) {
@@ -94,10 +96,49 @@ func (v *View) nicSelect(c *ui.Context, label string, labelWidth float32) {
 }
 
 func (v *View) operatorForm(c *ui.Context) {
-	ui.Grid(c).Columns(2).FillWidth().Gap(12).Children(func() {
-		v.field(c, "Listen address", "0.0.0.0:47000", &v.draft.Operator.Listen, v.locked())
-		v.field(c, "Public endpoint", "host.example:47000", &v.draft.Operator.Endpoint, v.locked())
-	})
+	hubMode := v.draft.Operator.Mode == "hub"
+	ui.Field(c, v.tr("Connection mode"), func() {
+		labels := []string{v.tr("Direct"), v.tr("Self-hosted hub")}
+		mode := labels[0]
+		if hubMode {
+			mode = labels[1]
+		}
+		if ui.Select(c.Key("hub-mode"), &mode, labels).Label(v.tr("Connection mode")).FillWidth().Height(32).Disabled(v.locked()).Changed() {
+			hubMode = mode == labels[1]
+		}
+	}).FillWidth()
+	if hubMode {
+		v.draft.Operator.Mode = "hub"
+		v.field(c, "Hub address", "host.example:47000", &v.draft.Operator.Hub.Addr, v.locked())
+		v.field(c, "Hub fingerprint", "", &v.draft.Operator.Hub.FP, v.locked())
+		v.field(c, "Share address", "host.example:47000", &v.draft.Operator.Endpoint, v.locked())
+		v.issuerControls(c)
+	} else {
+		v.draft.Operator.Mode = "direct"
+		v.draft.Operator.Hub = settings.Hub{}
+		ui.Grid(c).Columns(2).FillWidth().Gap(12).Children(func() {
+			v.field(c, "Listen address", "0.0.0.0:47000", &v.draft.Operator.Listen, v.locked())
+			v.field(c, "Public endpoint", "host.example:47000", &v.draft.Operator.Endpoint, v.locked())
+		})
+	}
+	v.presentationForm(c)
+}
+
+func (v *View) issuerControls(c *ui.Context) {
+	if !v.issuerRequested && v.actions.LoadIssuerEntry != nil {
+		v.issuerRequested = true
+		v.actions.LoadIssuerEntry()
+	}
+	v.value(c, "Hub authorization entry", v.issuerEntry)
+	if v.issuerEntry == "" && v.issuerRequested && ui.Button(c.Key("reload-entry"), v.tr("Reload entry")).Disabled(v.actions.LoadIssuerEntry == nil).Clicked() {
+		v.actions.LoadIssuerEntry()
+	}
+	if ui.Button(c.Key("copy-entry"), v.tr("Copy entry")).Disabled(v.issuerEntry == "" || v.actions.Copy == nil).Clicked() {
+		v.actions.Copy(v.issuerEntry)
+	}
+}
+
+func (v *View) presentationForm(c *ui.Context) {
 	v.field(c, "Presentation IPv4", "Local IPv4 used by diagnostic tools", &v.draft.Operator.Bind, v.locked())
 	ui.Grid(c).Columns(3).FillWidth().Gap(12).Children(func() {
 		for i, label := range []string{"Diagnostic TCP", "Control TCP", "Discovery UDP"} {
@@ -106,6 +147,23 @@ func (v *View) operatorForm(c *ui.Context) {
 	})
 	ui.Checkbox(c.Key("exclusive"), &v.draft.Operator.Exclusive, v.tr("Exclusive diagnostic tool access")).Label(v.tr("Exclusive diagnostic tool access")).Disabled(v.locked())
 	ui.Text(c, v.tr("Windows: one diagnostic process at a time. Owner detection is unavailable on other platforms.")).FontSize(11).TextColor(muted)
+}
+
+// SetIssuerEntry accepts only the public entry produced by the local operator.
+func (v *View) SetIssuerEntry(entry string) { v.issuerEntry = entry }
+
+func (v *View) centerForm(c *ui.Context) {
+	v.field(c, "Center ID", "", &v.centerID, v.locked())
+	v.field(c, "Center API URLs", "https://…", &v.centerAPI, v.locked())
+	cfg := v.saved
+	cfg.Center = settings.Center{ID: v.centerID, API: strings.Fields(v.centerAPI)}
+	err := cfg.Validate()
+	if err != nil {
+		ui.Text(c, v.tr("Check the center ID and HTTPS addresses.")).FontSize(11).TextColor(c.Theme().Danger)
+	}
+	if ui.Button(c.Key("change-center"), v.tr("Change center…")).Disabled(v.locked() || err != nil || cfg.Equal(v.saved) || v.actions.SetCenter == nil).Clicked() {
+		v.actions.SetCenter(cfg.Center)
+	}
 }
 
 func (v *View) value(c *ui.Context, label, text string) ui.Element {

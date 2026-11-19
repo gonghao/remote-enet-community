@@ -104,6 +104,8 @@ func checkTitle(id string) string {
 		return "Peer configuration"
 	case "hub_dns":
 		return "Hub address resolution"
+	case "hub_tls":
+		return "Hub TLS"
 	case "hub_tcp":
 		return "Hub TCP reachability"
 	case "hub_candidates":
@@ -166,6 +168,14 @@ func checkHint(code, role string) string {
 		return "Invalid port"
 	case checkup.DirectInputInvalidCode:
 		return "Enter eight digits"
+	case "hub_verified":
+		return "Hub fingerprint verified"
+	case "hub_identity_mismatch":
+		return "Hub identity mismatch"
+	case "tls_failed":
+		return "Hub TLS check failed"
+	case checkup.CenterInputUnsupported:
+		return "Numeric codes from a center are not supported yet"
 	case checkup.DirectInputAddressRequired:
 		return "Enter the direct address and port"
 	case "endpoint_invalid":

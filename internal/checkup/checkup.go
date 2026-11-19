@@ -2,7 +2,9 @@
 package checkup
 
 import (
+	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"io"
 	"net"
@@ -15,6 +17,8 @@ import (
 
 	"remote-enet/internal/app"
 	"remote-enet/internal/carside"
+	"remote-enet/internal/hub"
+	"remote-enet/internal/identity"
 	"remote-enet/internal/netpriv"
 	"remote-enet/internal/settings"
 	"remote-enet/internal/transport"
@@ -54,6 +58,7 @@ type Input struct {
 	Config     settings.Config
 	Runtime    app.Snapshot
 	Running    bool
+	PeerID     identity.Fingerprint
 	Endpoints  []transport.Endpoint
 	PeerCode   string
 	Permission netpriv.Status
@@ -61,6 +66,7 @@ type Input struct {
 
 // Direct-input results carry only syntax status across the checkup boundary.
 const (
+	CenterInputUnsupported     = "center_input_unsupported"
 	DirectInputValid           = "direct_input_valid"
 	DirectInputInvalidHost     = "direct_input_invalid_host"
 	DirectInputInvalidPort     = "direct_input_invalid_port"
@@ -154,6 +160,10 @@ func run(ctx context.Context, in Input, b backend) Report {
 				return Pass, "peer_available"
 			})
 			for i, endpoint := range in.Endpoints[:min(len(in.Endpoints), 4)] {
+				if endpoint.Kind == "hub" && !in.PeerID.IsZero() && endpoint.Hub != in.PeerID {
+					add("hub_tls", i+1, func() (Status, string) { return checkHubTLS(ctx, endpoint.Addr, endpoint.Hub) })
+					continue
+				}
 				valid := true
 				add("hub_dns", i+1, func() (Status, string) {
 					if endpoint.Kind != "hub" || endpoint.Hub.IsZero() {
@@ -207,6 +217,11 @@ func run(ctx context.Context, in Input, b backend) Report {
 				{"control_port", "tcp4", net.JoinHostPort(bind.String(), strconv.Itoa(in.Config.Operator.ControlPort)), true},
 				{"discovery_port", "udp4", net.JoinHostPort(bind.String(), strconv.Itoa(in.Config.Operator.DiscoveryPort)), true},
 			} {
+				if item.id == "hub_port" && in.Config.Operator.Mode == "hub" {
+					pin, _ := identity.ParseFingerprint(in.Config.Operator.Hub.FP)
+					add("hub_tls", 0, func() (Status, string) { return checkHubTLS(ctx, in.Config.Operator.Hub.Addr, pin) })
+					continue
+				}
 				add(item.id, 0, func() (Status, string) {
 					if in.Running {
 						return Skipped, "runtime_active"
@@ -223,10 +238,14 @@ func run(ctx context.Context, in Input, b backend) Report {
 				})
 			}
 			add("public_endpoint", 0, func() (Status, string) {
-				if in.Config.Operator.Endpoint == "" {
+				addr := in.Config.Operator.Endpoint
+				if addr == "" && in.Config.Operator.Mode == "hub" {
+					addr = in.Config.Operator.Hub.Addr
+				}
+				if addr == "" {
 					return Warning, "endpoint_missing"
 				}
-				status, code := resolve(ctx, b, in.Config.Operator.Endpoint)
+				status, code := resolve(ctx, b, addr)
 				if status != Pass {
 					return status, code
 				}
@@ -274,13 +293,53 @@ func run(ctx context.Context, in Input, b backend) Report {
 	return r
 }
 
+// Use an ephemeral client certificate for the outer mutual TLS handshake.
+// Closing the socket here never enters the routing protocol.
+func checkHubTLS(ctx context.Context, addr string, pin identity.Fingerprint) (Status, string) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	local, err := identity.Generate()
+	if err != nil {
+		return Failed, "tls_failed"
+	}
+	d := tls.Dialer{Config: &tls.Config{MinVersion: tls.VersionTLS13, MaxVersion: tls.VersionTLS13, NextProtos: []string{hub.ALPN}, Certificates: []tls.Certificate{local.Cert},
+		// The configured device pin and self-signature replace Web PKI validation.
+		InsecureSkipVerify: true, VerifyConnection: func(cs tls.ConnectionState) error {
+			if cs.NegotiatedProtocol != hub.ALPN || len(cs.PeerCertificates) != 1 {
+				return errors.New("unexpected hub certificate or ALPN")
+			}
+			cert := cs.PeerCertificates[0]
+			fp, err := identity.FingerprintOfCert(cert)
+			if err != nil {
+				return err
+			}
+			if fp != pin {
+				return identity.ErrFingerprintMismatch
+			}
+			now := time.Now()
+			if now.Before(cert.NotBefore) || now.After(cert.NotAfter) || !bytes.Equal(cert.RawIssuer, cert.RawSubject) || len(cert.UnhandledCriticalExtensions) != 0 {
+				return errors.New("invalid hub certificate")
+			}
+			return cert.CheckSignature(cert.SignatureAlgorithm, cert.RawTBSCertificate, cert.Signature)
+		}}}
+	conn, err := d.DialContext(ctx, "tcp", addr)
+	if errors.Is(err, identity.ErrFingerprintMismatch) {
+		return Failed, "hub_identity_mismatch"
+	}
+	if err != nil {
+		return Failed, "tls_failed"
+	}
+	_ = conn.Close()
+	return Pass, "hub_verified"
+}
+
 func directInputStatus(code string) (Status, bool) {
 	switch code {
 	case DirectInputValid:
 		return Pass, true
 	case DirectInputInvalidHost, DirectInputInvalidPort, DirectInputInvalidCode:
 		return Failed, true
-	case DirectInputAddressRequired:
+	case CenterInputUnsupported, DirectInputAddressRequired:
 		return Warning, true
 	default:
 		return "", false

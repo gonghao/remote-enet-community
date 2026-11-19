@@ -720,3 +720,64 @@ func TestPeerIDDetailsAndCopy(t *testing.T) {
 		}
 	}
 }
+
+func TestCenterReceiptsPreserveFormAndDirtyState(t *testing.T) {
+	cfg := settings.Default()
+	v := New(cfg, Actions{})
+	cfg.Center = settings.Center{ID: "garage", API: []string{"https://garage.invalid"}}
+	v.SetConfig(cfg)
+	if v.dirty() {
+		t.Fatal("center change dirtied clean form")
+	}
+	v.draft.AllowLinkTest = !cfg.AllowLinkTest
+	submitted := v.draft
+	v.submitted = &submitted
+	cfg.Center.ID = "next"
+	v.SetConfig(cfg)
+	if !v.dirty() || v.submitted == nil || v.submitted.Center.ID != "next" || v.draft.Center.ID != "next" {
+		t.Fatal("center receipt lost draft or pending submission")
+	}
+	cfg.AllowLinkTest = v.draft.AllowLinkTest
+	v.SetConfig(cfg)
+	if v.dirty() || v.submitted != nil {
+		t.Fatal("matching receipt did not acknowledge save")
+	}
+}
+
+func TestOperatorHubSettingsAndPath(t *testing.T) {
+	cfg := settings.Default()
+	cfg.Role = settings.RoleOperator
+	cfg.Operator.Bind = "127.0.0.1"
+	var copied string
+	v := New(cfg, Actions{Copy: func(text string) { copied = text }, Listen: func() {}, IssueInvite: func() {}})
+	v.page = settingsPage
+	tt := ui.NewTester(v.Render, 1080, 1000)
+	click(t, tt, "Connection mode")
+	click(t, tt, "Self-hosted hub")
+	if v.draft.Operator.Mode != "hub" || !tt.HasText("Hub fingerprint") {
+		t.Fatal("mode selection did not expose hub fields")
+	}
+	v.SetIssuerEntry("public entry")
+	tt.Frame()
+	click(t, tt, "Copy entry")
+	if copied != "public entry" {
+		t.Fatal("wrong issuer entry copied")
+	}
+	fp := identity.Fingerprint{7}
+	cfg.Operator.Mode = "hub"
+	cfg.Operator.Hub = settings.Hub{Addr: "hub.invalid:443", FP: fp.String()}
+	v = New(cfg, Actions{Listen: func() {}, IssueInvite: func() {}})
+	if !v.canListen() || !v.canInvite() {
+		t.Fatal("share address fallback unavailable")
+	}
+	v.SetState(State{Running: true, Runtime: app.Snapshot{Phase: app.PhaseListening, HubWaiting: true}})
+	tt = ui.NewTester(v.Render, 1080, 1000)
+	if !tt.HasText("Waiting on hub") || !tt.HasText("Not configured") {
+		t.Fatal("missing hub wait or center status")
+	}
+	v.SetState(State{Running: true, Runtime: app.Snapshot{Phase: app.PhaseConnected, Path: transport.PathInfo{Kind: transport.PathRelay, Via: cfg.Operator.Hub.Addr, Hub: fp}}})
+	tt.Frame()
+	if !tt.HasText("Via hub " + cfg.Operator.Hub.Addr + " · " + fp.Short()) {
+		t.Fatal("missing pinned hub path")
+	}
+}

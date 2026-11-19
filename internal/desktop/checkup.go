@@ -73,7 +73,11 @@ func (c *Controller) CheckConnection(ctx context.Context, invitation string) err
 	if err == nil && current {
 		in := checkup.Input{Config: cfg, Runtime: pending.sample, Running: g != nil}
 		if cfg.Role == settings.RoleClient {
-			in.Endpoints, in.PeerCode = c.checkEndpoints(ctx, cfg, invitation)
+			peer, code := c.checkEndpoints(ctx, cfg, invitation)
+			in.PeerID, in.Endpoints, in.PeerCode = peer.ID, slices.Clone(peer.Endpoints), code
+			for i := range in.Endpoints {
+				in.Endpoints[i].Ticket = ""
+			}
 		}
 		if cfg.Role == settings.RoleOperator && c.opts.NetworkStatus != nil && ctx.Err() == nil {
 			in.Permission = c.opts.NetworkStatus()
@@ -138,46 +142,49 @@ func sameCheckRuntime(a, b app.Snapshot) bool {
 		a.NIC == b.NIC && a.Gateway == b.Gateway && a.Direct.Address == b.Direct.Address && a.Direct.Phase == b.Direct.Phase
 }
 
-func (c *Controller) checkEndpoints(ctx context.Context, cfg settings.Config, code string) ([]transport.Endpoint, string) {
+func (c *Controller) checkEndpoints(ctx context.Context, cfg settings.Config, code string) (transport.PeerInfo, string) {
 	code = strings.TrimSpace(code)
 	if code != "" {
 		input, err := invite.ParseInput(code)
 		switch {
 		case errors.Is(err, invite.ErrInvalidHost):
-			return nil, checkup.DirectInputInvalidHost
+			return transport.PeerInfo{}, checkup.DirectInputInvalidHost
 		case errors.Is(err, invite.ErrInvalidPort):
-			return nil, checkup.DirectInputInvalidPort
+			return transport.PeerInfo{}, checkup.DirectInputInvalidPort
 		case errors.Is(err, invite.ErrInvalidCode):
-			return nil, checkup.DirectInputInvalidCode
+			return transport.PeerInfo{}, checkup.DirectInputInvalidCode
 		case err != nil:
-			return nil, "invite_invalid"
+			return transport.PeerInfo{}, "invite_invalid"
 		case input.Kind == invite.Direct:
-			return nil, checkup.DirectInputValid
+			return transport.PeerInfo{}, checkup.DirectInputValid
 		case input.Kind == invite.Center:
-			return nil, checkup.DirectInputAddressRequired
+			if cfg.Center.ID != "" {
+				return transport.PeerInfo{}, checkup.CenterInputUnsupported
+			}
+			return transport.PeerInfo{}, checkup.DirectInputAddressRequired
 		}
 		i := input.Invite
 		if i.Peer.ID.IsZero() || i.Token == ([16]byte{}) || len(i.Peer.Endpoints) == 0 {
-			return nil, "invite_invalid"
+			return transport.PeerInfo{}, "invite_invalid"
 		}
-		return slices.Clone(i.Peer.Endpoints), ""
+		return i.Peer, ""
 	}
 	if cfg.Client.Peer == "" {
-		return nil, "pairing_missing"
+		return transport.PeerInfo{}, "pairing_missing"
 	}
 	id, err := identity.ParseFingerprint(cfg.Client.Peer)
 	if err != nil || id.IsZero() {
-		return nil, "pairing_invalid"
+		return transport.PeerInfo{}, "pairing_invalid"
 	}
 	peer, err := c.deps.readPeer(ctx, c.roleDir(settings.RoleClient), id)
 	if errors.Is(err, trust.ErrNotFound) || errors.Is(err, os.ErrNotExist) {
-		return nil, "pairing_missing"
+		return transport.PeerInfo{}, "pairing_missing"
 	}
 	if err != nil {
-		return nil, "pairing_unavailable"
+		return transport.PeerInfo{}, "pairing_unavailable"
 	}
 	if peer.ID != id || len(peer.Endpoints) == 0 {
-		return nil, "pairing_invalid"
+		return transport.PeerInfo{}, "pairing_invalid"
 	}
-	return slices.Clone(peer.Endpoints), ""
+	return peer, ""
 }

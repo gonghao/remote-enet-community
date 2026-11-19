@@ -97,7 +97,7 @@ func (c *Controller) start(ctx context.Context, role, input string) error {
 	if err != nil {
 		message := "Check the saved settings and invitation before starting."
 		switch err {
-		case invite.ErrInvalidInvite, invite.ErrInviteExpired, invite.ErrInvalidHost, invite.ErrInvalidPort, invite.ErrInvalidCode, errDirectAddressRequired:
+		case invite.ErrInvalidInvite, invite.ErrInviteExpired, invite.ErrInvalidHost, invite.ErrInvalidPort, invite.ErrInvalidCode, errDirectAddressRequired, errCenterCode:
 			message = err.Error()
 		}
 		c.failureLocked(message, err)
@@ -117,7 +117,7 @@ func (c *Controller) start(ctx context.Context, role, input string) error {
 			c.mu.Lock()
 			defer c.mu.Unlock()
 			if c.run == g && !peer.ID.IsZero() && len(peer.Endpoints) == 1 &&
-				peer.Endpoints[0] == (transport.Endpoint{Kind: "hub", Addr: address, Hub: peer.ID}) {
+				pairedEndpoint(peer.Endpoints[0], peer.ID, address) {
 				peer.Endpoints = slices.Clone(peer.Endpoints)
 				g.pairing = peer
 			}
@@ -139,6 +139,16 @@ func (c *Controller) start(ctx context.Context, role, input string) error {
 	c.successLocked("Runtime starting.")
 	go c.serve(g, role, client, op)
 	return nil
+}
+
+func pairedEndpoint(ep transport.Endpoint, peer identity.Fingerprint, address string) bool {
+	if ep.Kind != "hub" || ep.Addr != address || ep.Hub.IsZero() {
+		return false
+	}
+	if ep.Hub == peer {
+		return ep.Ticket == ""
+	}
+	return ep.Ticket != ""
 }
 
 func (c *Controller) runtimeConfigs(cfg settings.Config, code string) (app.ClientConfig, app.OperatorConfig, transport.PeerInfo, error) {
@@ -172,6 +182,9 @@ func (c *Controller) runtimeConfigs(cfg settings.Config, code string) (app.Clien
 			case invite.Direct:
 				client.DirectPair = &app.DirectPair{Address: input.Address, Code: input.Code}
 			case invite.Center:
+				if cfg.Center.ID != "" {
+					return client, op, pairing, errCenterCode
+				}
 				return client, op, pairing, errDirectAddressRequired
 			}
 		} else if cfg.Client.Peer != "" {
@@ -293,7 +306,9 @@ func (c *Controller) serve(g *running, role string, client app.ClientConfig, op 
 		switch {
 		case !wasStopping && pairingText != "":
 			var hint string
-			if g.digitalPair && g.pairing.ID.IsZero() {
+			if pairingErr == app.HubAuthorizationExpired {
+				hint = "Request a new numeric code."
+			} else if g.digitalPair && g.pairing.ID.IsZero() {
 				hint = numericClientHint(pairingErr)
 			}
 			c.state.Runtime.LastError = pairingText

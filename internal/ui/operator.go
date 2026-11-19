@@ -8,6 +8,9 @@ func (v *View) operatorPage(c *ui.Context) {
 	v.traffic(c)
 	v.card(c.Key("operator-actions"), "Session controls", "One client at a time", func() {
 		v.startControls(c)
+		if v.state.Runtime.LastError == "Hub has not authorized this device. Check the entry and the system time." {
+			v.issuerControls(c)
+		}
 		v.numericCodeControls(c)
 		v.invitationControls(c)
 	})

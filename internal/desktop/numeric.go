@@ -21,6 +21,8 @@ const (
 	revokeNumeric
 )
 
+var errCenterCode = errors.New("Numeric codes from a center are not supported yet")
+
 var errDirectAddressRequired = errors.New("Enter the direct address and port")
 
 // IssueNumericCode returns the secret only to the caller that requested it.

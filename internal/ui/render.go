@@ -266,7 +266,7 @@ func (v *View) startControls(c *ui.Context) {
 		if v.saved.Client.Peer == "" {
 			return
 		}
-	case v.role == settings.RoleOperator && (v.saved.Operator.Endpoint == "" || v.saved.Operator.Bind == ""):
+	case v.role == settings.RoleOperator && (v.saved.Operator.Mode != "hub" && v.saved.Operator.Endpoint == "" || v.saved.Operator.Bind == ""):
 		status = "Open Settings to save a public endpoint and presentation IPv4."
 	}
 	message := v.tr(status)
@@ -293,6 +293,7 @@ func (v *View) settingsPage(c *ui.Context) {
 		}
 		v.saveControls(c)
 	})
+	v.card(c.Key("center-settings"), "Center", "", func() { v.centerForm(c) })
 	v.checksEntry(c)
 	if v.role == settings.RoleClient {
 		v.linkTest(c)

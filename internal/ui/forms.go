@@ -2,11 +2,13 @@ package ui
 
 import (
 	"net/netip"
+	"slices"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
 
 	"remote-enet/internal/carside"
+	"remote-enet/internal/center"
 	"remote-enet/internal/settings"
 )
 
@@ -163,6 +165,31 @@ func (v *View) centerForm(c *ui.Context) {
 	}
 	if ui.Button(c.Key("change-center"), v.tr("Change center…")).Disabled(v.locked() || err != nil || cfg.Equal(v.saved) || v.actions.SetCenter == nil).Clicked() {
 		v.actions.SetCenter(cfg.Center)
+	}
+	if ui.Button(c.Key("check-center"), v.tr("Check center")).Disabled(v.saved.Center.ID == "" || v.checkingCenter || v.actions.CheckCenter == nil).Clicked() {
+		v.checkingCenter = true
+		v.centerResults = nil
+		v.actions.CheckCenter()
+	}
+	if v.checkingCenter {
+		ui.Text(c, v.tr("Checking center…")).FontSize(11).TextColor(muted).Role(ui.RoleStatus)
+	}
+	for i, result := range v.centerResults {
+		label := "Center unreachable"
+		switch result.Status {
+		case center.Verified:
+			label = "Center verified"
+		case center.IDMismatch:
+			label = "Center ID mismatch"
+		}
+		v.value(c.Key(i), label, result.Entry)
+	}
+}
+
+// SetCenterResults accepts observations only for the currently saved center.
+func (v *View) SetCenterResults(cfg settings.Center, results []center.EntryResult) {
+	if cfg.ID == v.saved.Center.ID && slices.Equal(cfg.API, v.saved.Center.API) {
+		v.centerResults = slices.Clone(results)
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 
 	"remote-enet/internal/app"
 	"remote-enet/internal/carside"
+	"remote-enet/internal/center"
 	"remote-enet/internal/checkup"
 	"remote-enet/internal/hsfzcapture"
 	"remote-enet/internal/identity"
@@ -83,6 +84,7 @@ type dependencies struct {
 	pairedPeer  func(context.Context, string, transport.PeerInfo) error
 	readPeer    func(context.Context, string, identity.Fingerprint) (transport.PeerInfo, error)
 	checkup     func(context.Context, checkup.Input) checkup.Report
+	checkCenter func(context.Context, settings.Center) []center.EntryResult
 }
 
 func production() dependencies {
@@ -98,6 +100,7 @@ func production() dependencies {
 		issueInvite: app.IssueInvite,
 		readPeer:    trust.ReadPeer,
 		checkup:     checkup.Run,
+		checkCenter: center.Check,
 		pairedPeer: func(ctx context.Context, dir string, expected transport.PeerInfo) error {
 			store, err := trust.Open(ctx, dir)
 			if err != nil {

@@ -9,6 +9,7 @@ import (
 
 	"remote-enet/internal/app"
 	"remote-enet/internal/carside"
+	"remote-enet/internal/center"
 	"remote-enet/internal/checkup"
 	"remote-enet/internal/hsfzcapture"
 	"remote-enet/internal/identity"
@@ -53,6 +54,7 @@ type Actions struct {
 	IssueInvite       func()
 	LoadIssuerEntry   func()
 	SetCenter         func(settings.Center)
+	CheckCenter       func()
 	IssueNumericCode  func()
 	CopyNumericCode   func(uint64)
 	RevokeNumericCode func(uint64)
@@ -93,6 +95,7 @@ const (
 	ActionRevokeNumericCode
 	ActionIssuerEntry
 	ActionSetCenter
+	ActionCheckCenter
 )
 
 // View and all of its methods belong to the UI thread.
@@ -100,6 +103,8 @@ type View struct {
 	issuerEntry         string
 	issuerRequested     bool
 	centerID, centerAPI string
+	checkingCenter      bool
+	centerResults       []center.EntryResult
 
 	actions                             Actions
 	role                                string
@@ -156,6 +161,7 @@ func (v *View) SetConfig(cfg settings.Config) {
 	}
 	if cfg.Center.ID != v.saved.Center.ID || !slices.Equal(cfg.Center.API, v.saved.Center.API) {
 		v.centerID, v.centerAPI = cfg.Center.ID, strings.Join(cfg.Center.API, " ")
+		v.centerResults = nil
 	}
 	clean := !v.dirty()
 	v.draft.Center = cfg.Center
@@ -246,6 +252,8 @@ func (v *View) Complete(action Action) {
 		v.captureStopping = false
 	case ActionCheckConnection:
 		v.checking = false
+	case ActionCheckCenter:
+		v.checkingCenter = false
 	case ActionCancelChecks:
 		v.cancelingChecks = false
 	case ActionIssueNumericCode, ActionCopyNumericCode, ActionRevokeNumericCode:

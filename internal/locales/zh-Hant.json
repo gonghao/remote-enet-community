@@ -43,6 +43,7 @@
   "Changes apply immediately. Network settings and unsaved edits are kept.": "語言切換立即生效，網路設定及尚未儲存的修改會保留。",
   "Check the operator address before trying again.": "請核對 Operator 位址後重試。",
   "Check the saved settings and invitation before starting.": "啟動前請檢查已儲存的設定與邀請碼。",
+  "Checking center…": "正在檢查中心…",
   "Checking saved connection settings…": "正在檢查已儲存的連線設定…",
   "Checks use saved settings. Save network changes first.": "自檢使用已儲存設定，請先儲存網路變更。",
   "Choose a new local file. Existing capture files are never overwritten.": "請選擇新的本機檔案，不會覆寫既有擷取檔案。",

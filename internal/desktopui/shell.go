@@ -12,6 +12,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"remote-enet/internal/brand"
+	"remote-enet/internal/center"
 	"remote-enet/internal/desktop"
 	"remote-enet/internal/settings"
 	renetui "remote-enet/internal/ui"
@@ -81,6 +82,7 @@ func (s *shell) ready() {
 				s.submit(renetui.ActionSetCenter, func(ctx context.Context) error { return s.controller.SetCenter(ctx, center) })
 			}
 		},
+		CheckCenter:     s.checkCenter,
 		Refresh:         func() { s.submit(renetui.ActionRefresh, s.controller.RefreshNICs) },
 		Stop:            func() { s.submit(renetui.ActionStop, s.controller.Stop) },
 		TestLink:        func() { s.submit(renetui.ActionTest, s.controller.TestLink) },
@@ -212,6 +214,18 @@ func (s *shell) ready() {
 		}
 	}()
 	s.submit(renetui.ActionRefresh, s.controller.RefreshNICs)
+}
+
+func (s *shell) checkCenter() {
+	var cfg settings.Center
+	var results []center.EntryResult
+	s.submitWithCompletion(renetui.ActionCheckCenter, func(ctx context.Context) error {
+		var err error
+		cfg, results, err = s.controller.CheckCenter(ctx)
+		return err
+	}, func() {
+		s.view.SetCenterResults(cfg, results)
+	})
 }
 
 // submit is only called on the UI thread. A small admission budget keeps

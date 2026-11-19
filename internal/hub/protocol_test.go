@@ -89,7 +89,7 @@ func invalidLocal(t *testing.T, kind string) *identity.Local {
 
 func TestInvalidDeviceCertificates(t *testing.T) {
 	goodHub, goodDevice := local(t), local(t)
-	_, addr, _ := start(t, Options{Local: goodHub})
+	_, addr, _ := start(t, Options{Local: goodHub, Policy: testPolicy{}})
 	for _, kind := range []string{"expired", "future", "not-self-issued", "critical-extension", "bad-signature"} {
 		t.Run(kind, func(t *testing.T) {
 			bad := invalidLocal(t, kind)

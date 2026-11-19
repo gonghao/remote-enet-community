@@ -27,6 +27,14 @@ import (
 	"remote-enet/internal/tunnel"
 )
 
+type relayPolicy struct{}
+
+func (relayPolicy) Admit(identity.Fingerprint, hub.Request, time.Time) (hub.Grant, error) {
+	return hub.Grant{}, nil
+}
+func (relayPolicy) Valid(hub.Grant, identity.Fingerprint) bool { return true }
+func (relayPolicy) PairingOperator() identity.Fingerprint      { return identity.Fingerprint{} }
+
 func localIdentity(t fixtureT) *identity.Local {
 	t.Helper()
 	id, err := identity.Generate()
@@ -72,7 +80,11 @@ func connectPair(t fixtureT, ctx context.Context, embedded, clientDial bool, wra
 	}
 	hctx, stopHub := context.WithCancel(ctx)
 	hubDone := make(chan error, 1)
-	server := hub.NewServer(hub.Options{Local: hid, Embedded: handoff, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	options := hub.Options{Local: hid, Embedded: handoff, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	if !embedded {
+		options.Policy = relayPolicy{}
+	}
+	server := hub.NewServer(options)
 	go func() { hubDone <- server.Serve(hctx, ln) }()
 	t.Cleanup(func() {
 		stopHub()

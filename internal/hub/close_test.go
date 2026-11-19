@@ -47,7 +47,7 @@ func TestServeJoinsListenerClose(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		done := make(chan error, 1)
-		go func() { done <- NewServer(Options{Local: id}).Serve(ctx, listener) }()
+		go func() { done <- NewServer(Options{Local: id, Policy: testPolicy{}}).Serve(ctx, listener) }()
 		<-listener.accepted
 		cancel()
 		<-listener.closing

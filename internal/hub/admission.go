@@ -2,8 +2,8 @@ package hub
 
 import "time"
 
-// SetupLimits bounds pending outer handshakes and routing exchanges on an
-// embedded listener. Nonpositive fields use 16 slots, 8/s, burst 16 and 10s.
+// SetupLimits bounds pending outer handshakes and routing exchanges on a listener.
+// Nonpositive fields use the defaults for the deployment mode.
 type SetupLimits struct {
 	Concurrent int
 	PerSecond  int
@@ -18,15 +18,19 @@ type setupAdmission struct {
 	last   time.Time
 }
 
-func newSetupAdmission(limits SetupLimits) *setupAdmission {
+func newSetupAdmission(limits SetupLimits, embedded bool) *setupAdmission {
+	slots, rate := 64, 32
+	if embedded {
+		slots, rate = 16, 8
+	}
 	if limits.Concurrent <= 0 {
-		limits.Concurrent = 16
+		limits.Concurrent = slots
 	}
 	if limits.PerSecond <= 0 {
-		limits.PerSecond = 8
+		limits.PerSecond = rate
 	}
 	if limits.Burst <= 0 {
-		limits.Burst = 16
+		limits.Burst = slots
 	}
 	if limits.Timeout <= 0 {
 		limits.Timeout = setupTimeout

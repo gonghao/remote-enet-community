@@ -282,17 +282,6 @@ func (a *Connector) Close() error {
 	return nil
 }
 
-// embeddedServerOptions admits only dials to local. Without this restriction a
-// public Operator listener would route third-party wait/dial pairs, turning the
-// Operator's bandwidth into an open relay.
 func embeddedServerOptions(local *identity.Local, e *router.Embedded, limits router.SetupLimits) router.Options {
-	self := local.Fingerprint()
-	return router.Options{
-		Local:       local,
-		Embedded:    e,
-		SetupLimits: limits,
-		Authorize: func(_ identity.Fingerprint, role router.Role, target identity.Fingerprint) bool {
-			return role == router.RoleDial && target == self
-		},
-	}
+	return router.Options{Local: local, Embedded: e, SetupLimits: limits}
 }

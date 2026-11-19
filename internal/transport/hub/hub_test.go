@@ -16,6 +16,14 @@ import (
 	"remote-enet/internal/transport"
 )
 
+type relayPolicy struct{}
+
+func (relayPolicy) Admit(identity.Fingerprint, router.Request, time.Time) (router.Grant, error) {
+	return router.Grant{}, nil
+}
+func (relayPolicy) Valid(router.Grant, identity.Fingerprint) bool { return true }
+func (relayPolicy) PairingOperator() identity.Fingerprint         { return identity.Fingerprint{} }
+
 // stubWrap exchanges identities only for test assertions. It deliberately keeps
 // ctx for the full session lifetime, like secure.WrapStream.
 func stubWrap(self identity.Fingerprint) Wrap {
@@ -128,7 +136,11 @@ func startCountedHub(t *testing.T, h *identity.Local, e *router.Embedded) (trans
 	counted := &countedListener{Listener: ln}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
-	go func() { done <- router.NewServer(router.Options{Local: h, Embedded: e}).Serve(ctx, counted) }()
+	options := router.Options{Local: h, Embedded: e}
+	if e == nil {
+		options.Policy = relayPolicy{}
+	}
+	go func() { done <- router.NewServer(options).Serve(ctx, counted) }()
 	t.Cleanup(func() {
 		cancel()
 		select {

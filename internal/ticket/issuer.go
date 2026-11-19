@@ -8,8 +8,11 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"syscall"
 	"time"
 
 	"remote-enet/internal/identity"
@@ -24,8 +27,12 @@ const (
 // Issuer owns the signing key, separate from the device identity.
 type Issuer struct{ priv ed25519.PrivateKey }
 
-// LoadOrCreateIssuer publishes a complete PKCS#8 file without replacing a concurrent winner.
+// LoadOrCreateIssuer creates a PKCS#8 file without replacing a concurrent winner.
 func LoadOrCreateIssuer(path string) (*Issuer, error) {
+	return loadOrCreateIssuer(path, os.Link)
+}
+
+func loadOrCreateIssuer(path string, link func(string, string) error) (*Issuer, error) {
 	i, err := readIssuer(path)
 	if !errors.Is(err, os.ErrNotExist) {
 		return i, err
@@ -49,7 +56,8 @@ func LoadOrCreateIssuer(path string) (*Issuer, error) {
 		return nil, fmt.Errorf("create temporary issuer key: %w", err)
 	}
 	defer os.Remove(f.Name())
-	err = pem.Encode(f, &pem.Block{Type: "PRIVATE KEY", Bytes: der})
+	data := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
+	_, err = f.Write(data)
 	closeErr := f.Close()
 	if err != nil {
 		return nil, fmt.Errorf("write issuer key: %w", err)
@@ -57,8 +65,25 @@ func LoadOrCreateIssuer(path string) (*Issuer, error) {
 	if closeErr != nil {
 		return nil, fmt.Errorf("close issuer key: %w", closeErr)
 	}
-	if err = os.Link(f.Name(), path); errors.Is(err, os.ErrExist) {
+	if err = link(f.Name(), path); errors.Is(err, os.ErrExist) {
 		return readIssuer(path)
+	} else if errors.Is(err, errors.ErrUnsupported) || errors.Is(err, syscall.EPERM) || (runtime.GOOS == "windows" && errors.Is(err, syscall.Errno(1))) {
+		// FAT may report EPERM on Unix or ERROR_INVALID_FUNCTION on Windows.
+		out, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		if errors.Is(err, os.ErrExist) {
+			return readIssuer(path)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("create issuer key: %w", err)
+		}
+		_, err = out.Write(data)
+		if err == nil {
+			err = out.Sync()
+		}
+		closeErr := out.Close()
+		if err != nil || closeErr != nil {
+			return nil, fmt.Errorf("finish issuer key: %w", errors.Join(err, closeErr, os.Remove(path)))
+		}
 	} else if err != nil {
 		return nil, fmt.Errorf("publish issuer key: %w", err)
 	}
@@ -66,12 +91,40 @@ func LoadOrCreateIssuer(path string) (*Issuer, error) {
 }
 
 func readIssuer(path string) (*Issuer, error) {
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("read issuer key: %w", err)
+		return nil, fmt.Errorf("open issuer key: %w", err)
 	}
+	defer f.Close()
+	if runtime.GOOS != "windows" {
+		info, err := f.Stat()
+		if err != nil {
+			return nil, fmt.Errorf("stat issuer key: %w", err)
+		}
+		if info.Mode().Perm()&0077 != 0 {
+			return nil, fmt.Errorf("insecure issuer key permissions: run chmod 600 %q", path)
+		}
+	}
+	for attempt := 0; ; attempt++ {
+		data, err := io.ReadAll(f)
+		if err != nil {
+			return nil, fmt.Errorf("read issuer key: %w", err)
+		}
+		issuer, err := parseIssuer(data)
+		if err == nil || attempt == 5 {
+			return issuer, err
+		}
+		// Exclusive creation can expose a short-lived partial PEM.
+		time.Sleep(10 * time.Millisecond)
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			return nil, fmt.Errorf("rewind issuer key: %w", err)
+		}
+	}
+}
+
+func parseIssuer(data []byte) (*Issuer, error) {
 	block, rest := pem.Decode(data)
-	if block == nil || block.Type != "PRIVATE KEY" || !bytes.HasPrefix(data, []byte("-----BEGIN PRIVATE KEY-----")) || len(bytes.TrimSpace(rest)) != 0 {
+	if block == nil || block.Type != "PRIVATE KEY" || !bytes.HasPrefix(data, []byte("-----BEGIN PRIVATE KEY-----")) || len(bytes.TrimSpace(rest)) != 0 { // repo-guard: allow PEM header format validation
 		return nil, errors.New("invalid issuer PEM")
 	}
 	key, err := x509.ParsePKCS8PrivateKey(block.Bytes)

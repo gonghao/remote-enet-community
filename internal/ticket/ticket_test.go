@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
@@ -197,7 +199,12 @@ func TestPayloadProfile(t *testing.T) {
 	check("duplicate information map", append(bytes.Clone(extra), 0xa2, 1, 0, 1, 0), false)
 }
 func TestSignInvalid(t *testing.T) {
-	for _, change := range []func(*Claims){func(c *Claims) { c.Device = identity.Fingerprint{} }, func(c *Claims) { c.Bearer = true }, func(c *Claims) { c.Role = 2 }, func(c *Claims) { c.PairUntil = c.Expires }, func(c *Claims) { c.NotBefore = c.Expires }, func(c *Claims) { c.Expires = c.IssuedAt }, func(c *Claims) { c.Expires = time.Unix(1<<32, 0) }} {
+	wait := fixture("wait")
+	wait.PairUntil = wait.Expires.Add(time.Second)
+	if _, err := Sign(private(), wait); err == nil {
+		t.Fatal("signed wait with pairing window past expiry")
+	}
+	for _, change := range []func(*Claims){func(c *Claims) { c.Device = identity.Fingerprint{} }, func(c *Claims) { c.Bearer = true }, func(c *Claims) { c.Role = 2 }, func(c *Claims) { c.NotBefore = c.Expires }, func(c *Claims) { c.Expires = c.IssuedAt }, func(c *Claims) { c.Expires = time.Unix(1<<32, 0) }} {
 		c := fixture("dial")
 		change(&c)
 		if _, err := Sign(private(), c); err == nil {
@@ -218,6 +225,8 @@ func TestTime(t *testing.T) {
 		{end + 1, 1, 10, 0, 0, false, 0, true}, {end + 2, 1, 10, 0, 0, false, 0, false}, {end - 9, 1, 10, 0, 0, false, 0, true}, {end - 10, 1, 10, 0, 0, false, 0, false}, {end - 12, 1, 10, 0, 0, false, 0, false},
 		{end, 0, 9, 10, 0, false, 0, false}, {end, 0, 10, 9, 0, true, 0, false}, {end, 0, 10, 10, 0, true, 0, true},
 		{end, 0, 10, 0, 3, false, end - 7, true}, {end, 0, 10, 0, 2, false, end - 7, false}, {end, 0, 10, 0, 10, false, end - 9, false}, {end, 0, 10, 0, 12, false, end + 1, false},
+		{end, 0, 10, 0, 10, false, end - 8, true},
+		{end, 0, 10, 0, 10, false, end, true},
 		{math.MaxInt64, math.MaxInt64, 10, 0, 0, false, 0, true}, {math.MinInt64, math.MaxInt64, 10, 0, 0, false, 0, false},
 	} {
 		c.Bearer = tc.bearer
@@ -232,6 +241,45 @@ func TestTime(t *testing.T) {
 	}
 }
 func TestIssuer(t *testing.T) {
+	t.Run("link", func(t *testing.T) { testIssuer(t, os.Link) })
+	t.Run("exclusive create", func(t *testing.T) {
+		testIssuer(t, func(string, string) error { return errors.ErrUnsupported })
+	})
+}
+func TestIssuerPartialPublication(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "issuer.key")
+	want := must(LoadOrCreateIssuer(path))
+	data := must(os.ReadFile(path))
+	if err := os.WriteFile(path, data[:8], 0600); err != nil {
+		t.Fatal(err)
+	}
+	synctest.Test(t, func(t *testing.T) {
+		go func() {
+			time.Sleep(time.Millisecond)
+			if err := os.WriteFile(path, data, 0600); err != nil {
+				t.Error(err)
+			}
+		}()
+		got, err := LoadOrCreateIssuer(path)
+		if err != nil || got.Kid() != want.Kid() {
+			t.Fatalf("read partially published key: %v", err)
+		}
+	})
+}
+func TestIssuerPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permission bits")
+	}
+	path := filepath.Join(t.TempDir(), "issuer.key")
+	_ = must(LoadOrCreateIssuer(path))
+	if err := os.Chmod(path, 0640); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadOrCreateIssuer(path); err == nil || !strings.Contains(err.Error(), "chmod 600") {
+		t.Fatalf("permissions: %v", err)
+	}
+}
+func testIssuer(t *testing.T, link func(string, string) error) {
 	path := filepath.Join(t.TempDir(), "operator", "issuer.key")
 	const count = 24
 	var wg sync.WaitGroup
@@ -240,7 +288,7 @@ func TestIssuer(t *testing.T) {
 	for n := range count {
 		wg.Go(func() {
 			<-start
-			i, err := LoadOrCreateIssuer(path)
+			i, err := loadOrCreateIssuer(path, link)
 			if err != nil {
 				t.Error(err)
 				return
@@ -292,16 +340,48 @@ func TestIssuer(t *testing.T) {
 	}
 }
 
-// Verification authenticates received bytes even if their map order differs from the encoder's.
-func TestOriginalSignatureInput(t *testing.T) {
-	parts := partsOf(t, must(Sign(private(), fixture("dial"))))
+func TestDeterministicEncoding(t *testing.T) {
+	raw := must(Sign(private(), fixture("dial")))
+	parts := partsOf(t, raw)
 	p := parts[0].([]byte)
-	parts[0] = append(append([]byte{0xa2}, p[3:]...), p[1:3]...)
 	payload := parts[2].([]byte)
-	reordered := append(append([]byte{payload[0]}, payload[3:]...), payload[1:3]...)
-	if _, _, err := Verify(signed(parts, reordered), lookup); err != nil {
-		t.Fatal(err)
+	replace := func(b, from, to []byte) []byte {
+		t.Helper()
+		if !bytes.Contains(b, from) {
+			t.Fatal("missing fixture bytes")
+		}
+		return bytes.Replace(b, from, to, 1)
 	}
+	check := func(name, stage string, b []byte) {
+		t.Run(name, func(t *testing.T) {
+			if _, _, err := Verify(b, lookup); err == nil || !strings.HasPrefix(err.Error(), stage) {
+				t.Fatalf("expected %s, got %v", stage, err)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name     string
+		from, to []byte
+	}{
+		{"tag", []byte{0xd2}, []byte{0xd8, 18}},
+		{"array", []byte{0x84}, []byte{0x98, 4}},
+		{"protected length", []byte{0x4d}, []byte{0x58, 13}},
+		{"empty map", []byte{0xa0}, []byte{0xb8, 0}},
+		{"payload length", []byte{0x58, 146}, []byte{0x59, 0, 146}},
+		{"signature length", []byte{0x58, 64}, []byte{0x59, 0, 64}},
+	} {
+		check(tc.name, "A2", replace(raw, tc.from, tc.to))
+	}
+	check("payload integer", "A5", signed(parts, replace(payload, []byte{1, 2}, []byte{1, 0x18, 2})))
+	check("field length", "A5", signed(parts, replace(payload, []byte{0x58, 32}, []byte{0x59, 0, 32})))
+	reordered := append(append([]byte{payload[0]}, payload[3:]...), payload[1:3]...)
+	check("payload order", "A5", signed(parts, reordered))
+	parts[2] = reordered
+	check("payload order without new signature", "A4", envelope(parts))
+	parts[0] = replace(p, []byte{0x27}, []byte{0x38, 7})
+	check("protected algorithm", "A2", signed(parts, payload))
+	parts[0] = append(append([]byte{0xa2}, p[3:]...), p[1:3]...)
+	check("protected order", "A2", signed(parts, payload))
 }
 func TestExtensionAndTagBoundaries(t *testing.T) {
 	parts := partsOf(t, must(Sign(private(), fixture("dial"))))

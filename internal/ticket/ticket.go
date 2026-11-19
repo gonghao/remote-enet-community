@@ -113,7 +113,7 @@ func Inspect(raw []byte) (Kid, Claims, error) { return parse(raw, nil) }
 
 func parse(raw []byte, key func(Kid) (ed25519.PublicKey, bool)) (Kid, Claims, error) {
 	var tag cbor.RawTag
-	if len(raw) > 1024 || strict.Unmarshal(raw, &tag) != nil || tag.Number != 18 || len(raw)-len(tag.Content) != headSize(raw) {
+	if len(raw) > 1024 || strict.Unmarshal(raw, &tag) != nil || tag.Number != 18 {
 		return Kid{}, Claims{}, errors.New("A2: invalid COSE tag or size")
 	}
 	var parts []any
@@ -131,6 +131,9 @@ func parse(raw []byte, key func(Kid) (ed25519.PublicKey, bool)) (Kid, Claims, er
 	id, ok := headers[uint64(4)].([]byte)
 	if !ok || len(id) != 8 {
 		return Kid{}, Claims{}, errors.New("A2: invalid kid")
+	}
+	if !bytes.Equal(protected, must(enc.Marshal(headers))) || !bytes.Equal(raw, must(enc.Marshal(cbor.Tag{Number: 18, Content: parts}))) {
+		return Kid{}, Claims{}, errors.New("A2: non-deterministic COSE encoding")
 	}
 	kid := Kid(id)
 	if key != nil {
@@ -191,22 +194,18 @@ func children(item []byte) ([][]byte, error) {
 
 // Extensions can contain arbitrary CBOR, including maps with compound keys.
 // Compare the encoded keys of these deterministic maps without interpreting tags.
-func validateInfo(item []byte, mapKey bool) error {
+func validateInfo(item []byte) error {
 	major := item[0] >> 5
-	if mapKey {
-		// A unique encoding makes byte comparison valid even for compound keys.
-		size := headSize(item)
-		if major == 7 && item[0] >= 0xf9 {
-			var f float64
-			if err := untagged.Unmarshal(item, &f); err != nil {
-				return err
-			}
-			if !bytes.Equal(item, must(enc.Marshal(f))) {
-				return errors.New("non-deterministic float key")
-			}
-		} else if !minimalHead(item[:size]) {
-			return errors.New("non-minimal information key")
+	if major == 7 && item[0] >= 0xf9 {
+		var f float64
+		if err := untagged.Unmarshal(item, &f); err != nil {
+			return err
 		}
+		if !bytes.Equal(item, must(enc.Marshal(f))) {
+			return errors.New("non-deterministic information float")
+		}
+	} else if !minimalHead(item[:headSize(item)]) {
+		return errors.New("non-minimal information item")
 	}
 	switch major {
 	case 3:
@@ -218,19 +217,11 @@ func validateInfo(item []byte, mapKey bool) error {
 		if err != nil {
 			return err
 		}
-		seen := make(map[string]bool)
 		for i, v := range parts {
-			isKey := major == 5 && i%2 == 0
-			if isKey {
-				if mapKey && i >= 2 && bytes.Compare(parts[i-2], v) >= 0 {
-					return errors.New("unordered compound information key")
-				}
-				if seen[string(v)] {
-					return errors.New("duplicate information key")
-				}
-				seen[string(v)] = true
+			if major == 5 && i >= 2 && i%2 == 0 && bytes.Compare(parts[i-2], v) >= 0 {
+				return errors.New("duplicate or unordered information key")
 			}
-			if err := validateInfo(v, mapKey || isKey); err != nil {
+			if err := validateInfo(v); err != nil {
 				return err
 			}
 		}
@@ -240,7 +231,7 @@ func validateInfo(item []byte, mapKey bool) error {
 
 func decodeClaims(payload []byte) (Claims, error) {
 	var c Claims
-	fields := make(map[uint64][]byte)
+	fields := make(map[uint64]any)
 	if len(payload) == 0 || payload[0]>>5 != 5 {
 		return c, errors.New("expected claims map")
 	}
@@ -260,13 +251,13 @@ func decodeClaims(payload []byte) (Claims, error) {
 			return c, fmt.Errorf("duplicate field %d", k)
 		}
 		v := parts[i+1]
-		fields[k] = v
 		switch k {
 		case 1, 5, 10, 11, 12, 15:
 			var n uint64
 			if v[0]>>5 != 0 || untagged.Unmarshal(v, &n) != nil || n > math.MaxUint32 {
 				return c, fmt.Errorf("invalid integer field %d", k)
 			}
+			fields[k] = n
 			switch k {
 			case 1:
 				if n != 2 {
@@ -292,20 +283,30 @@ func decodeClaims(payload []byte) (Claims, error) {
 			if untagged.Unmarshal(v, &b) != nil || v[0]>>5 != 2 || len(b) != len(dst) {
 				return c, fmt.Errorf("invalid byte string field %d", k)
 			}
+			fields[k] = b
 			copy(dst, b)
 		case 16:
 			if len(v) != 1 || v[0] != 0xf5 {
 				return c, errors.New("invalid bearer flag")
 			}
+			fields[k] = true
 			c.Bearer = true
 		default:
 			if k < 64 {
 				return c, fmt.Errorf("unknown constraint %d", k)
 			}
-			if err := validateInfo(v, false); err != nil {
+			if err := validateInfo(v); err != nil {
 				return c, err
 			}
+			fields[k] = cbor.RawMessage(v)
 		}
+	}
+	canonical, err := enc.Marshal(fields)
+	if err != nil {
+		return c, fmt.Errorf("encode canonical claims: %w", err)
+	}
+	if !bytes.Equal(payload, canonical) {
+		return c, errors.New("non-deterministic claims encoding")
 	}
 	for _, k := range []uint64{1, 5, 9, 10, 11, 12, 13} {
 		if fields[k] == nil {

@@ -323,6 +323,18 @@ func TestShutdownAndCancellation(t *testing.T) {
 func TestNoGoroutineLeak(t *testing.T) {
 	before := runtime.NumGoroutine()
 	for range 5 {
+		t.Run("pairing and revocation", func(t *testing.T) {
+			h, op, client := local(t), local(t), local(t)
+			p := testPolicy{operator: op.Fingerprint(), admit: func(_ identity.Fingerprint, _ Request, now time.Time) (Grant, error) {
+				return Grant{PairingUntil: now.Add(time.Minute)}, nil
+			}}
+			s, addr, _ := start(t, Options{Local: h, Policy: p})
+			wait := connect(t, addr, h, op, Request{Role: RoleWait})
+			dial := connect(t, addr, h, client, Request{Role: RoleDial, Target: h.Fingerprint()})
+			s.SetPolicy(nil)
+			assertClosed(t, wait)
+			assertClosed(t, dial)
+		})
 		t.Run("cycle", func(t *testing.T) {
 			h, a, b := local(t), local(t), local(t)
 			_, addr, _ := start(t, Options{Local: h, Policy: testPolicy{}})

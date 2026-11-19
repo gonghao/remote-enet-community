@@ -1,6 +1,7 @@
 package settings
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -166,4 +167,40 @@ func TestLoadBuildDefaultCenter(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestVersionSpecificFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	check := func(data []byte, message string) {
+		t.Helper()
+		writeTestConfig(t, path, data)
+		if _, err := Load(path); err == nil || !strings.Contains(err.Error(), message) {
+			t.Errorf("expected %q, got %v", message, err)
+		}
+	}
+	for _, tc := range []struct{ before, field, value string }{
+		{`"version":`, "center", `{"id":"","api":[]}`},
+		{`"listen":`, "hub", `{"addr":"","fp":""}`},
+		{`"listen":`, "mode", `"direct"`},
+	} {
+		field := `"` + tc.field + `"`
+		check([]byte(strings.Replace(fixture, tc.before, field+":"+tc.value+","+tc.before, 1)), "unknown field "+field)
+	}
+	if err := Save(path, Default()); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatal(err)
+	}
+	delete(fields, "center")
+	data, err = json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(data, "config.center: missing required field")
 }

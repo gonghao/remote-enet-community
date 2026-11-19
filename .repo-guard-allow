@@ -27,5 +27,3 @@ tools/test_repo_guard.py
 
 # This file lists only the public example values above.
 .repo-guard-allow | private-ipv4
-# PEM header literal used to validate the issuer key file format.
-internal/ticket/issuer.go | private-key

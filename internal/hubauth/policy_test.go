@@ -76,8 +76,12 @@ func (f fixture) policy(t *testing.T) *Policy {
 // Start with a genuine ticket, then re-sign fields that the normal signer refuses.
 func (f fixture) edit(t *testing.T, raw []byte, key uint64, value any) []byte {
 	t.Helper()
+	enc, err := cbor.CoreDetEncOptions().EncMode()
+	if err != nil {
+		t.Fatal(err)
+	}
 	marshal := func(v any) []byte {
-		b, err := cbor.Marshal(v)
+		b, err := enc.Marshal(v)
 		if err != nil {
 			t.Fatal(err)
 		}

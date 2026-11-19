@@ -10,3 +10,9 @@ GUI 配置独立于身份、信任和邀请码。公开类型与函数签名遵�
 - `DefaultPathsForRole(role)`：仅接受 `client`、`operator`，配置路径为 `os.UserConfigDir()/remote-enet/{role}/settings.json`，stateDir 仍是共享的 `remote-enet/state` 根目录。只计算路径，不迁移、删除或创建文件；原 `DefaultPaths()` 行为不变。
 
 测试覆盖默认值、两种角色的未完成配置、端点/IP/指纹/端口校验、固定 JSON 向量、严格解码、体积边界、保存往返与替换、失败保留原文件、符号链接和平台路径。测试不访问网络。
+
+版本 1 只包含直连设置。读取时自动在内存中升级为版本 2，补入 `operator.mode = "direct"`、空 Hub 和构建期缺省中心。原文件在调用 `Save` 时才更新，保存统一写版本 2。
+
+版本 2 必须包含 `operator.mode`、`operator.hub` 和顶层 `center`。直连模式要求 Hub 的 `addr`、`fp` 都为空；Hub 模式要求填写 Hub 的主机与端口和完整非零身份指纹。中心由 `id` 和 HTTPS 基址数组 `api` 组成，两者均为空表示未配置。版本 2 中显式保存的空中心优先于构建期缺省值。
+
+构建时可通过 Go 链接器注入缺省中心，例如 `go build -ldflags '-X remote-enet/internal/settings.defaultCenterJSON={"id":"official","api":["https://center.example"]}' ./cmd/renetd`。缺省值用于新配置和版本 1 的升级。

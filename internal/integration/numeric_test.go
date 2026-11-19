@@ -368,8 +368,8 @@ func TestNumericStopDuringHandshake(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeNumericFrame(t, s, proto.PairShareA{Value: a})
-	readNumericFrame[proto.PairShareB](t, s)
+	writeNumericFrame(t, s, proto.PakeCommit{Value: a})
+	readNumericFrame[proto.PakeShareB](t, s)
 	stop()
 	if _, err := op.NumericCodeDisplay(f.ctx, d.Generation); !errors.Is(err, cpace.ReasonUnavailable) {
 		t.Fatalf("code after stop: %v", err)
@@ -466,36 +466,38 @@ func TestNumericClientScripts(t *testing.T) {
 				}
 				writeNumericFrame(t, s, reply)
 				if scenario != "unsupported" {
-					ya := readNumericFrame[proto.PairShareA](t, s)
+					commit := readNumericFrame[proto.PakeCommit](t, s)
 					switch scenario {
 					case "separate-tls":
-						writeNumericFrame(t, backend, ya)
-						writeNumericFrame(t, s, readNumericFrame[proto.PairShareB](t, backend))
-						writeNumericFrame(t, backend, readNumericFrame[proto.PairConfirmA](t, s))
-						rejection := readNumericFrame[proto.PairResult](t, backend)
-						if rejection.Accepted || rejection.Reason != string(cpace.ReasonConfirmation) {
-							t.Fatal("cross-session confirmation accepted")
-						}
-						writeNumericFrame(t, s, rejection)
+						writeNumericFrame(t, backend, commit)
+						writeNumericFrame(t, s, readNumericFrame[proto.PakeShareB](t, backend))
+						writeNumericFrame(t, backend, readNumericFrame[proto.PakeShareA](t, s))
+						writeNumericFrame(t, s, readNumericFrame[proto.PakeConfirmB](t, backend))
 						want = "confirmation"
 					case "nic-change":
 						changed.Store(true)
 					case "untrusted-reason":
-						writeNumericFrame(t, s, proto.PairResult{Reason: f.client.DirectPair.Code})
+						writeNumericFrame(t, s, proto.PairDecision{Reason: f.client.DirectPair.Code})
 					case "early-accepted":
-						writeNumericFrame(t, s, proto.PairResult{Accepted: true})
+						writeNumericFrame(t, s, proto.PairDecision{Accepted: true})
 					default:
-						responder, yb, err := cpace.Respond(f.client.DirectPair.Code, scriptBinding(t, ts, ts.Peer(), front.Fingerprint(), hello, reply), ya.Value)
+						responder, yb, err := cpace.Respond(f.client.DirectPair.Code, scriptBinding(t, ts, ts.Peer(), front.Fingerprint(), hello, reply), commit.Value)
 						if err != nil {
 							t.Fatal(err)
 						}
-						writeNumericFrame(t, s, proto.PairShareB{Value: yb})
-						ta := readNumericFrame[proto.PairConfirmA](t, s)
-						if _, err := responder.VerifyAndConfirm(ta.Value); err != nil {
+						writeNumericFrame(t, s, proto.PakeShareB{Value: yb})
+						ya := readNumericFrame[proto.PakeShareA](t, s)
+						tb, err := responder.Open(ya.Value)
+						if err != nil {
+							t.Fatal(err)
+						}
+						writeNumericFrame(t, s, proto.PakeConfirmB{Value: tb})
+						ta := readNumericFrame[proto.PakeConfirmA](t, s)
+						if _, err := responder.Verify(ta.Value); err != nil {
 							t.Fatal(err)
 						}
 						if scenario == "late-accepted" {
-							writeNumericFrame(t, s, proto.PairResult{Accepted: true})
+							writeNumericFrame(t, s, proto.PairDecision{Accepted: true})
 						} else {
 							ts.Close(nil)
 						}

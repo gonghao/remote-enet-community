@@ -132,10 +132,10 @@ func TestBoundedMalformedCBOR(t *testing.T) {
 func TestReadPairRequiresCanonicalFixedBody(t *testing.T) {
 	point := make([]byte, 32)
 	body := append([]byte{0xa1, 1, 0x58, 32}, point...)
-	env := func(b []byte) []byte { return append([]byte{0xa2, 1, 11, 2}, b...) }
+	env := func(b []byte) []byte { return append([]byte{0xa2, 1, 12, 2}, b...) }
 	for name, payload := range map[string][]byte{
 		"envelope extension": append(append([]byte{0xa3}, env(body)[1:]...), 3, 0),
-		"noncanonical type":  append([]byte{0xa2, 1, 0x18, 11, 2}, body...),
+		"noncanonical type":  append([]byte{0xa2, 1, 0x18, 12, 2}, body...),
 		"body extension":     env(append(append([]byte{0xa2}, body[1:]...), 2, 0)),
 		"duplicate key":      env(append(append([]byte{0xa2}, body[1:]...), 1, 0)),
 		"short value":        env(append([]byte{0xa1, 1, 0x58, 31}, point[:31]...)),
@@ -153,7 +153,7 @@ func TestReadPairRequiresCanonicalFixedBody(t *testing.T) {
 	if _, err := ReadPair(bytes.NewReader([]byte{0, 0, 1, 1})); err == nil || errors.Is(err, io.EOF) {
 		t.Fatal("length was not rejected before reading body", err)
 	}
-	for _, msg := range []any{PairShareA{}, PairShareB{}, PairConfirmA{}, PairConfirmB{}} {
+	for _, msg := range []any{PakeCommit{}, PairDecision{Accepted: true, Reason: "accepted"}, PakeShareA{}, PakeShareB{}, PakeConfirmA{}, PakeConfirmB{}} {
 		var buf bytes.Buffer
 		if err := Write(&buf, msg); err != nil {
 			t.Fatal(err)
@@ -161,5 +161,15 @@ func TestReadPairRequiresCanonicalFixedBody(t *testing.T) {
 		if got, err := ReadPair(&buf); got != msg || err != nil {
 			t.Fatalf("round trip %T: %v", got, err)
 		}
+	}
+}
+
+func TestReadPairRejectsLegacyResult(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Write(&buf, PairResult{Reason: "expired"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadPair(&buf); err == nil {
+		t.Fatal("accepted legacy result on pairing stream")
 	}
 }

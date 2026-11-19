@@ -105,7 +105,7 @@ func WrapStream(ctx context.Context, conn net.Conn, o Opts) (transport.Session, 
 		return nil, fmt.Errorf("secure: TLS handshake: %w", err)
 	}
 	state := tc.ConnectionState()
-	exporter, err := state.ExportKeyingMaterial("EXPORTER-renet-pair-direct-v1", nil, 32)
+	exporter, err := state.ExportKeyingMaterial("EXPORTER-renet-pake-sid-v1", nil, 32)
 	if err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("secure: pairing exporter: %w", err)

@@ -77,7 +77,7 @@ func (v *View) numericCodeControls(c *ui.Context) {
 		switch status.Reason {
 		case "", cpace.ReasonExpired:
 			message = "Code expired"
-		case cpace.ReasonExhausted:
+		case cpace.ReasonBudgetExhausted:
 			message = "Attempts exhausted"
 		case cpace.ReasonRateLimited:
 			message = "Try again later"

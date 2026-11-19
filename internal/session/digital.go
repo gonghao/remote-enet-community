@@ -5,13 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"remote-enet/internal/identity"
 	"remote-enet/internal/pairing/cpace"
 	"remote-enet/internal/proto"
 )
 
-// DigitalResponder admits one attempt after the complete client share arrives.
+// DigitalResponder admits one attempt after the complete commitment arrives.
 type DigitalResponder interface {
 	Begin(context.Context) (DigitalAttempt, error)
 }
@@ -19,7 +20,7 @@ type DigitalResponder interface {
 // DigitalAttempt owns the code and serializes trust persistence with revocation.
 type DigitalAttempt interface {
 	Context() context.Context
-	Respond(cpace.Binding, [32]byte) (*cpace.Responder, [32]byte, error)
+	Respond(cpace.Binding, [64]byte) (*cpace.Responder, [32]byte, error)
 	Finish()
 	// Commit reports errors from save as cpace.ReasonStoreFailed.
 	Commit(func(context.Context) error) error
@@ -44,15 +45,15 @@ const (
 
 func pairingFailure(r cpace.Reason) error { return fmt.Errorf("%w: %w", ErrPairing, r) }
 
-func wireReason(err error, fallback cpace.Reason) cpace.Reason {
+func admissionReason(err error) (cpace.Reason, bool) {
 	var r cpace.Reason
 	if errors.As(err, &r) {
 		switch r {
-		case cpace.ReasonUnavailable, cpace.ReasonExpired, cpace.ReasonExhausted, cpace.ReasonRateLimited, cpace.ReasonBusy, cpace.ReasonConfirmation, cpace.ReasonStoreFailed:
-			return r
+		case cpace.ReasonUnavailable, cpace.ReasonExpired, cpace.ReasonBudgetExhausted, cpace.ReasonRateLimited, cpace.ReasonBusy:
+			return r, true
 		}
 	}
-	return fallback
+	return "", false
 }
 
 func (s *Session) digital(ctx context.Context, local, peer [32]byte) error {
@@ -62,7 +63,7 @@ func (s *Session) digital(ctx context.Context, local, peer [32]byte) error {
 	}
 	b := cpace.Binding{Exporter: exp.PairingExporter(), ClientFP: s.opts.LocalFP, OperatorFP: s.Peer(), HelloClientHash: local, HelloOperatorHash: peer}
 	if s.opts.Role == RoleClient {
-		return s.digitalClient(b)
+		return s.digitalClient(ctx, b)
 	}
 	b.ClientFP, b.OperatorFP = b.OperatorFP, b.ClientFP
 	b.HelloClientHash, b.HelloOperatorHash = peer, local
@@ -73,10 +74,19 @@ func readPair[T any](r io.Reader) (T, error) {
 	var zero T
 	msg, err := proto.ReadPair(r)
 	if err != nil {
+		// Either peer can silently abort after validating a point or confirmation.
+		switch any(zero).(type) {
+		case proto.PakeShareA, proto.PakeConfirmB, proto.PakeConfirmA:
+			return zero, pairingFailure(cpace.ReasonConfirmation)
+		}
 		return zero, pairingFailure(ReasonInterrupted)
 	}
-	if result, ok := msg.(proto.PairResult); ok && !result.Accepted {
-		return zero, pairingFailure(wireReason(cpace.Reason(result.Reason), ReasonInterrupted))
+	if _, waiting := any(zero).(proto.PakeShareB); waiting {
+		if d, ok := msg.(proto.PairDecision); ok && !d.Accepted {
+			if reason, ok := admissionReason(cpace.Reason(d.Reason)); ok {
+				return zero, pairingFailure(reason)
+			}
+		}
 	}
 	value, ok := msg.(T)
 	if !ok {
@@ -87,71 +97,125 @@ func readPair[T any](r io.Reader) (T, error) {
 
 func (s *Session) sendPair(msg any) error {
 	if err := proto.Write(s.control, msg); err != nil {
+		switch msg.(type) {
+		case proto.PakeShareA, proto.PakeShareB, proto.PakeConfirmB:
+			return pairingFailure(cpace.ReasonConfirmation)
+		}
 		return pairingFailure(ReasonInterrupted)
 	}
 	return nil
 }
 
 func (s *Session) rejectPair(reason cpace.Reason) error {
-	_ = s.sendPair(proto.PairResult{Reason: string(reason)})
+	_ = s.sendPair(proto.PairDecision{Reason: string(reason)})
 	return pairingFailure(reason)
 }
 
-func (s *Session) digitalClient(b cpace.Binding) error {
-	client, a, err := cpace.Start(s.opts.DigitalCode, b)
-	if err != nil {
-		return pairingFailure(cpace.ReasonConfirmation)
-	}
-	if err = s.sendPair(proto.PairShareA{Value: a}); err != nil {
-		return err
-	}
-	y, err := readPair[proto.PairShareB](s.control)
-	if err != nil {
-		return err
-	}
-	ta, err := client.Confirm(y.Value)
-	if err != nil {
-		return s.rejectPair(cpace.ReasonConfirmation)
-	}
-	if err = s.sendPair(proto.PairConfirmA{Value: ta}); err != nil {
-		return err
-	}
-	tb, err := readPair[proto.PairConfirmB](s.control)
-	if err != nil {
-		return err
-	}
-	if err = client.Verify(tb.Value); err != nil {
-		return pairingFailure(cpace.ReasonConfirmation)
+func (s *Session) confirmSAS(ctx context.Context, sas string) error {
+	if s.opts.ConfirmSAS != nil {
+		// Both peers may still be comparing the SAS when the local hook returns.
+		if !s.setupTimer.Stop() {
+			return pairingFailure(ReasonInterrupted)
+		}
+		s.setupTimer.Reset(3 * time.Minute)
+		confirmCtx, cancel := context.WithCancel(ctx)
+		stop := context.AfterFunc(s.ctx, cancel)
+		defer stop()
+		defer cancel()
+		ok, err := s.opts.ConfirmSAS(confirmCtx, sas, s.Peer())
+		if err != nil || !ok {
+			return pairingFailure(cpace.ReasonConfirmation)
+		}
 	}
 	return nil
 }
 
+func (s *Session) digitalClient(ctx context.Context, b cpace.Binding) error {
+	client, c, err := cpace.Start(s.opts.DigitalCode, b)
+	if err != nil {
+		return pairingFailure(cpace.ReasonConfirmation)
+	}
+	if err = s.sendPair(proto.PakeCommit{Value: c}); err != nil {
+		return err
+	}
+	y, err := readPair[proto.PakeShareB](s.control)
+	if err != nil {
+		return err
+	}
+	a, err := client.Reveal(y.Value)
+	if err != nil {
+		return pairingFailure(cpace.ReasonConfirmation)
+	}
+	if err = s.sendPair(proto.PakeShareA{Value: a}); err != nil {
+		return err
+	}
+	tb, err := readPair[proto.PakeConfirmB](s.control)
+	if err != nil {
+		return err
+	}
+	ta, sas, err := client.Finish(tb.Value)
+	if err != nil {
+		return pairingFailure(cpace.ReasonConfirmation)
+	}
+	if err = s.sendPair(proto.PakeConfirmA{Value: ta}); err != nil {
+		return err
+	}
+	if err = s.confirmSAS(ctx, sas); err != nil {
+		return err
+	}
+	decision, err := readPair[proto.PairDecision](s.control)
+	if err != nil {
+		return err
+	}
+	if decision.Accepted && decision.Reason == "accepted" {
+		return nil
+	}
+	if !decision.Accepted && decision.Reason == string(cpace.ReasonStoreFailed) {
+		return pairingFailure(cpace.ReasonStoreFailed)
+	}
+	return pairingFailure(ReasonInterrupted)
+}
+
 func (s *Session) digitalOperator(ctx context.Context, b cpace.Binding) error {
-	a, err := readPair[proto.PairShareA](s.control)
+	c, err := readPair[proto.PakeCommit](s.control)
 	if err != nil {
 		return err
 	}
 	attempt, err := s.opts.DigitalManager.Begin(ctx)
 	if err != nil {
-		return s.rejectPair(wireReason(err, cpace.ReasonUnavailable))
+		return s.admissionFailure(err)
 	}
 	defer attempt.Finish()
-	operator, y, err := attempt.Respond(b, a.Value)
+	operator, y, err := attempt.Respond(b, c.Value)
 	if err != nil {
-		return s.rejectPair(wireReason(err, cpace.ReasonConfirmation))
+		return s.admissionFailure(err)
 	}
 	stop := context.AfterFunc(attempt.Context(), func() { s.finish(pairingFailure(ReasonInterrupted)) })
 	defer stop()
-	if err = s.sendPair(proto.PairShareB{Value: y}); err != nil {
+	if err = s.sendPair(proto.PakeShareB{Value: y}); err != nil {
 		return err
 	}
-	ta, err := readPair[proto.PairConfirmA](s.control)
+	a, err := readPair[proto.PakeShareA](s.control)
 	if err != nil {
 		return err
 	}
-	tb, err := operator.VerifyAndConfirm(ta.Value)
+	tb, err := operator.Open(a.Value)
 	if err != nil {
-		return s.rejectPair(cpace.ReasonConfirmation)
+		return pairingFailure(cpace.ReasonConfirmation)
+	}
+	if err = s.sendPair(proto.PakeConfirmB{Value: tb}); err != nil {
+		return err
+	}
+	ta, err := readPair[proto.PakeConfirmA](s.control)
+	if err != nil {
+		return err
+	}
+	sas, err := operator.Verify(ta.Value)
+	if err != nil {
+		return pairingFailure(cpace.ReasonConfirmation)
+	}
+	if err = s.confirmSAS(attempt.Context(), sas); err != nil {
+		return err
 	}
 	// Commit rechecks the generation and may cancel the attempt context itself.
 	stop()
@@ -167,7 +231,20 @@ func (s *Session) digitalOperator(ctx context.Context, b cpace.Binding) error {
 		return s.opts.Remember(saveCtx, b.ClientFP)
 	})
 	if err != nil {
-		return s.rejectPair(wireReason(err, ReasonInterrupted))
+		if errors.Is(err, cpace.ReasonStoreFailed) {
+			return s.rejectPair(cpace.ReasonStoreFailed)
+		}
+		return pairingFailure(ReasonInterrupted)
 	}
-	return s.sendPair(proto.PairConfirmB{Value: tb})
+	return s.sendPair(proto.PairDecision{Accepted: true, Reason: "accepted"})
+}
+
+func (s *Session) admissionFailure(err error) error {
+	if r, ok := admissionReason(err); ok {
+		return s.rejectPair(r)
+	}
+	if errors.Is(err, cpace.ReasonConfirmation) {
+		return pairingFailure(cpace.ReasonConfirmation)
+	}
+	return pairingFailure(ReasonInterrupted)
 }

@@ -6,10 +6,13 @@ import (
 	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"testing"
 
 	"github.com/gtank/ristretto255"
+
+	"remote-enet/internal/proto"
 )
 
 type vector map[string]json.RawMessage
@@ -111,11 +114,22 @@ func TestExchangeVectors(t *testing.T) {
 			if name == "application" {
 				b := v.binding(t)
 				v.check(t, "CI", b.ci())
-				digest := transcript(b, a, y)
-				v.check(t, "T", digest[:])
+				digest := commitment(a)
+				v.check(t, "commit", digest[:])
 				tags := confirmationTags(b, k, a, y)
 				v.check(t, "Ta", tags.client[:])
 				v.check(t, "Tb", tags.operator[:])
+				var sas string
+				if err := json.Unmarshal(v["SAS"], &sas); err != nil || sas != tags.sas || sas[0] != '0' {
+					t.Fatal("SAS mismatch")
+				}
+				for j, msg := range []any{proto.PakeCommit{Value: digest}, proto.PakeShareB{Value: y}, proto.PakeShareA{Value: a}, proto.PakeConfirmB{Value: tags.operator}, proto.PakeConfirmA{Value: tags.client}, proto.PairDecision{Accepted: true, Reason: "accepted"}} {
+					var frame bytes.Buffer
+					if err := proto.Write(&frame, msg); err != nil {
+						t.Fatal(err)
+					}
+					v.check(t, fmt.Sprintf("CBOR%d", 11+j), frame.Bytes()[4:])
+				}
 			}
 		})
 	}
@@ -150,14 +164,18 @@ func TestPointVectors(t *testing.T) {
 		}
 		if len(tc.share) == 32 {
 			p := [32]byte(tc.share)
-			if _, _, err := Respond(exampleCode, testBinding(), p); err == nil {
+			r, _, err := Respond(exampleCode, testBinding(), commitment(p))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := r.Open(p); err == nil {
 				t.Fatal("respond accepted invalid share")
 			}
 			i, _ := startTest(t, testBinding())
-			if _, err := i.Confirm(p); err == nil {
+			if _, err := i.Reveal(p); err == nil {
 				t.Fatal("confirm accepted invalid share")
 			}
-			if _, err := i.Confirm([32]byte(x)); err == nil {
+			if _, err := i.Reveal([32]byte(x)); err == nil {
 				t.Fatal("retried invalid share")
 			}
 		}
@@ -183,4 +201,15 @@ func TestScalarSampling(t *testing.T) {
 	if first == second {
 		t.Fatal("Start reused the public share")
 	}
+}
+
+func TestCenterCIVector(t *testing.T) {
+	v := readVector(t, "application")
+	var center vector
+	if err := json.Unmarshal(v["center"], &center); err != nil {
+		t.Fatal(err)
+	}
+	hc := sha256.Sum256(center.bytes(t, "HC"))
+	ho := sha256.Sum256(center.bytes(t, "HO"))
+	center.check(t, "CI", lvCat([]byte("renet-pake-v1"), []byte(suiteID), []byte("pair-center/1"), []byte("renet/1"), v.bytes(t, "fpA"), v.bytes(t, "fpB"), hc[:], ho[:], center.bytes(t, "hub_fp"), center.bytes(t, "center_id"), center.bytes(t, "session_id")))
 }

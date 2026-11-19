@@ -116,7 +116,7 @@ func TestDigitalPairResultAcceptedLeavesSavedSettingsUntouched(t *testing.T) {
 	}
 	if msg, err := proto.ReadPair(st); err != nil {
 		t.Fatal(err)
-	} else if _, ok := msg.(proto.PairShareA); !ok {
+	} else if _, ok := msg.(proto.PakeCommit); !ok {
 		t.Fatalf("expected client share, got %T", msg)
 	}
 	if err := proto.Write(st, proto.PairResult{Accepted: true}); err != nil {

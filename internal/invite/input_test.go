@@ -49,7 +49,8 @@ func TestParseInput(t *testing.T) {
 		{name: "extra field", input: "host:1 0000 1234 extra", err: ErrInvalidCode},
 		{name: "extra digits", input: "host:1 " + code + " 1", err: ErrInvalidCode},
 		{name: "zero-width", input: "host:1 " + code + "\u200b", err: ErrInvalidCode},
-		{name: "punctuation", input: "host:1 0000-1234", err: ErrInvalidCode},
+		{name: "hyphenated code", input: "my-hub:1 0000-1234", address: "my-hub:1", kind: Direct},
+		{name: "hyphenated center", input: "0000-1234", kind: Center},
 		{name: "other digits", input: "host:1 ٠٠٠٠١٢٣٤", err: ErrInvalidCode},
 		{name: "bad raw invite", input: "RENET1:" + code, err: ErrInvalidInvite},
 	} {

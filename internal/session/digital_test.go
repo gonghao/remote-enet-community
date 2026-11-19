@@ -48,7 +48,7 @@ type testAttempt struct {
 
 func (a testAttempt) Context() context.Context { return a.ctx }
 func (a testAttempt) Finish()                  {}
-func (a testAttempt) Respond(b cpace.Binding, y [32]byte) (*cpace.Responder, [32]byte, error) {
+func (a testAttempt) Respond(b cpace.Binding, y [64]byte) (*cpace.Responder, [32]byte, error) {
 	return cpace.Respond(a.code, b, y)
 }
 func (a testAttempt) Commit(save func(context.Context) error) error {
@@ -69,18 +69,42 @@ func (s alteredHello) AcceptStream(ctx context.Context) (transport.Stream, error
 	if err != nil {
 		return nil, err
 	}
-	var prefix [4]byte
-	if _, err = io.ReadFull(st, prefix[:]); err != nil {
+	return alteredHelloReader(st), nil
+}
+
+func (s alteredHello) OpenStream(ctx context.Context) (transport.Stream, error) {
+	st, err := s.Session.OpenStream(ctx)
+	if err != nil {
 		return nil, err
 	}
-	raw := make([]byte, binary.BigEndian.Uint32(prefix[:]))
-	if _, err = io.ReadFull(st, raw); err != nil {
-		return nil, err
+	return alteredHelloReader(st), nil
+}
+
+type helloReader struct {
+	io.Reader
+	stream transport.Stream
+}
+
+func alteredHelloReader(st transport.Stream) transport.Stream {
+	return &prefixedStream{st, &helloReader{stream: st}}
+}
+func (r *helloReader) Read(p []byte) (int, error) {
+	if r.Reader == nil {
+		st := r.stream
+		var prefix [4]byte
+		if _, err := io.ReadFull(st, prefix[:]); err != nil {
+			return 0, err
+		}
+		raw := make([]byte, binary.BigEndian.Uint32(prefix[:]))
+		if _, err := io.ReadFull(st, raw); err != nil {
+			return 0, err
+		}
+		frame := binary.BigEndian.AppendUint32(nil, uint32(len(raw)+1))
+		frame = append(frame, raw[0], 0x18)
+		frame = append(frame, raw[1:]...)
+		r.Reader = io.MultiReader(bytes.NewReader(frame), st)
 	}
-	frame := binary.BigEndian.AppendUint32(nil, uint32(len(raw)+1))
-	frame = append(frame, raw[0], 0x18)
-	frame = append(frame, raw[1:]...)
-	return &prefixedStream{st, io.MultiReader(bytes.NewReader(frame), st)}, nil
+	return r.Reader.Read(p)
 }
 
 type prefixedStream struct {
@@ -96,8 +120,8 @@ func TestDigitalExchange(t *testing.T) {
 		name string
 		want cpace.Reason
 	}{
-		{"success", ""}, {"wrong code", cpace.ReasonConfirmation}, {"altered hello", cpace.ReasonConfirmation}, {"exporter mismatch", cpace.ReasonConfirmation}, {"save failed", cpace.ReasonStoreFailed}, {"no code", cpace.ReasonUnavailable},
-		{"commit canceled", ReasonInterrupted}, {"commit deadline", ReasonInterrupted}, {"save deadline", cpace.ReasonStoreFailed},
+		{"success", ""}, {"wrong code", cpace.ReasonConfirmation}, {"SAS rejected", cpace.ReasonConfirmation}, {"altered operator hello", cpace.ReasonConfirmation}, {"altered hello", cpace.ReasonConfirmation}, {"exporter mismatch", cpace.ReasonConfirmation}, {"save failed", cpace.ReasonStoreFailed}, {"no code", cpace.ReasonUnavailable},
+		{"lost decision", ReasonInterrupted}, {"commit canceled", ReasonInterrupted}, {"commit deadline", ReasonInterrupted}, {"save deadline", cpace.ReasonStoreFailed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := testContext(t)
@@ -110,6 +134,8 @@ func TestDigitalExchange(t *testing.T) {
 			switch tc.name {
 			case "wrong code":
 				m.code = "00001235"
+			case "altered operator hello":
+				a = alteredHello{a}
 			case "altered hello":
 				b = alteredHello{b}
 			case "exporter mismatch":
@@ -128,6 +154,8 @@ func TestDigitalExchange(t *testing.T) {
 					t.Errorf("wrong peer saved")
 				}
 				switch tc.name {
+				case "lost decision":
+					return b.Close(nil)
 				case "save failed":
 					return errors.New(code)
 				case "save deadline":
@@ -135,6 +163,14 @@ func TestDigitalExchange(t *testing.T) {
 				}
 				return nil
 			}}
+			if tc.name == "SAS rejected" {
+				o.ConfirmSAS = func(_ context.Context, sas string, peer identity.Fingerprint) (bool, error) {
+					if len(sas) != 6 || peer != cfp {
+						t.Error("invalid SAS prompt")
+					}
+					return false, nil
+				}
+			}
 			type result struct {
 				s   *Session
 				err error
@@ -148,9 +184,13 @@ func TestDigitalExchange(t *testing.T) {
 					t.Fatalf("pairing failed: %v %v", err, op.err)
 				}
 			} else {
-				for _, failure := range []error{err, op.err} {
-					if !errors.Is(failure, tc.want) || strings.Contains(failure.Error(), code) {
-						t.Fatalf("unexpected error: %v", failure)
+				for role, failure := range map[Role]error{RoleClient: err, RoleOperator: op.err} {
+					want := tc.want
+					if tc.name == "SAS rejected" && role == RoleClient {
+						want = ReasonInterrupted
+					}
+					if !errors.Is(failure, want) || strings.Contains(failure.Error(), code) {
+						t.Fatalf("%s: got %v, want %v", role, failure, want)
 					}
 				}
 				if cs != nil || op.s != nil {
@@ -158,7 +198,7 @@ func TestDigitalExchange(t *testing.T) {
 				}
 			}
 			wantSaves := 0
-			if tc.want == "" || tc.want == cpace.ReasonStoreFailed {
+			if tc.want == "" || tc.want == cpace.ReasonStoreFailed || tc.name == "lost decision" {
 				wantSaves = 1
 			}
 			if saves != wantSaves {
@@ -190,11 +230,11 @@ func (s *recordedStream) Write(p []byte) (int, error) { return s.writer.Write(p)
 
 func TestDigitalClientScript(t *testing.T) {
 	const code = "00001234"
-	_, share, err := cpace.Start(code, testBinding)
+	_, share, err := cpace.Respond(code, testBinding, [64]byte{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	shareB := proto.PairShareB{Value: share}
+	shareB := proto.PakeShareB{Value: share}
 	for _, tc := range []struct {
 		name             string
 		replies          []any
@@ -203,13 +243,13 @@ func TestDigitalClientScript(t *testing.T) {
 	}{
 		{"unsupported", nil, ReasonUnsupported, 0, 0},
 		{"missing exporter", nil, ReasonInterrupted, 0, 0},
-		{"early accepted", []any{proto.PairResult{Accepted: true}}, ReasonInterrupted, 1, 0},
-		{"late accepted", []any{shareB, proto.PairResult{Accepted: true}}, ReasonInterrupted, 1, 1},
-		{"lost after confirmation", []any{shareB}, ReasonInterrupted, 1, 1},
-		{"wrong order", []any{proto.PairConfirmB{}}, ReasonInterrupted, 1, 0},
+		{"early accepted", []any{proto.PairDecision{Accepted: true}}, ReasonInterrupted, 1, 0},
+		{"late accepted", []any{shareB, proto.PairDecision{Accepted: true}}, ReasonInterrupted, 1, 1},
+		{"lost before Tb", []any{shareB}, cpace.ReasonConfirmation, 1, 1},
+		{"wrong order", []any{proto.PakeConfirmB{}}, ReasonInterrupted, 1, 0},
 		{"duplicate share", []any{shareB, shareB}, ReasonInterrupted, 1, 1},
-		{"wrong tag", []any{shareB, proto.PairConfirmB{}}, cpace.ReasonConfirmation, 1, 1},
-		{"unknown reason", []any{proto.PairResult{Reason: code}}, ReasonInterrupted, 1, 0},
+		{"wrong tag", []any{shareB, proto.PakeConfirmB{}}, cpace.ReasonConfirmation, 1, 1},
+		{"unknown reason", []any{proto.PairDecision{Reason: code}}, ReasonInterrupted, 1, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := proto.Hello{Role: "operator", ProtoVersion: proto.Version}
@@ -238,9 +278,9 @@ func TestDigitalClientScript(t *testing.T) {
 					t.Fatal(err)
 				}
 				switch msg.(type) {
-				case proto.PairShareA:
+				case proto.PakeCommit:
 					shares++
-				case proto.PairConfirmA:
+				case proto.PakeShareA:
 					confirms++
 				default:
 					t.Fatalf("unexpected %T", msg)
@@ -259,7 +299,7 @@ func TestDigitalRejectionSurvivesHandshakeDeadline(t *testing.T) {
 		ts := &handshakeTransport{done: make(chan struct{}), closed: make(chan struct{})}
 		ts.stream = &handshakeStream{
 			owner: ts,
-			input: bytes.NewReader(encodedMessages(t, hello, proto.PairResult{Reason: string(cpace.ReasonExpired)})),
+			input: bytes.NewReader(encodedMessages(t, hello, proto.PairDecision{Reason: string(cpace.ReasonExpired)})),
 			afterRead: func() {
 				time.Sleep(handshakeTimeout)
 				<-ts.closed
@@ -330,7 +370,7 @@ func TestDigitalOperatorDisconnectAfterClientConfirmation(t *testing.T) {
 	}
 	hello := encodedMessages(t, proto.Hello{Role: "client", ProtoVersion: proto.Version, Capabilities: []string{proto.PairDirectCapability}})
 	script := &closingScriptTransport{Session: operator, ctx: ctx,
-		inputSize: len(hello) + len(encodedMessages(t, proto.PairShareA{}, proto.PairConfirmA{}))}
+		inputSize: len(hello) + len(encodedMessages(t, proto.PakeCommit{}, proto.PakeShareA{}, proto.PakeConfirmA{}))}
 	remembered := false
 	result := make(chan error, 1)
 	go func() {
@@ -358,18 +398,29 @@ func TestDigitalOperatorDisconnectAfterClientConfirmation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = proto.Write(st, proto.PairShareA{Value: ya}); err != nil {
+	if err = proto.Write(st, proto.PakeCommit{Value: ya}); err != nil {
 		t.Fatal(err)
 	}
-	yb, err := readPair[proto.PairShareB](st)
+	yb, err := readPair[proto.PakeShareB](st)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ta, err := a.Confirm(yb.Value)
+	share, err := a.Reveal(yb.Value)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = proto.Write(st, proto.PairConfirmA{Value: ta}); err != nil {
+	if err = proto.Write(st, proto.PakeShareA{Value: share}); err != nil {
+		t.Fatal(err)
+	}
+	tb, err := readPair[proto.PakeConfirmB](st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ta, _, err := a.Finish(tb.Value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = proto.Write(st, proto.PakeConfirmA{Value: ta}); err != nil {
 		t.Fatal(err)
 	}
 	if err = client.Close(nil); err != nil {
@@ -381,7 +432,10 @@ func TestDigitalOperatorDisconnectAfterClientConfirmation(t *testing.T) {
 	if _, err = proto.Read(&script.output, proto.MaxFrameLen); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = readPair[proto.PairShareB](&script.output); err != nil || script.output.Len() != 0 {
+	if _, err = readPair[proto.PakeShareB](&script.output); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = readPair[proto.PakeConfirmB](&script.output); err != nil || script.output.Len() != 0 {
 		t.Fatal("expected exactly one operator share and no additional pairing frames")
 	}
 	if remembered || m.Status().AttemptsLeft != display.AttemptsLeft-1 {
@@ -412,15 +466,15 @@ func TestOperatorRejectsUnexpectedPairFrames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := proto.PairShareA{Value: y}
+	a := proto.PakeCommit{Value: y}
 	for _, tc := range []struct {
 		name   string
 		frames []any
 		shares int
 	}{
-		{"confirm first", []any{proto.PairConfirmA{}}, 0},
+		{"confirm first", []any{proto.PakeConfirmA{}}, 0},
 		{"duplicate share", []any{a, a}, 1},
-		{"accepted instead of confirmation", []any{a, proto.PairResult{Accepted: true}}, 1},
+		{"accepted instead of confirmation", []any{a, proto.PairDecision{Accepted: true}}, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := proto.Hello{Role: "client", ProtoVersion: proto.Version, Capabilities: []string{proto.PairDirectCapability}}
@@ -436,7 +490,7 @@ func TestOperatorRejectsUnexpectedPairFrames(t *testing.T) {
 			}
 			for i := 0; i < tc.shares; i++ {
 				msg, err := proto.ReadPair(&record.output)
-				if _, ok := msg.(proto.PairShareB); err != nil || !ok {
+				if _, ok := msg.(proto.PakeShareB); err != nil || !ok {
 					t.Fatalf("expected response share: %T, %v", msg, err)
 				}
 			}
@@ -449,3 +503,63 @@ func TestOperatorRejectsUnexpectedPairFrames(t *testing.T) {
 
 // testBinding is non-zero because cpace rejects zero exporters and fingerprints.
 var testBinding = cpace.Binding{Exporter: [32]byte{2}, ClientFP: [32]byte{3}, OperatorFP: [32]byte{4}}
+
+func TestDirectAdmissionBudget(t *testing.T) {
+	for _, reason := range []cpace.Reason{cpace.ReasonUnavailable, cpace.ReasonExpired, cpace.ReasonBusy, cpace.ReasonBudgetExhausted, cpace.ReasonRateLimited, ""} {
+		t.Run(string(reason), func(t *testing.T) {
+			now := time.Now()
+			cfg := pairing.Config{Now: func() time.Time { return now }}
+			if reason == cpace.ReasonBudgetExhausted {
+				cfg.PerCode = 1
+			}
+			if reason == cpace.ReasonRateLimited {
+				cfg.GlobalLimit = 1
+			}
+			m := pairing.NewManager(cfg)
+			defer m.Close()
+			if reason != cpace.ReasonUnavailable {
+				if _, err := m.Issue(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			switch reason {
+			case cpace.ReasonExpired:
+				now = now.Add(time.Hour)
+			case cpace.ReasonBusy, cpace.ReasonBudgetExhausted, cpace.ReasonRateLimited:
+				owner, err := m.Begin(t.Context())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, _, err = owner.Respond(testBinding, [64]byte{}); err != nil {
+					t.Fatal(err)
+				}
+				if reason != cpace.ReasonBusy {
+					owner.Finish()
+				}
+			}
+			before := m.Status()
+			h := proto.Hello{Role: "client", ProtoVersion: proto.Version, Capabilities: []string{proto.PairDirectCapability}}
+			ts := &handshakeTransport{done: make(chan struct{}), closed: make(chan struct{})}
+			ts.stream = &handshakeStream{owner: ts, input: bytes.NewReader(encodedMessages(t, h, proto.PakeCommit{}))}
+			record := &recordingTransport{Session: ts}
+			sess, err := Run(t.Context(), exportSession{record, [32]byte{1}}, Options{Initiator: true, Role: RoleOperator, LocalFP: testBinding.OperatorFP, DigitalManager: managerResponder{m}})
+			if err == nil || sess != nil {
+				t.Fatal("unexpected success")
+			}
+			if _, err := proto.Read(&record.output, proto.MaxFrameLen); err != nil {
+				t.Fatal(err)
+			}
+			msg, err := proto.ReadPair(&record.output)
+			if err != nil || record.output.Len() != 0 {
+				t.Fatal("unexpected pairing frames", err)
+			}
+			if reason == "" {
+				if _, ok := msg.(proto.PakeShareB); !ok || m.Status().AttemptsLeft != before.AttemptsLeft-1 {
+					t.Fatal("disconnect before Tb refunded attempt")
+				}
+			} else if msg != (proto.PairDecision{Reason: string(reason)}) || m.Status() != before {
+				t.Fatal("incorrect rejection or budget", msg, m.Status())
+			}
+		})
+	}
+}

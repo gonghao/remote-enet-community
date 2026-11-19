@@ -45,7 +45,7 @@ func classifyPairingError(err error) PairingErrorKind {
 		return "busy"
 	case errors.As(err, &reason):
 		switch reason {
-		case cpace.ReasonUnavailable, cpace.ReasonExpired, cpace.ReasonExhausted, cpace.ReasonRateLimited, cpace.ReasonBusy, cpace.ReasonConfirmation, cpace.ReasonStoreFailed, session.ReasonUnsupported:
+		case cpace.ReasonUnavailable, cpace.ReasonExpired, cpace.ReasonBudgetExhausted, cpace.ReasonRateLimited, cpace.ReasonBusy, cpace.ReasonConfirmation, cpace.ReasonStoreFailed, session.ReasonUnsupported:
 			return PairingErrorKind(reason)
 		}
 	}

@@ -54,10 +54,10 @@ func Text(tag, source string, args ...any) string {
 var pairingMessages = map[string]string{
 	"unavailable":       "Code unavailable",
 	"expired":           "Code expired",
-	"exhausted":         "Attempts exhausted",
+	"budget_exhausted":  "Attempts exhausted",
 	"rate_limited":      "Try again later",
 	"busy":              "Operator busy",
-	"confirmation":      "Code or peer confirmation failed",
+	"confirmation":      "Incorrect code or connection tampered",
 	"store_failed":      "Could not save pairing",
 	"dns":               "Address lookup failed",
 	"timeout":           "Connection timed out",

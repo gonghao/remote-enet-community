@@ -628,8 +628,8 @@ func TestExpiredInvitationShowsSpecificError(t *testing.T) {
 }
 
 func TestRuntimeLogRedactsPairingCredentials(t *testing.T) {
-	raw := "bind failed: renet1:ABCDEFG 04827193 0482 7193 ０４８２　７１９３"
-	want := "bind failed: [invitation redacted] [numeric code redacted] [numeric code redacted] [numeric code redacted]"
+	raw := "bind failed: renet1:ABCDEFG 04827193 0482 7193 ０４８２　７１９３ 04-82-7193"
+	want := "bind failed: [invitation redacted] [numeric code redacted] [numeric code redacted] [numeric code redacted] [numeric code redacted]"
 	if got := displayRuntimeError(raw); got != want {
 		t.Errorf("runtime error redaction = %q, want %q", got, want)
 	}

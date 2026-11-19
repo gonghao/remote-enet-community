@@ -55,7 +55,7 @@
   "Client settings": "Client settings",
   "Closing the runtime and releasing its resources.": "Closing the runtime and releasing its resources.",
   "Code expired": "Code expired",
-  "Code or peer confirmation failed": "Code or peer confirmation failed",
+  "Incorrect code or connection tampered": "Incorrect code or connection tampered",
   "Code redeemed": "Code redeemed",
   "Code unavailable": "Code unavailable",
   "Completing pairing": "Completing pairing",

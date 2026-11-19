@@ -38,7 +38,7 @@ func TestPairingAndRuntimeMessagesAreCataloged(t *testing.T) {
 		"Address lookup failed", "Connection timed out", "Operator busy",
 		"Numeric pairing unsupported", "Device identity mismatch",
 		"Code unavailable", "Code expired", "Code redeemed", "Attempts exhausted", "Try again later",
-		"Code or peer confirmation failed", "Pairing interrupted", "Could not save pairing",
+		"Incorrect code or connection tampered", "Pairing interrupted", "Could not save pairing",
 		"Client disconnected.", "Client connection could not be accepted.", "Client session ended with an error.",
 		"Operator disconnected.", "Operator session ended with an error.",
 		"Pairing rejected.", "Incompatible protocol version.", "Runtime stopped with an error. Check runtime diagnostics.",

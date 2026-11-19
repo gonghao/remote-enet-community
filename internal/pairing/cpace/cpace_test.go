@@ -1,9 +1,6 @@
 package cpace
 
-import (
-	"bytes"
-	"testing"
-)
+import "testing"
 
 const exampleCode = "00001234"
 
@@ -17,7 +14,7 @@ func testBinding() Binding {
 	}
 }
 
-func startTest(t *testing.T, b Binding) (*Initiator, [32]byte) {
+func startTest(t *testing.T, b Binding) (*Initiator, [64]byte) {
 	t.Helper()
 	i, a, err := Start(exampleCode, b)
 	if err != nil {
@@ -25,115 +22,81 @@ func startTest(t *testing.T, b Binding) (*Initiator, [32]byte) {
 	}
 	return i, a
 }
-func exchangeTest(t *testing.T, opCode string, b Binding) (*Initiator, *Responder, [32]byte) {
+func exchangeTest(t *testing.T, code string, b Binding) (*Initiator, *Responder, [64]byte) {
 	t.Helper()
-	i, a := startTest(t, testBinding())
-	r, y, err := Respond(opCode, b, a)
+	i, c := startTest(t, testBinding())
+	r, y, err := Respond(code, b, c)
 	if err != nil {
 		t.Fatal(err)
 	}
-	tag, err := i.Confirm(y)
+	a, err := i.Reveal(y)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return i, r, tag
+	tb, err := r.Open(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return i, r, tb
+}
+func TestCommitMismatch(t *testing.T) {
+	i, c := startTest(t, testBinding())
+	c[0] ^= 1
+	r, y, err := Respond(exampleCode, testBinding(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := i.Reveal(y)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = r.Open(a); err != ReasonConfirmation {
+		t.Fatal(err)
+	}
 }
 func TestSingleUse(t *testing.T) {
-	i, r, ta := exchangeTest(t, exampleCode, testBinding())
-	copyR := *r
-	tb, err := r.VerifyAndConfirm(ta)
+	i, r, tb := exchangeTest(t, exampleCode, testBinding())
+	copyI := *i
+	ta, sas, err := i.Finish(tb)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := copyR.VerifyAndConfirm(ta); err == nil {
-		t.Fatal("reused responder")
-	}
-	if err := i.Verify(tb); err != nil {
+	if _, _, err := copyI.Finish(tb); err != errState {
 		t.Fatal(err)
 	}
-	if err := i.Verify(tb); err == nil {
-		t.Fatal("reused initiator")
+	results := make(chan error, 2)
+	for range 2 {
+		go func() {
+			got, err := r.Verify(ta)
+			if err == nil && got != sas {
+				t.Error("SAS mismatch")
+			}
+			results <- err
+		}()
 	}
-	if _, err := i.Confirm([32]byte{}); err == nil {
-		t.Fatal("repeated confirm")
-	}
-	i, r, ta = exchangeTest(t, exampleCode, testBinding())
-	if err := i.Verify(ta); err != ReasonConfirmation {
-		t.Fatal("accepted reflected tag")
-	}
-	tb, err = r.VerifyAndConfirm(ta)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := i.Verify(tb); err == nil {
-		t.Fatal("retried after failed verify")
-	}
-	i, a := startTest(t, testBinding())
-	if err := i.Verify(ta); err == nil {
-		t.Fatal("accepted early verify")
-	}
-	if _, err := i.Confirm(a); err == nil {
-		t.Fatal("retried after early verify")
+	first, second := <-results, <-results
+	if !(first == nil && second == errState || second == nil && first == errState) {
+		t.Fatal(first, second)
 	}
 }
 func TestWrongCodeAndBinding(t *testing.T) {
-	checkMismatch := func(code string, b Binding) {
+	check := func(code string, b Binding) {
 		t.Helper()
-		i, r, ta := exchangeTest(t, code, b)
-		candidate := r.s.pending.operator
-		if err := i.Verify(candidate); err != ReasonConfirmation {
-			t.Fatal("initiator accepted mismatched exchange")
+		i, r, tb := exchangeTest(t, code, b)
+		if _, _, err := i.Finish(tb); err != ReasonConfirmation {
+			t.Fatal(err)
 		}
-		if result, err := r.VerifyAndConfirm(ta); err != ReasonConfirmation || result != [32]byte{} {
-			t.Fatal("responder accepted mismatched exchange")
-		}
-		if _, err := r.VerifyAndConfirm(ta); err == nil {
-			t.Fatal("retried failed verification")
+		if _, err := r.Verify(tb); err != ReasonConfirmation {
+			t.Fatal(err)
 		}
 	}
-	checkMismatch("00001235", testBinding())
+	check("00001235", testBinding())
 	b := testBinding()
 	for _, field := range [][]byte{b.Exporter[:], b.ClientFP[:], b.OperatorFP[:], b.HelloClientHash[:], b.HelloOperatorHash[:]} {
 		for n := range field {
 			field[n] ^= 1
-			checkMismatch(exampleCode, b)
+			check(exampleCode, b)
 			field[n] ^= 1
-		}
-	}
-}
-func TestRoleBinding(t *testing.T) {
-	v := readVector(t, "application")
-	ci := v.bytes(t, "CI")
-	for _, role := range []string{"client", "operator"} {
-		offset := bytes.Index(ci, []byte(role))
-		if offset < 0 {
-			t.Fatal("missing role")
-		}
-		for n := range len(role) {
-			changed := bytes.Clone(ci)
-			changed[offset+n] ^= 1
-			g, err := generator(v.bytes(t, "PRS"), changed, v.bytes(t, "sid"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			// Model a peer using a different role in its generator context.
-			y := multiply(v.scalar(t, "yb"), g)
-			k, err := sharedPoint(v.scalar(t, "ya"), y[:])
-			if err != nil {
-				t.Fatal(err)
-			}
-			b := v.binding(t)
-			a := [32]byte(v.bytes(t, "Ya"))
-			received := confirmationTags(b, k, a, y)
-			peerShared, err := sharedPoint(v.scalar(t, "yb"), a[:])
-			if err != nil {
-				t.Fatal(err)
-			}
-			peer := confirmationTags(b, peerShared, a, y)
-			r := Responder{&responderState{pending: &peer}}
-			if _, err := r.VerifyAndConfirm(received.client); err != ReasonConfirmation {
-				t.Fatal("accepted mutated role")
-			}
 		}
 	}
 }
@@ -142,7 +105,7 @@ func TestInvalidCode(t *testing.T) {
 		if _, _, err := Start(code, testBinding()); err != errCode {
 			t.Fatal("invalid code accepted")
 		}
-		if _, _, err := Respond(code, testBinding(), [32]byte{}); err != errCode {
+		if _, _, err := Respond(code, testBinding(), [64]byte{}); err != errCode {
 			t.Fatal("invalid code accepted")
 		}
 	}
@@ -157,7 +120,7 @@ func TestInvalidBinding(t *testing.T) {
 		{Exporter: valid.Exporter, OperatorFP: valid.OperatorFP},
 		{Exporter: valid.Exporter, ClientFP: valid.ClientFP},
 	} {
-		if state, share, err := Start(exampleCode, b); err != errBinding || state != nil || share != [32]byte{} {
+		if state, share, err := Start(exampleCode, b); err != errBinding || state != nil || share != [64]byte{} {
 			t.Fatal("Start did not reject missing binding data")
 		}
 		if state, share, err := Respond(exampleCode, b, a); err != errBinding || state != nil || share != [32]byte{} {
@@ -166,21 +129,34 @@ func TestInvalidBinding(t *testing.T) {
 	}
 }
 
-func TestConcurrentConfirmation(t *testing.T) {
-	i, r, ta := exchangeTest(t, exampleCode, testBinding())
-	type result struct {
-		tag [32]byte
-		err error
+func TestOutOfOrderAndReflectedConfirmation(t *testing.T) {
+	b := testBinding()
+	i, c := startTest(t, b)
+	r, y, err := Respond(exampleCode, b, c)
+	if err != nil {
+		t.Fatal(err)
 	}
-	results := make(chan result, 2)
-	for range 2 {
-		go func() { tag, err := r.VerifyAndConfirm(ta); results <- result{tag, err} }()
+	if _, _, err = i.Finish([64]byte{}); err != errState {
+		t.Fatal(err)
 	}
-	first, second := <-results, <-results
-	if first.err != nil {
-		first, second = second, first
+	if _, err = i.Reveal(y); err != errState {
+		t.Fatal(err)
 	}
-	if first.err != nil || second.err != errState || i.Verify(first.tag) != nil {
-		t.Fatal("expected exactly one successful confirmation")
+	if _, err = r.Verify([64]byte{}); err != errState {
+		t.Fatal(err)
+	}
+	if _, err = r.Open([32]byte{}); err == nil {
+		t.Fatal("reused invalidated state")
+	}
+	i, r, tb := exchangeTest(t, exampleCode, b)
+	if _, err = r.Verify(tb); err != ReasonConfirmation {
+		t.Fatal("accepted reflected Tb")
+	}
+	ta, _, err := i.Finish(tb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = r.Verify(ta); err != errState {
+		t.Fatal("retried failed verification")
 	}
 }

@@ -36,6 +36,12 @@ type session struct {
 func Pair(t testing.TB, a, b identity.Fingerprint) (transport.Session, transport.Session) {
 	t.Helper()
 	left, right := net.Pipe()
+	return PairConns(t, left, right, a, b)
+}
+
+// PairConns takes ownership of a connected in-process pair for transport timing tests.
+func PairConns(t testing.TB, left, right net.Conn, a, b identity.Fingerprint) (transport.Session, transport.Session) {
+	t.Helper()
 	cfg := yamux.DefaultConfig()
 	cfg.EnableKeepAlive = false
 	cfg.StreamCloseTimeout = 0

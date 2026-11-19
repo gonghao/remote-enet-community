@@ -263,10 +263,25 @@ func (s *Session) handshake(ctx context.Context) error {
 		return err
 	}
 	if !trusted {
+		s.finishRejection()
 		return ErrPairing
 	}
 	return nil
 }
+
+// The request's yamux Write can still be waiting for completion after we have
+// read it. Keep the mux alive until the peer consumes the rejection and closes.
+func (s *Session) finishRejection() {
+	// A manual SAS check may have extended the setup timer beyond the I/O budget.
+	if s.opts.ConfirmSAS != nil && s.setupTimer.Stop() {
+		s.setupTimer.Reset(handshakeTimeout)
+	}
+	if err := s.control.CloseWrite(); err == nil {
+		// Run closes the transport on either setup timeout or caller cancellation.
+		_, _ = io.Copy(io.Discard, s.control)
+	}
+}
+
 func (s *Session) finish(err error) {
 	if err == nil {
 		err = io.EOF

@@ -109,7 +109,9 @@ func (s *Session) sendPair(msg any) error {
 }
 
 func (s *Session) rejectPair(reason cpace.Reason) error {
-	_ = s.sendPair(proto.PairDecision{Reason: string(reason)})
+	if err := s.sendPair(proto.PairDecision{Reason: string(reason)}); err == nil {
+		s.finishRejection()
+	}
 	return pairingFailure(reason)
 }
 

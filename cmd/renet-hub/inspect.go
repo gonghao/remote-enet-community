@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -35,18 +36,32 @@ func inspect(out io.Writer, cfg hubauth.Config, fp identity.Fingerprint, path, d
 	if err != nil {
 		return errors.New("ticket-file: expected unpadded base64url")
 	}
-	kid, c, parseErr := ticket.Inspect(raw)
-	if parseErr == nil {
-		fmt.Fprintf(out, "kid=%x jti=%s hub=%s role=%d bearer=%t iat=%s nbf=%s exp=%s\n", kid, base64.RawURLEncoding.EncodeToString(c.JTI[:]), c.Hub.Short(), c.Role, c.Bearer, c.IssuedAt.UTC().Format(time.RFC3339), c.NotBefore.UTC().Format(time.RFC3339), c.Expires.UTC().Format(time.RFC3339))
-		if !c.Device.IsZero() {
-			fmt.Fprintln(out, "device="+c.Device.Short())
+	var headerKid *ticket.Kid
+	kid, c, err := ticket.Verify(raw, func(k ticket.Kid) (ed25519.PublicKey, bool) {
+		headerKid = &k
+		for _, issuer := range cfg.Issuers {
+			pub, err := base64.RawURLEncoding.DecodeString(issuer.PublicKey)
+			if err == nil && ticket.KidOf(pub) == k {
+				return pub, true
+			}
 		}
-		if !c.Peer.IsZero() {
-			fmt.Fprintln(out, "peer="+c.Peer.Short())
+		return nil, false
+	})
+	if err != nil {
+		if headerKid != nil {
+			return fmt.Errorf("%w (unverified kid=%x)", err, *headerKid)
 		}
-		if !c.PairUntil.IsZero() {
-			fmt.Fprintln(out, "pair_until="+c.PairUntil.UTC().Format(time.RFC3339))
-		}
+		return err
+	}
+	fmt.Fprintf(out, "kid=%x jti=%s hub=%s role=%d bearer=%t iat=%s nbf=%s exp=%s\n", kid, base64.RawURLEncoding.EncodeToString(c.JTI[:]), c.Hub.Short(), c.Role, c.Bearer, c.IssuedAt.UTC().Format(time.RFC3339), c.NotBefore.UTC().Format(time.RFC3339), c.Expires.UTC().Format(time.RFC3339))
+	if !c.Device.IsZero() {
+		fmt.Fprintln(out, "device="+c.Device.Short())
+	}
+	if !c.Peer.IsZero() {
+		fmt.Fprintln(out, "peer="+c.Peer.Short())
+	}
+	if !c.PairUntil.IsZero() {
+		fmt.Fprintln(out, "pair_until="+c.PairUntil.UTC().Format(time.RFC3339))
 	}
 	dev := c.Device
 	if device != "" {

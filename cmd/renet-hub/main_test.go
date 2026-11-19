@@ -212,3 +212,22 @@ func TestServeReload(t *testing.T) {
 		t.Fatalf("revoked wait: %v", err)
 	}
 }
+
+func TestInspectRejectsTamperedClaimsBeforeDisplay(t *testing.T) {
+	f := setup(t)
+	kid, c, err := ticket.Inspect(f.raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.raw[len(f.raw)-1] ^= 1
+	file := filepath.Join(t.TempDir(), "ticket")
+	writeFile(t, file, []byte(base64.RawURLEncoding.EncodeToString(f.raw)))
+	var out bytes.Buffer
+	err = inspect(&out, f.cfg, f.local.Fingerprint(), file, "")
+	if err == nil || !strings.Contains(err.Error(), "A4") || !strings.Contains(err.Error(), fmt.Sprintf("unverified kid=%x", kid)) {
+		t.Fatalf("diagnostic: %v", err)
+	}
+	if out.Len() != 0 || strings.Contains(err.Error(), c.Device.Short()) || strings.Contains(err.Error(), base64.RawURLEncoding.EncodeToString(c.JTI[:])) {
+		t.Fatal("displayed unauthenticated claims")
+	}
+}

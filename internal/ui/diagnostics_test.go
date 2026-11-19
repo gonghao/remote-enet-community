@@ -51,7 +51,7 @@ func TestNetworkPermissionHintsKeepDirectControlsVisible(t *testing.T) {
 			if !tt.HasText(v.permissionHint()) {
 				t.Fatal("permission guidance was not displayed")
 			}
-			for _, label := range []string{"Enable MGU direct link", "Disable MGU direct link"} {
+			for _, label := range []string{"Enable MGU direct link", "Disable head unit direct link"} {
 				r, found := tt.Find(label)
 				if !found || r.Y < 0 || r.Y+r.H > 720 {
 					t.Fatalf("permission guidance hid %s: %+v", label, r)

@@ -55,7 +55,9 @@ Operator 在 Settings 填写公开的 `DDNS:端口` 与本机呈现 IPv4 并保�
 
 Wave 8的独立TUN验收工具 `cmd/renet-tuncheck` 用于IPv4/TCP、SSH banner/HTTP及资源回收测试，默认dry-run。Wave 9把MGU只读地址发现和会话TUN接入Operator：连接后可在主页面启用/禁用MGU direct link，成功显示目标IP；结束会话会回收资源。系统网卡/路由初始化需要Operator侧相应权限，车端仍普通权限运行；GUI配置JSON v1不变，直连开关不持久化。Windows Operator还需要可加载的官方Wintun DLL。CLI可显式 `operator --mgu-direct` 在新会话自动启用，默认关闭。验收边界见 [Wave 9](docs/WAVE9.md)、[Wave 8](docs/WAVE8.md) 与[手动工具说明](cmd/renet-tuncheck/README.md)。
 
-Wave 10的Mac GUI只在明确启用MGU时请求系统授权，助手只持有本次设备、单目标路由和受限设备I/O，不读取GUI的身份、信任或设置，也不安装常驻服务。Windows界面显示管理员能力，权限不足时提示使用相应权限启动；普通HSFZ会话不因该能力缺失而停止。Log页的Copy diagnostics只在显式点击后复制固定字段报告，省略地址、VIN、指纹、路径、邀请码和原始错误。实现与原生验收状态见 [Wave 10](docs/WAVE10.md)。
+**NBT EVO SSH 直连**。Operator 连接车辆后选择「启用 EVO」，CLI 可在新会话自动执行 `operator --evo-direct`（与 `--mgu-direct` 互斥）。程序经车端依次检查 `169.254.199.119:22` 和 `169.254.199.99:22`，选用第一个返回 SSH 标识的地址，然后建立目标 /32 路由，仅转发 TCP 22。用 SSH 客户端连接界面显示的 IPv4 并核对主机密钥。两个地址来自 evo_kit 的兼容记录。探测只确认 SSH 服务可达，主机型号仍由操作者选择。车端 Client 选定的网段须覆盖目标地址，且主机须已提供 SSH 服务。禁用、断线或车辆网关变化会回收直连。EVO 实车仍待验收。
+
+Wave 10的Mac GUI只在明确启用主机直连时请求系统授权，助手只持有本次设备、单目标路由和受限设备I/O，不读取GUI的身份、信任或设置，也不安装常驻服务。Windows界面显示管理员能力，权限不足时提示使用相应权限启动；普通HSFZ会话不因该能力缺失而停止。Log页的Copy diagnostics只在显式点击后复制固定字段报告，省略地址、VIN、指纹、路径、邀请码和原始错误。实现与原生验收状态见 [Wave 10](docs/WAVE10.md)。
 
 Operator 的 Log → HSFZ capture 可显式开启双向原始字节记录和实时帧查看，保存为新的本地 JSONL 文件；默认关闭，只接入新 TCP 连接。覆盖诊断/控制 TCP、UDP 发现和内部 MGU 地址查询，支持按连接/方向筛选及前缀复制。录制期间可用 Insert marker 或全局 Cmd/Ctrl+Shift+M 在工具操作前打标，支持短注释及按标记筛选。载荷不进入匿名诊断，录制限额或磁盘错误不停止健康转发。使用、JSONL 格式及不完整记录语义见[抓取说明](docs/CAPTURE.md)。
 

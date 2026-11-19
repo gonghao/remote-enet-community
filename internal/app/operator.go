@@ -40,11 +40,15 @@ type OperatorConfig struct {
 	Resolver             exclusive.Resolver
 	DirectFactory        DirectFactory
 	AutoMGU              bool
+	AutoEVO              bool
 	// Capture is caller-owned and observes only HSFZ presentation and MGU queries.
 	Capture *hsfzcapture.Recorder
 }
 
 func (cfg OperatorConfig) validate() error {
+	if cfg.AutoMGU && cfg.AutoEVO {
+		return fmt.Errorf("app: automatic MGU and EVO direct access are mutually exclusive")
+	}
 	if cfg.Exclusive && cfg.Resolver == nil && runtime.GOOS != "windows" {
 		return fmt.Errorf("app: exclusive mode requires Windows or an injected resolver: %w", exclusive.ErrUnsupported)
 	}
@@ -270,9 +274,9 @@ func (r *Runtime) operatorConnection(ctx context.Context, ts transport.Session, 
 	install()
 	generation := r.activate(connectionCtx, s, ts.Path())
 	autoDone := make(chan struct{})
-	if cfg.AutoMGU {
+	if cfg.AutoMGU || cfg.AutoEVO {
 		initial := manager
-		go func() { defer close(autoDone); _ = initial.connect(connectionCtx) }()
+		go func() { defer close(autoDone); _ = initial.connect(connectionCtx, cfg.AutoEVO) }()
 	} else {
 		close(autoDone)
 	}

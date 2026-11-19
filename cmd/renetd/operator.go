@@ -27,10 +27,14 @@ func runOperator(ctx context.Context, args []string, stderr io.Writer, logger *s
 	remoteCtrl := fs.Int("remote-ctrl-port", 6811, "vehicle gateway control TCP port")
 	exclusive := fs.Bool("exclusive", runtime.GOOS == "windows", "restrict diagnostic and control TCP connections to one local process")
 	autoMGU := fs.Bool("mgu-direct", false, "discover the MGU and enable per-session direct access; requires network configuration privileges")
+	autoEVO := fs.Bool("evo-direct", false, "detect the EVO SSH endpoint and enable per-session direct access; requires network configuration privileges")
 	capturePath := fs.String("capture-hsfz", "", "record new HSFZ connections to a new local JSONL file; off by default")
 	opts := addRuntimeFlags(fs)
 	if err := parsed(fs, args, stateDir); err != nil {
 		return err
+	}
+	if *autoMGU && *autoEVO {
+		return fmt.Errorf("--mgu-direct and --evo-direct are mutually exclusive")
 	}
 	if err := opts.validate(); err != nil {
 		return err
@@ -75,6 +79,7 @@ func runOperator(ctx context.Context, args []string, stderr io.Writer, logger *s
 		return r.RunOperator(ctx, app.OperatorConfig{
 			StateDir: *stateDir, Listen: *listen, Bind: bindAddr, Exclusive: *exclusive, AllowLinkTest: opts.allowLinkTest,
 			AutoMGU:              *autoMGU,
+			AutoEVO:              *autoEVO,
 			Capture:              capture,
 			Ports:                operator.Ports{Diagnostic: *diagPort, Control: *ctrlPort, Discovery: *discPort},
 			RemoteDiagnosticPort: uint16(*remoteDiag), RemoteControlPort: uint16(*remoteCtrl), Logger: logger,

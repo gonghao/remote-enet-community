@@ -11,8 +11,8 @@ import (
 )
 
 func TestDirectActionsUseIndependentCompletion(t *testing.T) {
-	enables, disables := 0, 0
-	v := New(operatorConfig(), Actions{ConnectMGU: func() { enables++ }, DisconnectMGU: func() { disables++ }})
+	enables, evoEnables, disables := 0, 0, 0
+	v := New(operatorConfig(), Actions{ConnectMGU: func() { enables++ }, ConnectEVO: func() { evoEnables++ }, DisconnectMGU: func() { disables++ }})
 	s := State{Running: true, Error: "An earlier operation failed.", Runtime: app.Snapshot{Phase: app.PhaseConnected, Generation: 1}}
 	v.SetState(s)
 	tt := ui.NewTester(v.Render, 1080, 760)
@@ -21,16 +21,22 @@ func TestDirectActionsUseIndependentCompletion(t *testing.T) {
 	v.Complete(ActionTest)
 	tt.Frame()
 	click(t, tt, "Enable MGU direct link")
-	if enables != 1 {
+	click(t, tt, "Enable EVO direct link")
+	if enables != 1 || evoEnables != 0 {
 		t.Fatal("old errors or unrelated completion reopened direct setup")
 	}
-	click(t, tt, "Disable MGU direct link")
-	click(t, tt, "Disable MGU direct link")
+	click(t, tt, "Disable head unit direct link")
+	click(t, tt, "Disable head unit direct link")
 	if disables != 1 {
 		t.Fatal("direct stop did not cancel setup or admitted duplicates")
 	}
 	v.Complete(ActionConnectMGU)
 	v.Complete(ActionDisconnectMGU)
+	tt.Frame()
+	click(t, tt, "Enable EVO direct link")
+	if evoEnables != 1 {
+		t.Fatal("EVO action was not forwarded after completion")
+	}
 	s.Runtime.Direct = app.DirectState{Phase: app.DirectReady, Address: netip.MustParseAddr("169.254.9.3")}
 	v.SetState(s)
 	tt.Frame()
@@ -40,9 +46,9 @@ func TestDirectActionsUseIndependentCompletion(t *testing.T) {
 }
 
 func TestClientDoesNotExposeDirectActions(t *testing.T) {
-	v := New(settings.Default(), Actions{ConnectMGU: func() { t.Error("Client admitted Operator action") }, DisconnectMGU: func() { t.Error("Client admitted Operator action") }})
+	v := New(settings.Default(), Actions{ConnectMGU: func() { t.Error("Client admitted Operator action") }, ConnectEVO: func() { t.Error("Client admitted EVO action") }, DisconnectMGU: func() { t.Error("Client admitted Operator action") }})
 	tt := ui.NewTester(v.Render, 820, 640)
-	for _, label := range []string{"Enable MGU direct link", "Disable MGU direct link"} {
+	for _, label := range []string{"Enable MGU direct link", "Enable EVO direct link", "Disable head unit direct link"} {
 		if _, found := tt.Find(label); found {
 			t.Fatal("Client exposed a direct-access control")
 		}

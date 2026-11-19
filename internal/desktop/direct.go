@@ -24,7 +24,14 @@ type directOperation struct {
 }
 
 // ConnectMGU binds the setup request to the displayed run and session generation.
-func (c *Controller) ConnectMGU(ctx context.Context) error { return c.directLink(ctx, true, nil, 0) }
+func (c *Controller) ConnectMGU(ctx context.Context) error {
+	return c.directLink(ctx, true, false, nil, 0)
+}
+
+// ConnectEVO binds endpoint detection to the displayed session generation.
+func (c *Controller) ConnectEVO(ctx context.Context) error {
+	return c.directLink(ctx, true, true, nil, 0)
+}
 
 // DisconnectMGU also cancels an admitted setup before removing its resources.
 func (c *Controller) DisconnectMGU(ctx context.Context) error {
@@ -49,10 +56,10 @@ func (c *Controller) DisconnectMGU(ctx context.Context) error {
 			return err
 		}
 	}
-	return c.directLink(ctx, false, g, generation)
+	return c.directLink(ctx, false, false, g, generation)
 }
 
-func (c *Controller) directLink(ctx context.Context, enable bool, expected *running, generation uint64) error {
+func (c *Controller) directLink(ctx context.Context, enable, evo bool, expected *running, generation uint64) error {
 	c.mu.Lock()
 	if err := c.availableLocked(ctx, false); err != nil {
 		c.mu.Unlock()
@@ -71,11 +78,24 @@ func (c *Controller) directLink(ctx context.Context, enable bool, expected *runn
 		err = ErrBusy
 	}
 	var runtime directRuntime
+	var connect func(context.Context, uint64) error
 	if err == nil {
 		var supported bool
 		runtime, supported = g.runtime.(directRuntime)
 		if !supported {
 			err = transport.ErrUnsupported
+		} else {
+			connect = runtime.ConnectMGU
+			if evo {
+				t, ok := g.runtime.(interface {
+					ConnectEVO(context.Context, uint64) error
+				})
+				if ok {
+					connect = t.ConnectEVO
+				} else {
+					err = transport.ErrUnsupported
+				}
+			}
 		}
 	}
 	if err != nil {
@@ -92,14 +112,14 @@ func (c *Controller) directLink(ctx context.Context, enable bool, expected *runn
 	defer g.workers.Done()
 	defer close(op.done)
 	c.state.DirectWorking = true
-	message := "Preparing MGU direct link."
+	message := "Preparing direct link."
 	if !enable {
-		message = "Stopping MGU direct link."
+		message = "Stopping direct link."
 	}
 	c.successLocked(message)
 	c.mu.Unlock()
 	if enable {
-		err = runtime.ConnectMGU(opCtx, op.generation)
+		err = connect(opCtx, op.generation)
 	} else {
 		err = runtime.DisconnectMGU(opCtx, op.generation)
 	}
@@ -130,9 +150,9 @@ func (c *Controller) directLink(ctx context.Context, enable bool, expected *runn
 		c.failureLocked(directMessage(err), err)
 		return err
 	}
-	message = "MGU direct link ready."
+	message = "Direct link ready."
 	if !enable {
-		message = "MGU direct link stopped."
+		message = "Direct link stopped."
 	}
 	c.successLocked(message)
 	return nil
@@ -141,7 +161,7 @@ func (c *Controller) directLink(ctx context.Context, enable bool, expected *runn
 func directMessage(err error) string {
 	switch {
 	case errors.Is(err, ErrRole):
-		return "MGU direct link is available in Operator."
+		return "Direct link is available in Operator."
 	case errors.Is(err, app.ErrNotConnected):
 		return "Connect to a vehicle before enabling direct access."
 	case errors.Is(err, ErrBusy), errors.Is(err, exclusive.ErrBusy):

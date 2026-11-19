@@ -67,6 +67,7 @@ type directManager struct {
 	cancelOp    context.CancelFunc
 	done        chan struct{}
 	device      DirectDevice
+	evo         bool
 	stack       *l3.Stack
 	closeErr    error
 }
@@ -88,7 +89,16 @@ func (r *Runtime) ConnectMGU(ctx context.Context, expectedGen uint64) error {
 	if err != nil {
 		return err
 	}
-	return m.connect(ctx)
+	return m.connect(ctx, false)
+}
+
+// ConnectEVO selects a reachable SSH endpoint from the known EVO addresses.
+func (r *Runtime) ConnectEVO(ctx context.Context, expectedGen uint64) error {
+	m, err := r.directForGeneration(expectedGen)
+	if err != nil {
+		return err
+	}
+	return m.connect(ctx, true)
 }
 
 // DisconnectMGU cancels and joins setup before releasing the link's resources.
@@ -112,7 +122,7 @@ func (r *Runtime) directForGeneration(expected uint64) (*directManager, error) {
 	return r.direct, nil
 }
 
-func (m *directManager) connect(ctx context.Context) error {
+func (m *directManager) connect(ctx context.Context, evo bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -129,6 +139,10 @@ func (m *directManager) connect(ctx context.Context) error {
 		return exclusive.ErrBusy
 	}
 	if m.device != nil {
+		if m.evo != evo {
+			m.mu.Unlock()
+			return exclusive.ErrBusy
+		}
 		select {
 		case <-m.stack.Done():
 			m.mu.Unlock()
@@ -164,6 +178,11 @@ func (m *directManager) connect(ctx context.Context) error {
 	stopSetup := context.AfterFunc(opCtx, cancelLink)
 	var address netip.Addr
 	err := m.presenter.WithMaintenance(opCtx, func(ctx context.Context, gateway netip.Addr) error {
+		if evo {
+			var err error
+			address, err = discoverEVO(ctx, m.opener)
+			return err
+		}
 		info, err := mgu.Discover(ctx, m.queryOpener, netip.AddrPortFrom(gateway, m.port), mgu.Options{})
 		if err == nil {
 			address = info.Address
@@ -183,8 +202,14 @@ func (m *directManager) connect(ctx context.Context) error {
 	}
 	if err == nil {
 		opts := l3.Options{Targets: []netip.Addr{address}, Opener: m.opener, Observer: m.observer}
-		if m.gate != nil {
+		if evo || m.gate != nil {
 			opts.Admit = func(ctx context.Context, local, remote netip.AddrPort) (func(), error) {
+				if evo && local.Port() != 22 {
+					return nil, fmt.Errorf("evo: only TCP port 22 is supported")
+				}
+				if m.gate == nil {
+					return nil, nil
+				}
 				lease, err := m.gate.Admit(ctx, local, remote)
 				if err != nil {
 					return nil, err
@@ -216,7 +241,7 @@ func (m *directManager) connect(ctx context.Context) error {
 		err = context.Canceled
 	}
 	if err == nil {
-		m.device, m.stack = device, stack
+		m.device, m.stack, m.evo = device, stack, evo
 		// The session manager explicitly closes stack before device.
 		m.cancel = cancelLink
 	}

@@ -118,7 +118,7 @@ func logStatus(logger *slog.Logger, s app.Snapshot) {
 		"exclusive_enabled", s.Exclusive.Enabled, "owner_pid", s.Exclusive.Owner.PID, "owner_created", s.Exclusive.Owner.Created, "owner_connections", s.Exclusive.Active,
 		"last_error", s.LastError, "next_retry", s.NextRetry)
 	if s.Role == "operator" && s.Direct.Phase != "" && s.Direct.Phase != app.DirectDisabled {
-		logger.Info("MGU direct link", "generation", s.Generation, "phase", s.Direct.Phase,
+		logger.Info("Head unit direct link", "generation", s.Generation, "phase", s.Direct.Phase,
 			"address", s.Direct.Address.String(), "local", s.Direct.Local.String(), "adapter", s.Direct.Adapter,
 			"error", s.Direct.LastError)
 	}

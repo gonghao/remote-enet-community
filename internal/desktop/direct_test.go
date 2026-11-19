@@ -142,7 +142,7 @@ func TestDirectCompletionCannotClaimReadyAfterWithdrawal(t *testing.T) {
 	if err := c.ConnectMGU(t.Context()); !errors.Is(err, app.ErrNotConnected) {
 		t.Fatalf("withdrawn link was reported ready: %v", err)
 	}
-	if c.Snapshot().Notice == "MGU direct link ready." || c.Snapshot().DirectWorking {
+	if c.Snapshot().Notice == "Direct link ready." || c.Snapshot().DirectWorking {
 		t.Fatal("completion contradicted the current direct state")
 	}
 	if c.Snapshot().Error != "Direct link canceled: vehicle connection changed." {

@@ -85,6 +85,7 @@ func (s *shell) ready() {
 	} else {
 		actions.Listen = func() { s.submit(renetui.ActionListen, s.controller.StartOperator) }
 		actions.ConnectMGU = func() { s.submit(renetui.ActionConnectMGU, s.controller.ConnectMGU) }
+		actions.ConnectEVO = func() { s.submit(renetui.ActionConnectMGU, s.controller.ConnectEVO) }
 		actions.DisconnectMGU = func() { s.submit(renetui.ActionDisconnectMGU, s.controller.DisconnectMGU) }
 		actions.StartCapture = s.startCapture
 		actions.StopCapture = func() { s.submit(renetui.ActionStopCapture, s.controller.StopCapture) }

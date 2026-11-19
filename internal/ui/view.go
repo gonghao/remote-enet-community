@@ -49,6 +49,7 @@ type Actions struct {
 	IssueInvite     func()
 	TestLink        func()
 	ConnectMGU      func()
+	ConnectEVO      func()
 	DisconnectMGU   func()
 	CopyDiagnostics func()
 	Copy            func(string)

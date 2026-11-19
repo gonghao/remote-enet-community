@@ -136,7 +136,7 @@ func (r *Runtime) RunOperator(ctx context.Context, cfg OperatorConfig) (err erro
 	if cfg.Hub != nil {
 		issuer, err := loadIssuer(cfg.StateDir)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w: %w", HubIssuer, err)
 		}
 		hubFP := cfg.Hub.FP
 		responder.grant = func(client identity.Fingerprint) ([]byte, error) {
@@ -156,7 +156,10 @@ func (r *Runtime) RunOperator(ctx context.Context, cfg OperatorConfig) (err erro
 			raw, err := issuer.Wait(time.Now(), id.Fingerprint(), hub, until)
 			responder.waitToken = string(raw)
 			responder.waitGeneration = status.Generation
-			return raw, err
+			if err != nil {
+				return nil, fmt.Errorf("%w: %w", HubIssuer, err)
+			}
+			return raw, nil
 		}
 		opts.OnRegister = func(_ identity.Fingerprint, token []byte, err error) { r.onRegister(responder, token, err) }
 	}

@@ -62,6 +62,8 @@ func (r *Runtime) onRegister(d *digitalResponder, token []byte, err error) {
 	switch {
 	case err == nil:
 		r.state.LastError = ""
+	case errors.Is(err, HubIssuer):
+		r.state.LastError = string(HubIssuer)
 	case errors.Is(err, hub.ErrUnauthorized):
 		st := d.Status()
 		if st.Reason == "" && st.Generation == d.waitGeneration && d.Revoke(d.listener, st.Generation) == nil {
@@ -86,6 +88,7 @@ func (r *Runtime) onRegister(d *digitalResponder, token []byte, err error) {
 type PairingErrorKind string
 
 const (
+	HubIssuer               PairingErrorKind = "hub_issuer"
 	HubIdentityMismatch     PairingErrorKind = "hub_identity_mismatch"
 	HubWaitUnauthorized     PairingErrorKind = "hub_wait_unauthorized"
 	HubPairingDisabled      PairingErrorKind = "hub_pairing_disabled"

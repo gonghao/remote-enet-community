@@ -6,6 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -225,5 +228,25 @@ func TestTicketDialFailureKinds(t *testing.T) {
 		if fatal != tc.fatal || !errors.Is(err, tc.kind) || !errors.Is(err, tc.err) {
 			t.Errorf("wrong retry decision or error kind for %v", tc.err)
 		}
+	}
+}
+
+func TestLocalIssuerFailureKind(t *testing.T) {
+	r := New()
+	r.state.Phase = PhaseListening
+	d := &digitalResponder{listener: t.Context()}
+	r.onRegister(d, nil, fmt.Errorf("sign wait ticket: %w", HubIssuer))
+	if got := r.Snapshot(); got.LastError != "hub_issuer" || got.HubWaiting {
+		t.Fatalf("failed registration: %v", got.LastError)
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "issuer.key"), []byte("invalid"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	r = New()
+	cfg := OperatorConfig{StateDir: dir, Hub: &HubConfig{Addr: "127.0.0.1:47000", FP: identity.Fingerprint{1}}, Bind: netip.MustParseAddr("127.0.0.1"), Logger: quietLogger()}
+	if err := r.RunOperator(t.Context(), cfg); !errors.Is(err, HubIssuer) || r.Snapshot().LastError != "hub_issuer" {
+		t.Fatalf("issuer startup failure: %v", err)
 	}
 }

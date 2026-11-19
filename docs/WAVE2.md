@@ -91,7 +91,7 @@ State 可暂为空：尚无有效网关时不应答发现、拒绝 TCP 连接。
 
 - `invite --state-dir DIR --endpoint HOST:PORT [--ttl 15m]`：加载本机身份，生成一次性随机 token，持久化其哈希和有效期，输出邀请码到 stdout；日志不可包含 token。Endpoint 为 Operator 内嵌 Hub 的外部地址，Hub 指纹等于 Operator 指纹。
 - `operator --state-dir DIR --listen HOST:PORT --bind IP`：启动内嵌 Hub、持久化信任校验和单会话接收循环；等首条车辆状态后启动 Presenter。默认本地监听 6801/tcp、6811/tcp、6811/udp，支持显式端口覆盖和远端诊断/控制端口覆盖，供假 ZGW 使用。
-- `client --state-dir DIR [--invite-file FILE | --invite CODE | --peer FINGERPRINT] [--nic NAME] [--nic-addr IP] [--discovery-target IP:PORT] [--discovery-timeout 3s]`：选择 NIC，发现唯一网关，多车不任意选第一辆；拨 Operator、完成配对、推送车辆状态并挂接 Forwarder。成功后保存 Operator 的 PeerInfo，以便不持有过期邀请码也能重连。明确失败时给可操作的错误，不以桩跳过发现。
+- `client --state-dir DIR [--invite-file FILE | --invite CODE | --peer FINGERPRINT | --pair-file FILE] [--nic NAME] [--nic-addr IP] [--discovery-target IP:PORT] [--discovery-timeout 3s]`：选择 NIC，发现唯一网关，多车不任意选第一辆；拨 Operator、完成配对、推送车辆状态并挂接 Forwarder。成功后保存 Operator 的 PeerInfo，以便不持有过期邀请码也能重连。明确失败时给可操作的错误，不以桩跳过发现。 后续版本加入 `--pair-file`，文件内容为一行直连地址和数字码，格式见 [README](../README.md)。
 
 Operator 始终保持单会话；同一工具可有多条 TCP 连接。本轮不实现按进程独占。断线后清理旧 Presenter 和所有转发，再接下一条会话。Client 网络错误以有界指数退避重试、context 取消可立即打断；配对拒绝或版本不兼容作为可操作错误返回。底层 `WrapStream` 的 context 持有整个会话寿命，不能在 Dial 成功后取消。
 

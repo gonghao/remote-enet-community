@@ -32,7 +32,9 @@
 
 ## R2 · 直连数字配对（已完成，设计见 [PAIRING](PAIRING.md)）
 
-待办（2026-1对齐（2026-11-19）：经 PR #4 按 [CENTER-CONTRACT §10](CENTER-CONTRACT.md#10-中心模式的首次配对) 改写线格式（LEB128 CI、HMAC-SHA-512 确认、承诺与 SAS、消息 11–16、exporter 标签 `EXPORTER-renet-pake-sid-v1`），与 PR #2 的格式不兼容；应用向量由独立生成器产出。同时修复 Operator 拒绝后立即关流导致 Client 把拒绝原因误报为中断的竞态。下方第 7 项的 LAN 台架是对旧格式做的，打 tag 前需在台架重跑一次首次配对与拒绝场景。-11-19）：经 PR #2 合并。1–6 已实现，离线测试与独立审查通过。7 已完成 LAN 台架：Windows GUI Operator + Linux CLI Client + 假网关，覆盖首次配对、无码重连、旧码重用、猜错计数与第 5 次成功、撤销、次数用尽、过期和复制格式。Mac GUI Client 与公网验证移入下方「并行验收线」；Mac 经 WG 访问台架时无法发现非同链路网关，属车端有意限制。独立密码学复核列为后续项，不阻塞发布。
+进度（2026-11-19）：经 PR #2 合并。1–6 已实现，离线测试与独立审查通过。7 已完成 LAN 台架：Windows GUI Operator + Linux CLI Client + 假网关，覆盖首次配对、无码重连、旧码重用、猜错计数与第 5 次成功、撤销、次数用尽、过期和复制格式。Mac GUI Client 与公网验证移入下方「并行验收线」；Mac 经 WG 访问台架时无法发现非同链路网关，属车端有意限制。独立密码学复核列为后续项，不阻塞发布。
+
+对齐（2026-11-19）：经 PR #4 按 [CENTER-CONTRACT §10](CENTER-CONTRACT.md#10-中心模式的首次配对) 改写线格式（LEB128 CI、HMAC-SHA-512 确认、承诺与 SAS、消息 11–16、exporter 标签 `EXPORTER-renet-pake-sid-v1`），与 PR #2 的格式不兼容；应用向量由独立生成器产出。同时修复 Operator 拒绝后立即关流导致 Client 把拒绝原因误报为中断的竞态。下方第 7 项的 LAN 台架是对旧格式做的，打 tag 前需在台架重跑一次首次配对与拒绝场景。
 
 目标：Client 输入「地址:端口 + 8 位数字码」即可完成首次配对，原始邀请码保留。
 

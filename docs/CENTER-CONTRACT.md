@@ -1,8 +1,8 @@
 # 中心契约 v1
 
-记录日期：2026-11-19。状态：已定稿，尚未实现。本文把 [CENTER-PROTOCOL](CENTER-PROTOCOL.md) 的约束落成可实现的接口：中心 HTTPS API、请求签名、连接票据、Hub 验签、租约与占位、首次配对的消息流程和错误码。第 10 节是配对消息编号、编码与状态机的唯一权威定义；[PAKE 选型](research/pake-selection.md) 只保留选型理由与安全分析。中心服务端可以用任意语言和存储实现，Go 端（Hub、Client、Operator）按本文接入。第 14 节的参数于 2026-11-19 确定。
+记录日期：2026-11-19（第八版 2026-11-20 增补自建 Hub 模式）。状态：已定稿，尚未实现。本文把 [CENTER-PROTOCOL](CENTER-PROTOCOL.md) 的约束落成可实现的接口：中心 HTTPS API、请求签名、连接票据、Hub 验签、租约与占位、首次配对的消息流程和错误码。第 10 节是配对消息编号、编码与状态机的唯一权威定义；[PAKE 选型](research/pake-selection.md) 只保留选型理由与安全分析。中心服务端可以用任意语言和存储实现，Go 端（Hub、Client、Operator）按本文接入。第 14 节的参数于 2026-11-19 确定。
 
-本文不涉及支付、定价、套餐或任何具体部署。管理端只向中心写入两类与收费相关的事实：账号有效期和并发额度。本文不修改现有 `renet1:` 邀请码、Settings 或 Hub 外层协议 v1（[internal/hub/PROTOCOL.md](../internal/hub/PROTOCOL.md)）；session 控制消息只新增第 10.2 节的消息编号。
+本文不涉及支付、定价、套餐或任何具体部署。管理端只向中心写入两类与收费相关的事实：账号有效期和并发额度。本文不修改现有 `renet1:` 邀请码、Settings 或 Hub 外层协议 v1（[internal/hub/PROTOCOL.md](../internal/hub/PROTOCOL.md)）；session 控制消息只新增第 10.2 节的消息编号，以及自建模式的 17 `HubTicket` 与能力 `hub-ticket/1`（[SELFHOST §6.4](SELFHOST.md#64-设备票下发消息-17-hubticket)），中心模式不使用它们。
 
 ## 1. 术语与编码约定
 
@@ -376,7 +376,7 @@ Session 对象：
 
 | 键 | 字段 | 类型 | 说明 |
 |---|---|---|---|
-| 1 | `v` | uint | 固定 1 |
+| 1 | `v` | uint | `1` = 中心票据。`2` 是自建票据（[SELFHOST §3](SELFHOST.md#3-自建票据v--2)），字段集与准入规则不同；中心模式的 Hub 按第 8.4 节第 5 步拒绝 `v ≠ 1` |
 | 2 | `center` | tstr ≤ 32 | `center_id` |
 | 3 | `acct` | bstr 16 | `account_id`（不是账号码） |
 | 4 | `dev` | bstr 32 | 持票设备指纹 |
@@ -391,7 +391,7 @@ Session 对象：
 | 13 | `jti` | bstr 16 | 票据唯一标识 |
 | 14 | `gen` | uint ≤ 2³²−1 | 节点代次 |
 
-中心签发时取 `iat = nbf = 当前时间`，`exp = min(iat + ticket_ttl, 硬截止 − 2 × clock_skew)`。时间关系：`iat ≤ nbf < exp`，`exp − iat ≤ ticket_max_ttl`。键 1–63 为约束字段，验证方遇到不认识的约束键必须拒绝；键 ≥ 64 留给不影响准入的信息字段，验证方忽略。改变准入语义只能升 `v`。
+中心签发时取 `iat = nbf = 当前时间`，`exp = min(iat + ticket_ttl, 硬截止 − 2 × clock_skew)`。时间关系：`iat ≤ nbf < exp`，`exp − iat ≤ ticket_max_ttl`。键 1–63 为约束字段，验证方遇到不认识的约束键必须拒绝；键 ≥ 64 留给不影响准入的信息字段，验证方忽略。改变准入语义只能升 `v`。键 15 `pair_until`、16 `bearer` 只在 `v = 2` 中定义，中心票据中出现即按未知约束键拒绝。
 
 ### 8.3 尺寸上限
 
@@ -676,6 +676,15 @@ Operator 先于 Client 写入钉住记录。若 16 丢失，Client 未完成，�
 | 拒绝原因 | 可以使用 `unavailable`、`expired`、`rate_limited`、`busy` 代替 12 拒绝 |
 | 预算与参数 | 码有效期、单码尝试次数、全局滚动窗口与提交顺序见 R2 设计 [PAIRING §4](PAIRING.md#4-发码计数与信任提交) |
 
+### 10.7 自建 Hub 模式
+
+自建模式（[SELFHOST](SELFHOST.md)）的首次配对经自建者的 Hub 转发，使用同一套消息号、编码、MAC、SAS 推导和状态机，区别如下：
+
+| 项 | 自建 Hub 模式 |
+|---|---|
+| 配对能力 | `pair-hub/1`。Client 只在内层对端指纹不等于外层指纹时声明 |
+| CI | `lv_cat("renet-pake-v1", "CPACE-RISTR255-SHA512", "pair-hub/1", "renet/1", fp_client, fp_operator, SHA-256(HC), SHA-256(HO), hub_fp)`。`hub_fp` 由 Client 取外层实际看到的指纹，由 Operator 取本地配置的 Hub 指纹；其余规则同第 10.6 节 |
+
 ## 11. API 入口回退
 
 - 入口列表随安装包预置，或来自此前已验证的配置；不能在中心不可达时向同一中心查询备用入口。每个入口的 `GET /v1/meta` 返回的 `center_id` 必须与配置一致。
@@ -794,6 +803,7 @@ Hub 需要的值经激活和心跳响应下发；Operator / Client 本地参数�
 | V5 | `kid` 推导 |
 | V6 | 中心模式与直连模式的 CI 字节（`CPACE-RISTR255-SHA512`，含双方 Hello 原始帧的 SHA-256） |
 | V7 | 配对消息 11–16 的 CBOR 编码；承诺、ISK、Tb、Ta（HMAC-SHA-512）与 6 位 SAS（含前导零一例）；CPace 层可与草案 -21 附录 B.3 向量对照 |
+| V16 | 自建票据（`v = 2`）的向量，见 [SELFHOST 第 10 节](SELFHOST.md#10-测试计划)。R5 实现中心验证器时，需要补充「`v = 2` 票据被中心 Hub 拒绝」的向量 |
 
 **票据拒绝向量**（期望 `unauthorized`）
 
@@ -859,7 +869,7 @@ Hub 需要的值经激活和心跳响应下发；Operator / Client 本地参数�
 
 以下是实现时需要的能力，具体签名在 R2、R3、R5 实现时由整合者确定：
 
-- `internal/hub` 准入：现有 `AuthorizeToken(dev, role, target, token) bool` 在路由锁外执行、只返回布尔值，`wait` / `dial` 也在解锁后才写 `ok`，无法满足第 8.4 节的提交点。需要拆成两段：锁外的验票回调返回准入信息（例如 `Admission{SessionID, JTI, Expires, Gen}`），由 Hub 在路由锁内完成第 10–12 步（重查时间、代次、封存和 `jti`，核对配对双方 `sid`，登记路由、撤销索引与承载截止，消费 `jti`），解锁后写状态。验票回调仍须本地完成、快速返回，不访问网络。
+- `internal/hub` 准入：现有 `AuthorizeToken(dev, role, target, token) bool` 在路由锁外执行、只返回布尔值，`wait` / `dial` 也在解锁后才写 `ok`，无法满足第 8.4 节的提交点。需要拆成两段：锁外的验票回调返回准入信息（R3 计划落地的 `hub.Policy` / `hub.Grant` / `Server.SetPolicy`；中心模式的策略在 `Grant` 中携带 `sid`、`jti` 与 `exp`），由 Hub 在路由锁内完成第 10–12 步（重查时间、代次、封存和 `jti`，核对配对双方 `sid`，登记路由、撤销索引与承载截止，消费 `jti`），解锁后写状态。验票回调仍须本地完成、快速返回，不访问网络。
 - Hub 维护：每会话承载截止 D 与连接集合、封存集合、`jti` 集合、每会话按方向的累计字节。撤销在路由锁内完成封存与关连接后，才进入 `closed`。中心模式不启用 `Embedded`。
 - 票据编解码与验签、中心 API 客户端（含请求签名、nonce 与时间校正）、节点激活与心跳循环分别放在新包中；Hub 包本身只依赖准入回调。
 - `secure` 需要导出内层 TLS 的 exporter，标签为 `EXPORTER-renet-pake-sid-v1`。配对连接在 Hello 协商出配对能力后，控制流上只允许第 10.2 节的 11–16 号消息，不开放任何隧道。`internal/proto` 新增 11–16 号消息；session 需要采集双方 Hello 的原始帧字节，并提供 SAS 确认钩子（中心模式必须由用户确认，直连模式默认自动通过）。
@@ -869,7 +879,7 @@ Hub 需要的值经激活和心跳响应下发；Operator / Client 本地参数�
 
 ## 17. 与 R3 自建授权的关系
 
-[路线图 R3](ROADMAP.md#r3--自建-hub-与中心地址配置) 计划由自建者离线签发票据。离线签发沿用第 8 节的票据格式与验签流程；没有中心时也就没有代次、心跳与租约，8.4 中与代次相关的检查和第 9 节不适用，`ticket_max_ttl` 由自建者在 Hub 配置中设定。这种模式的期限与撤销语义在 R3 中另行规定，本文只覆盖中心模式。
+自建模式使用 `v = 2` 的票据，编码与签名结构同第 8.1 节，字段、Hub 校验步骤、期限与撤销语义见 [SELFHOST 第 3 节](SELFHOST.md#3-自建票据v--2)。没有中心，因此没有代次、心跳、租约与 `jti` 消费；票据只约束准入，撤销通过修改 Hub 配置并重载生效。`ticket_max_ttl` 等参数由自建者在 Hub 配置中设定（[SELFHOST 4.1](SELFHOST.md#41-配置文件)）。
 
 ## 18. 修订记录
 
@@ -997,3 +1007,16 @@ community 分支 `continue-planned-work` 已独立实现 R2 直连数字配对�
 | 向量 | 第 15 节 V3 新增 `node-activate` 一例：节点主体为 `node_id`，但用请求体中的 `node_pub` 验签，带幂等键。原有向量逐字节不变 |
 
 | 决定 · 计量方向 | 第 7.8 节写定：`rx_bytes` = Hub 从会话两端收到的字节合计，`tx_bytes` = 发往两端的合计，按外层 TLS 解密后的内层字节计 |
+
+### 2026-11-20 第八版：自建 Hub（R3）
+
+依据 [SELFHOST](SELFHOST.md) 第 11 节，经项目负责人批准，补入自建 Hub 模式的相关条文。中心模式的字段、步骤与参数均未改变：
+
+| 编号 | 处理 |
+|---|---|
+| 自建 · 第 8.2 节 `v` | `v` 一行改为 `1` = 中心票据、`2` = 自建票据，中心模式的 Hub 仍按第 8.4 节第 5 步拒绝 `v ≠ 1`；表后注明键 15 `pair_until`、16 `bearer` 只在 `v = 2` 中定义 |
+| 自建 · 第 10.7 节 | 新增「自建 Hub 模式」：配对能力 `pair-hub/1`，CI 增加 `hub_fp`，其余规则同第 10.6 节 |
+| 自建 · 开头说明 | session 控制消息除第 10.2 节的编号外，新增自建模式的 17 `HubTicket` 与能力 `hub-ticket/1`，中心模式不使用 |
+| 自建 · 第 15 节 | 新增 V16，指向 SELFHOST 第 10 节的自建票据向量，并注明 R5 需补「`v = 2` 票据被中心 Hub 拒绝」的向量 |
+| 自建 · 第 16 节 | 准入接口的示意名 `Admission` 改为 R3 计划落地的 `hub.Policy` / `hub.Grant` / `Server.SetPolicy`；中心模式的策略在 `Grant` 中携带 `sid`、`jti` 与 `exp` |
+| 自建 · 第 17 节 | 改写为自建模式使用 `v = 2` 票据：无代次、心跳、租约与 `jti` 消费，撤销经 Hub 配置重载生效，参数由自建者设定 |

@@ -390,7 +390,7 @@ Client 的流程：外层钉住邀请码里的 Hub 指纹，dial 的 target = Op
 
 ## 11. 与 CENTER-CONTRACT 的关系
 
-R3 不改变中心模式的任何字段、步骤或参数。以下是建议由负责人在契约中修订的条文（本文不直接修改 CENTER-CONTRACT.md）：
+R3 不改变中心模式的任何字段、步骤或参数。以下修订已于 2026-11-20 经负责人批准，写入 [CENTER-CONTRACT](CENTER-CONTRACT.md) 第八版（见其第 18 节），条文如下：
 
 1. **§8.2 `v` 一行**改为：「`1` = 中心票据。`2` 是自建票据（[SELFHOST §3](SELFHOST.md#3-自建票据v--2)），字段集与准入规则不同；中心模式的 Hub 按 §8.4 第 5 步拒绝 `v ≠ 1`。」另在表后注明：键 15 `pair_until`、16 `bearer` 只在 `v = 2` 中定义，中心票据中出现即按未知约束键拒绝。
 2. **§10 新增 10.7「自建 Hub 模式」**：配对能力 `pair-hub/1`；CI 为 `lv_cat("renet-pake-v1", "CPACE-RISTR255-SHA512", "pair-hub/1", "renet/1", fp_client, fp_operator, SHA-256(HC), SHA-256(HO), hub_fp)`，`hub_fp` 由 Client 取外层实际看到的指纹，由 Operator 取本地配置的 Hub 指纹；其余规则同 10.6。Client 只在内层对端指纹不等于外层指纹时声明此能力。

@@ -561,3 +561,42 @@ func TestNoGoroutineLeak(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 }
+
+func TestEmbeddedListenerIsNotARelay(t *testing.T) {
+	h, a, b := id(t), id(t), id(t)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() {
+		done <- router.NewServer(embeddedServerOptions(h, router.NewEmbedded(), router.SetupLimits{})).Serve(ctx, ln)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+	addr := ln.Addr().String()
+	for name, c := range map[string]struct {
+		local *identity.Local
+		req   router.Request
+	}{
+		"wait":             {b, router.Request{Role: router.RoleWait}},
+		"targeted wait":    {b, router.Request{Role: router.RoleWait, Target: a.Fingerprint()}},
+		"third-party dial": {a, router.Request{Role: router.RoleDial, Target: b.Fingerprint()}},
+	} {
+		conn, err := router.Connect(t.Context(), addr, c.local, h.Fingerprint(), c.req)
+		if conn != nil {
+			_ = conn.Close()
+		}
+		if !errors.Is(err, router.ErrUnauthorized) {
+			t.Errorf("%s: err = %v, want unauthorized", name, err)
+		}
+	}
+	conn, err := router.Connect(t.Context(), addr, a, h.Fingerprint(), router.Request{Role: router.RoleDial, Target: h.Fingerprint()})
+	if err != nil {
+		t.Fatalf("self dial: %v", err)
+	}
+	_ = conn.Close()
+}

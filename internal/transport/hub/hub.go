@@ -79,7 +79,7 @@ func New(o Options) (*Connector, transport.Acceptor, error) {
 			a.o.Embedded = router.NewEmbedded()
 		}
 		a.serverDone = make(chan struct{})
-		server := router.NewServer(router.Options{Local: o.Local, Embedded: a.o.Embedded, SetupLimits: o.SetupLimits})
+		server := router.NewServer(embeddedServerOptions(o.Local, a.o.Embedded, o.SetupLimits))
 		go func() {
 			defer close(a.serverDone)
 			_ = server.Serve(ctx, ln)
@@ -280,4 +280,19 @@ func (a *Connector) Close() error {
 		<-a.serverDone
 	}
 	return nil
+}
+
+// embeddedServerOptions admits only dials to local. Without this restriction a
+// public Operator listener would route third-party wait/dial pairs, turning the
+// Operator's bandwidth into an open relay.
+func embeddedServerOptions(local *identity.Local, e *router.Embedded, limits router.SetupLimits) router.Options {
+	self := local.Fingerprint()
+	return router.Options{
+		Local:       local,
+		Embedded:    e,
+		SetupLimits: limits,
+		Authorize: func(_ identity.Fingerprint, role router.Role, target identity.Fingerprint) bool {
+			return role == router.RoleDial && target == self
+		},
+	}
 }

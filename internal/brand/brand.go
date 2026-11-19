@@ -11,9 +11,23 @@ import (
 	"image/color"
 	"image/draw"
 	"image/png"
+	"math"
 )
 
 const Accent = "#2356d8"
+
+var plateColor = color.NRGBA{R: 243, G: 245, B: 248, A: 255}
+
+var accentColor = color.NRGBA{R: 0x23, G: 0x56, B: 0xd8, A: 255}
+
+// The macOS mark gradient brackets the accent: azure above, indigo below.
+var (
+	macAccentTop    = color.NRGBA{R: 66, G: 150, B: 246, A: 255}
+	macAccentBottom = color.NRGBA{R: 48, G: 52, B: 232, A: 255}
+)
+
+// macPlateBottom is the accent mixed 25% into white.
+var macPlateBottom = color.NRGBA{R: 200, G: 213, B: 245, A: 255}
 
 //go:embed assets/mark.svg
 var markSVG string
@@ -64,10 +78,6 @@ var compact20 = parseSVG(mark20SVG)
 
 func artworkFor(size int) artwork {
 	switch {
-	case size == 18 || size == 36:
-		// AppKit draws status images at 18 points. Remove only the 20-grid's
-		// transparent margin so its 2x bitmap stays aligned to physical pixels.
-		return artwork{grid: 18, start: 1, boxes: compact20.boxes}
 	case size == 20:
 		return compact20
 	case size%32 == 0:
@@ -80,18 +90,100 @@ func artworkFor(size int) artwork {
 // SVG returns a detached copy of the 32-unit master; compact grids are separate assets.
 func SVG() []byte { return []byte(markSVG) }
 
-// PNG accepts multiples of 16 up to 1024, plus 20 and AppKit's 18/36 menu sizes.
+// PNG accepts multiples of 16 up to 1024, plus 20.
 // Template uses black alpha with transparent cutouts and ignores plate.
 func PNG(size int, plate, template bool) []byte {
-	if size < 16 || size > 1024 || size%16 != 0 && size != 18 && size != 20 && size != 36 {
+	if size < 16 || size > 1024 || size%16 != 0 && size != 20 {
 		panic("brand: invalid pixel icon size")
 	}
-	art := artworkFor(size)
 	im := image.NewNRGBA(image.Rect(0, 0, size, size))
-	if plate && !template {
-		draw.Draw(im, im.Bounds(), image.NewUniform(color.NRGBA{R: 243, G: 245, B: 248, A: 255}), image.Point{}, draw.Src)
+	art := artworkFor(size)
+	paint(im, image.Point{}, art, size/art.grid, plate, template)
+	return encode(im)
+}
+
+// MacPNG is the macOS app icon: Apple's 824 body (inset 100 on a 1024 canvas)
+// as a light gradient plate, with the mark at 5/8 of the canvas and its accent
+// shaded row by row (see macAccent). The corners
+// are superellipse arcs (extent 270, exponent 3.5) approximating Apple's
+// continuous 185 corner; a circular 185 arc reads visibly rounder in the Dock.
+// A bundled .icns gets no system mask, so the rounded body and its margin must
+// be drawn here. The body edge is anti-aliased; the mark stays on whole pixels.
+// Size must be a multiple of 64 up to 1024.
+func MacPNG(size int) []byte {
+	if size < 64 || size > 1024 || size%64 != 0 {
+		panic("brand: invalid macOS icon size")
 	}
-	unit := size / art.grid
+	im := image.NewNRGBA(image.Rect(0, 0, size, size))
+	scale := float64(size) / 1024
+	half, inset, corner := float64(size)/2, 100*scale, 270*scale
+	for y := range size {
+		for x := range size {
+			qx := math.Abs(float64(x)+0.5-half) - (half - inset - corner)
+			qy := math.Abs(float64(y)+0.5-half) - (half - inset - corner)
+			d := math.Max(qx, qy) - corner
+			if qx > 0 && qy > 0 {
+				d = math.Pow(math.Pow(qx, 3.5)+math.Pow(qy, 3.5), 1/3.5) - corner
+			}
+			if alpha := math.Min(math.Max(0.5-d, 0), 1); alpha > 0 {
+				c := macPlate(size, y)
+				c.A = uint8(math.Round(alpha * 255))
+				im.SetNRGBA(x, y, c)
+			}
+		}
+	}
+	mark, art := size*5/8, master
+	if mark%master.grid != 0 {
+		art = compact20 // 64 and 128: 40 and 80 px are whole 20-grid multiples
+	}
+	origin, unit := image.Pt((size-mark)/2, (size-mark)/2), mark/art.grid
+	paint(im, origin, art, unit, false, false)
+	top, bottom := art.accentRows()
+	for y := origin.Y + top*unit; y < origin.Y+bottom*unit; y++ {
+		shade := macAccent(art, (y-origin.Y)/unit)
+		for x := origin.X; x < origin.X+mark; x++ {
+			if im.NRGBAAt(x, y) == accentColor {
+				im.SetNRGBA(x, y, shade)
+			}
+		}
+	}
+	return encode(im)
+}
+
+// macAccent shades one grid row of the mark from azure at the top to indigo at
+// the bottom. Whole rows keep each cell flat.
+func macAccent(art artwork, row int) color.NRGBA {
+	top, bottom := art.accentRows()
+	t := float64(row-top) / float64(bottom-1-top)
+	mix := func(a, b uint8) uint8 { return uint8(math.Round(float64(a) + t*(float64(b)-float64(a)))) }
+	return color.NRGBA{R: mix(macAccentTop.R, macAccentBottom.R), G: mix(macAccentTop.G, macAccentBottom.G), B: mix(macAccentTop.B, macAccentBottom.B), A: 255}
+}
+
+// accentRows returns the half-open grid row range covered by accent cells.
+func (a artwork) accentRows() (top, bottom int) {
+	top = a.grid
+	for _, r := range a.boxes {
+		if r.Fill == Accent {
+			top, bottom = min(top, r.Y-a.start), max(bottom, r.Y+r.Height-a.start)
+		}
+	}
+	return top, bottom
+}
+
+// macPlate fades the macOS body from white to a pale accent tint, top to
+// bottom, matching the light gradients of neighbouring Dock icons.
+func macPlate(size, y int) color.NRGBA {
+	inset := float64(size) * 100 / 1024
+	t := math.Min(math.Max((float64(y)+0.5-inset)/(float64(size)-2*inset), 0), 1)
+	mix := func(to uint8) uint8 { return uint8(math.Round(255 - t*(255-float64(to)))) }
+	return color.NRGBA{R: mix(macPlateBottom.R), G: mix(macPlateBottom.G), B: mix(macPlateBottom.B), A: 255}
+}
+
+func paint(im *image.NRGBA, origin image.Point, art artwork, unit int, plate, template bool) {
+	if plate && !template {
+		body := image.Rect(0, 0, art.grid*unit, art.grid*unit).Add(origin)
+		draw.Draw(im, body, image.NewUniform(plateColor), image.Point{}, draw.Src)
+	}
 	for _, r := range art.boxes {
 		if len(r.Fill) != 7 || r.Fill[0] != '#' {
 			panic("brand: invalid source color")
@@ -108,9 +200,12 @@ func PNG(size int, plate, template bool) []byte {
 				fill = color.NRGBA{A: 255}
 			}
 		}
-		box := image.Rect((r.X-art.start)*unit, (r.Y-art.start)*unit, (r.X+r.Width-art.start)*unit, (r.Y+r.Height-art.start)*unit)
+		box := image.Rect((r.X-art.start)*unit, (r.Y-art.start)*unit, (r.X+r.Width-art.start)*unit, (r.Y+r.Height-art.start)*unit).Add(origin)
 		draw.Draw(im, box, image.NewUniform(fill), image.Point{}, draw.Src)
 	}
+}
+
+func encode(im image.Image) []byte {
 	var data bytes.Buffer
 	if err := png.Encode(&data, im); err != nil {
 		panic(err)

@@ -50,7 +50,7 @@ func export(dir string) error {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
-	files := map[string][]byte{"logo.svg": brand.SVG(), "logo.png": brand.PNG(1024, false, false), "app-icon.png": brand.PNG(1024, true, false), "tray.png": brand.PNG(36, false, true)}
+	files := map[string][]byte{"logo.svg": brand.SVG(), "logo.png": brand.PNG(1024, false, false), "app-icon.png": brand.PNG(1024, true, false), "app-icon-macos.png": brand.MacPNG(1024)}
 	for _, size := range []int{16, 20, 32} {
 		files[fmt.Sprintf("icon-%d.png", size)] = brand.PNG(size, false, false)
 		files[fmt.Sprintf("template-%d.png", size)] = brand.PNG(size, false, true)
@@ -78,8 +78,10 @@ func export(dir string) error {
 	for _, item := range []struct {
 		tag  string
 		size int
-	}{{"icp4", 16}, {"icp5", 32}, {"icp6", 64}, {"ic07", 128}, {"ic08", 256}, {"ic09", 512}, {"ic10", 1024}} {
-		picture := brand.PNG(item.size, true, false)
+	}{{"icp6", 64}, {"ic07", 128}, {"ic08", 256}, {"ic09", 512}, {"ic10", 1024}} {
+		// No 16/32 entries: the 3/4 inset is not whole-pixel there, and
+		// AppKit downsamples from the 64 entry instead.
+		picture := brand.MacPNG(item.size)
 		blocks.WriteString(item.tag)
 		binary.Write(&blocks, binary.BigEndian, uint32(8+len(picture)))
 		blocks.Write(picture)

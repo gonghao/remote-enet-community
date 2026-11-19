@@ -104,15 +104,15 @@ func (s *shell) ready() {
 	})
 	s.post, s.invalidate = s.window.Update, s.window.Invalidate
 	_ = s.window.SetIcon(brand.PNG(256, true, false))
-	if runtime.GOOS == "darwin" {
-		_ = mygo.App.Dock.SetIcon(brand.PNG(256, true, false))
-	}
 	s.registerCaptureShortcut = func(acc string, keys func(string), trigger func()) error {
 		return mygo.GlobalShortcut.RegisterWith(acc, mygo.GlobalShortcutOptions{Description: s.tr("Insert HSFZ capture marker"), OnKeys: keys}, trigger)
 	}
 	s.unregisterCaptureShortcut = mygo.GlobalShortcut.Unregister
 	s.applyState()
-	s.installTray()
+	if runtime.GOOS != "darwin" {
+		// macOS has the Dock; a menu bar item would only duplicate it.
+		s.installTray()
+	}
 	offLocale := mygo.App.OnLocaleChanged(s.localeChanged)
 	s.window.OnClose(func(e *mygo.CloseEvent) {
 		// Keep the window alive until the quit path has joined all workers.
@@ -317,7 +317,7 @@ func (s *shell) trayMenu() *mygo.Menu {
 }
 
 func (s *shell) installTray() {
-	tray, err := mygo.NewTray(mygo.TrayOptions{Icon: trayIcon(), IconIsTemplate: runtime.GOOS == "darwin", ToolTip: s.tr(s.product.name), Menu: s.trayMenu()})
+	tray, err := mygo.NewTray(mygo.TrayOptions{Icon: brand.PNG(16, false, false), ToolTip: s.tr(s.product.name), Menu: s.trayMenu()})
 	if err != nil {
 		s.systemNotice = "Tray is unavailable. Closing the window will quit the application."
 		s.applyState()
@@ -325,11 +325,4 @@ func (s *shell) installTray() {
 	}
 	s.tray = tray
 	tray.OnClick(s.show)
-}
-
-func trayIcon() []byte {
-	if runtime.GOOS == "darwin" {
-		return brand.PNG(36, false, true)
-	}
-	return brand.PNG(16, false, false)
 }

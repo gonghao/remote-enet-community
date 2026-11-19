@@ -56,9 +56,9 @@ Pixel Code固定使用v2.2原版Bold字体，采用SIL Open Font License 1.1，�
 - 主几何源：`internal/brand/assets/mark.svg`，32×32整数网格；小尺寸源为同目录的`mark-16.svg`和`mark-20.svg`，仅矩形与纯色。
 - 颜色固定为钴蓝`#2356D8`与白色`#FFFFFF`。全彩版的小车与触点为不透明白色；单色版将白色区域转为透明留白，保留网口与车窗的黑色Alpha。
 - 标志最小16px。16/20px分别使用独立网格；48px使用16格稿的3倍整数放大，64px等使用32格主稿整数放大。禁止拉伸、旋转、加光晕或平滑缩放位图。
-- 页眉使用原生32px PNG；窗口和Dock使用统一主稿，打包资源包含独立小尺寸。Windows托盘使用16px彩色稿；macOS菜单栏固定18点，从20格稿仅裁去透明外边距，以36px模板提供2倍像素密度。
-- Logo透明版用于页面与文档，浅色方底版用于应用图标，黑色Alpha模板由macOS根据明暗主题着色。
-- [Apple图标规范](https://developer.apple.com/design/human-interface-guidelines/app-icons)规定方形源图由系统施加图标遮罩；品牌内部像素轮廓保持不变。
+- 页眉使用原生32px PNG；窗口与任务栏使用统一主稿，打包资源包含独立小尺寸。Windows托盘使用16px彩色稿；macOS不设菜单栏图标，Dock即常驻入口。
+- macOS的ICNS使用`app-icon-macos.png`：按[Apple图标规范](https://developer.apple.com/design/human-interface-guidelines/app-icons)的网格（1024画布内缩100；圆角用超椭圆近似系统连续圆角，起弯270、指数3.5，比半径185的圆弧收得更紧）绘制圆角底板，自上而下由白色渐变到混入25%钴蓝的浅色，标志占画布5/8居中（256px起用32格主稿，64/128px用20格稿），各尺寸仍为整数像素；标志的钴蓝部分按网格逐行自上而下由天蓝`#4296F6`过渡到靛蓝`#3034E8`，每个像素格保持单色，白色触点与小车不变；仅底板边缘抗锯齿。直接打包的ICNS不会被系统套用遮罩，圆角与留白须自带。运行时不再调用`Dock.SetIcon`，启动跳动与运行中的Dock图标都来自同一ICNS。ICNS只含64–1024px，16/32px由系统从64px缩小。这是界面“直角、无渐变”规则对系统应用图标容器的唯一例外。
+- Logo透明版用于页面与文档，浅色方底版用于应用图标，黑色Alpha单色模板作为品牌交付物保留。
 
 生成可交付SVG、PNG、ICO与ICNS：
 

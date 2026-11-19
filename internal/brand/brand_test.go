@@ -13,7 +13,7 @@ import (
 var exported embed.FS
 
 func TestPixelGridAndTemplateCutouts(t *testing.T) {
-	for _, size := range []int{16, 18, 20, 32, 36, 48, 128} {
+	for _, size := range []int{16, 20, 32, 48, 128} {
 		plain, err := png.Decode(bytes.NewReader(PNG(size, false, false)))
 		if err != nil {
 			t.Fatal(err)
@@ -51,7 +51,7 @@ func TestPixelGridAndTemplateCutouts(t *testing.T) {
 	}
 }
 
-func TestCompactGridsAndRetinaMenu(t *testing.T) {
+func TestCompactGrids(t *testing.T) {
 	for _, item := range []struct {
 		size, row, groups int
 	}{{16, 3, 4}, {20, 3, 8}, {32, 5, 8}, {48, 9, 4}} {
@@ -71,36 +71,10 @@ func TestCompactGridsAndRetinaMenu(t *testing.T) {
 			t.Fatalf("%dpx contact groups: got %d, want %d", item.size, groups, item.groups)
 		}
 	}
-	for _, template := range []bool{false, true} {
-		base, err := png.Decode(bytes.NewReader(PNG(20, false, template)))
-		if err != nil {
-			t.Fatal(err)
-		}
-		retina, err := png.Decode(bytes.NewReader(PNG(36, false, template)))
-		if err != nil {
-			t.Fatal(err)
-		}
-		for y := range 36 {
-			for x := range 36 {
-				want := color.NRGBAModel.Convert(base.At(x/2+1, y/2+1))
-				if got := color.NRGBAModel.Convert(retina.At(x, y)); got != want {
-					t.Fatalf("retina menu changed native cells at (%d,%d)", x, y)
-				}
-			}
-		}
-		for i := range 20 {
-			for _, p := range [][2]int{{0, i}, {19, i}, {i, 0}, {i, 19}} {
-				_, _, _, a := base.At(p[0], p[1]).RGBA()
-				if a != 0 {
-					t.Fatal("menu crop would discard artwork")
-				}
-			}
-		}
-	}
 }
 
 func TestExportedAssetsMatchCanonicalSource(t *testing.T) {
-	files := map[string][]byte{"logo.svg": SVG(), "logo.png": PNG(1024, false, false), "app-icon.png": PNG(1024, true, false), "tray.png": PNG(36, false, true),
+	files := map[string][]byte{"logo.svg": SVG(), "logo.png": PNG(1024, false, false), "app-icon.png": PNG(1024, true, false), "app-icon-macos.png": MacPNG(1024),
 		"icon-16.png": PNG(16, false, false), "icon-20.png": PNG(20, false, false), "icon-32.png": PNG(32, false, false),
 		"template-16.png": PNG(16, false, true), "template-20.png": PNG(20, false, true), "template-32.png": PNG(32, false, true)}
 	for name, expected := range files {
@@ -116,15 +90,15 @@ func TestExportedAssetsMatchCanonicalSource(t *testing.T) {
 	if string(data[:4]) != "icns" || int(binary.BigEndian.Uint32(data[4:8])) != len(data) {
 		t.Fatal("invalid ICNS container")
 	}
-	sizes := map[string]int{"icp4": 16, "icp5": 32, "icp6": 64, "ic07": 128, "ic08": 256, "ic09": 512, "ic10": 1024}
+	sizes := map[string]int{"icp6": 64, "ic07": 128, "ic08": 256, "ic09": 512, "ic10": 1024}
 	for offset := 8; offset < len(data); {
 		length := int(binary.BigEndian.Uint32(data[offset+4 : offset+8]))
 		if length <= 8 || offset+length > len(data) {
 			t.Fatal("invalid ICNS block")
 		}
 		size, ok := sizes[string(data[offset:offset+4])]
-		if !ok || !bytes.Equal(data[offset+8:offset+length], PNG(size, true, false)) {
-			t.Fatal("ICNS representation differs from native grid")
+		if !ok || !bytes.Equal(data[offset+8:offset+length], MacPNG(size)) {
+			t.Fatal("ICNS representation differs from the macOS icon")
 		}
 		delete(sizes, string(data[offset:offset+4]))
 		offset += length
@@ -152,6 +126,56 @@ func TestExportedAssetsMatchCanonicalSource(t *testing.T) {
 		}
 		if entry[0] != byte(size) || entry[1] != byte(size) || !bytes.Equal(data[offset:offset+length], PNG(size, true, false)) {
 			t.Fatal("ICO representation differs from native grid")
+		}
+	}
+}
+
+func TestMacRoundedBody(t *testing.T) {
+	for _, size := range []int{64, 128, 256, 512, 1024} {
+		mac, err := png.Decode(bytes.NewReader(MacPNG(size)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		at := func(x, y int) color.NRGBA { return color.NRGBAModel.Convert(mac.At(x, y)).(color.NRGBA) }
+		inset := size * 100 / 1024
+		for _, p := range [][2]int{{0, 0}, {inset - 1, size / 2}, {size / 2, size - inset}, {inset + 2, inset + 2}, {size - inset - 3, size - inset - 3}} {
+			if at(p[0], p[1]).A != 0 {
+				t.Fatalf("%dpx: margin or rounded corner is opaque at %v", size, p)
+			}
+		}
+		if at(inset+1, size/2) != macPlate(size, size/2) || at(size/2, inset+1) != macPlate(size, inset+1) {
+			t.Fatalf("%dpx: rounded body lost its plate", size)
+		}
+		top, bottom := at(size/2, inset+1), at(size/2, size-inset-2)
+		if top.B != 255 || !(bottom.R < top.R && bottom.G < top.G && bottom.B < top.B) {
+			t.Fatalf("%dpx: plate must fade from white at the top to a tint at the bottom: %v -> %v", size, top, bottom)
+		}
+		side, base, art := size*5/8, PNG(20, false, false), compact20
+		if side%32 == 0 {
+			base, art = PNG(side, false, false), master
+		}
+		first, last := art.accentRows()
+		if high, low := macAccent(art, first), macAccent(art, last-1); high != macAccentTop || low != macAccentBottom {
+			t.Fatalf("%dpx: mark gradient %v -> %v does not span its endpoints", size, high, low)
+		}
+		mark, err := png.Decode(bytes.NewReader(base))
+		if err != nil {
+			t.Fatal(err)
+		}
+		unit, offset := side/mark.Bounds().Dx(), (size-side)/2
+		for y := range side {
+			for x := range side {
+				want := color.NRGBAModel.Convert(mark.At(x/unit, y/unit)).(color.NRGBA)
+				switch want {
+				case color.NRGBA{}:
+					want = macPlate(size, y+offset)
+				case accentColor:
+					want = macAccent(art, y*art.grid/side)
+				}
+				if got := at(x+offset, y+offset); got != want {
+					t.Fatalf("%dpx: centred mark differs at (%d,%d)", size, x, y)
+				}
+			}
 		}
 	}
 }

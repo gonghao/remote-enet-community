@@ -3,6 +3,7 @@ package desktop
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -481,5 +482,147 @@ func TestRequestCancellationStopsOnlyLinkTest(t *testing.T) {
 	}
 	if s := c.Snapshot(); s.Testing || !s.Running || !s.TestResult.Interrupted || !strings.Contains(s.Error, "canceled") || run.ctx.Err() != nil {
 		t.Fatal("request cancellation stopped runtime or misreported partial result")
+	}
+}
+
+func TestDigitalPairingPersistence(t *testing.T) {
+	for _, mode := range []string{"subscribed", "quick-exit", "no-confirmation", "different-endpoint", "save-failed", "subscribed-save-failed"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newRuntime()
+			saves := make(chan settings.Config, 2)
+			failSave := strings.HasSuffix(mode, "save-failed")
+			subscribe := strings.HasPrefix(mode, "subscribed")
+			c := testController(t, settings.Default(), func(d *dependencies) {
+				d.newRuntime = func() appRuntime { return f }
+				d.save = func(_ string, cfg settings.Config) error {
+					saves <- cfg
+					if failSave {
+						return errors.New("write failed")
+					}
+					return nil
+				}
+			})
+			if err := c.StartClient(t.Context(), "　 EXAMPLE.invalid:47000\t００００ １２３４\n"); err != nil {
+				t.Fatal(err)
+			}
+			call := await(t, f.started)
+			if call.client.Invite != "" || call.client.DirectPair == nil ||
+				*call.client.DirectPair != (app.DirectPair{Address: "example.invalid:47000", Code: "00001234"}) ||
+				call.client.Hooks.OnPaired == nil {
+				t.Fatal("numeric input did not produce direct pairing configuration")
+			}
+			peer := transport.PeerInfo{ID: identity.Fingerprint{7}, Endpoints: []transport.Endpoint{
+				{Kind: "hub", Addr: call.client.DirectPair.Address, Hub: identity.Fingerprint{7}},
+			}}
+			if mode != "no-confirmation" {
+				store, err := trust.Open(t.Context(), c.roleDir(settings.RoleClient))
+				if err != nil {
+					t.Fatal(err)
+				}
+				durable := peer
+				if mode == "different-endpoint" {
+					durable.Endpoints = []transport.Endpoint{{Kind: "hub", Addr: "example.invalid:47001", Hub: peer.ID}}
+				}
+				if err := store.SavePeer(t.Context(), durable); err != nil {
+					t.Fatal(err)
+				}
+				call.client.Hooks.OnPaired(peer)
+			}
+			if subscribe {
+				f.emit(connected(1))
+				stateWhere(t, c, func(s State) bool {
+					return s.Config.Client.Peer != "" || s.Error == "Could not save pairing"
+				})
+			}
+			f.finish <- nil
+			s := stateWhere(t, c, func(s State) bool { return !s.Running })
+			wantSave := mode != "no-confirmation" && mode != "different-endpoint"
+			if wantSave {
+				cfg := await(t, saves)
+				if cfg.Client.Peer != peer.ID.String() {
+					t.Fatal("paired fingerprint was not written to settings")
+				}
+				assertNoNumericSecret(t, "00001234", fmt.Sprint(cfg))
+			}
+			select {
+			case <-saves:
+				t.Fatal("unconfirmed pairing or duplicate callback wrote settings")
+			default:
+			}
+			if wantSave && !failSave {
+				if s.Config.Client.Peer != peer.ID.String() {
+					t.Fatal("durable pairing was lost")
+				}
+			} else if s.Config.Client.Peer != "" {
+				t.Fatal("unconfirmed or failed pairing updated desktop settings")
+			}
+			if failSave && s.Error != "Could not save pairing" {
+				t.Fatal("settings write failure was lost during exit")
+			}
+			assertNoNumericSecret(t, "00001234", fmt.Sprint(s))
+		})
+	}
+}
+
+func TestNumericInputErrorsAndTerminalMessagesAreSecretFree(t *testing.T) {
+	for _, tc := range []struct{ input, message string }{
+		{"0000 1234", "Enter the direct address and port"},
+		{"0.0.0.0:47000 00001234", "Invalid host"},
+		{"[::]:47000 00001234", "Invalid host"},
+		{"example.invalid:0 00001234", "Invalid port"},
+		{"example.invalid:47000 00001234x", "Enter eight digits"},
+	} {
+		t.Run(tc.message, func(t *testing.T) {
+			c := testController(t, clientSettings(), func(d *dependencies) {
+				d.newRuntime = func() appRuntime { t.Fatal("rejected numeric input allocated a runtime"); return nil }
+			})
+			states := c.Subscribe(t.Context())
+			err := c.StartClient(t.Context(), tc.input)
+			s := await(t, states)
+			if err == nil || s.Error != tc.message || s.Running {
+				t.Fatal("numeric input was not rejected with the expected fixed message")
+			}
+			assertNoNumericSecret(t, "00001234", err.Error()+fmt.Sprint(s))
+		})
+	}
+	for _, tc := range []struct {
+		kind          app.PairingErrorKind
+		message, hint string
+	}{
+		{"busy", "Operator busy", "You can retry with the same code if it is still valid."},
+		{"expired", "Code expired", "Request a new numeric code."},
+		{"interrupted", "Pairing interrupted", "Request a new numeric code."},
+		{"rate_limited", "Try again later", "Try again later with a new numeric code."},
+		{"unsupported", "Numeric pairing unsupported", "Check the operator address before trying again."},
+	} {
+		t.Run(string(tc.kind), func(t *testing.T) {
+			f := newRuntime()
+			c := testController(t, clientSettings(), func(d *dependencies) { d.newRuntime = func() appRuntime { return f } })
+			if err := c.StartClient(t.Context(), "example.invalid:47000 00001234"); err != nil {
+				t.Fatal(err)
+			}
+			await(t, f.started)
+			states := c.Subscribe(t.Context())
+			f.finish <- fmt.Errorf("fixed test error: %w", tc.kind)
+			s := stateWhere(t, c, func(s State) bool { return !s.Running })
+			if s.Error != tc.message || s.PairingHint != tc.hint || s.Runtime.LastError != tc.message {
+				t.Fatal("numeric failure did not publish the localized reason key and retry guidance")
+			}
+			assertNoNumericSecret(t, "00001234", fmt.Sprint(s)+fmt.Sprint(await(t, states)))
+		})
+	}
+}
+
+func TestExpiredInvitationShowsSpecificError(t *testing.T) {
+	code, err := (invite.Invite{Version: 1, ExpiresAt: time.Now().Add(-time.Minute)}).Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := testController(t, clientSettings(), func(d *dependencies) {
+		d.newRuntime = func() appRuntime { t.Fatal("expired invitation started a runtime"); return nil }
+	})
+	err = c.StartClient(t.Context(), code)
+	if !errors.Is(err, invite.ErrInviteExpired) || c.Snapshot().Error != "Invitation expired" {
+		t.Fatal("expired invitation did not yield its specific message")
 	}
 }

@@ -85,6 +85,7 @@ type Runtime struct {
 	subs           map[*subscription]struct{}
 	metrics        *observe.Tracker
 	exclusiveState func() exclusive.Snapshot
+	numeric        *digitalResponder
 	direct         *directManager
 }
 

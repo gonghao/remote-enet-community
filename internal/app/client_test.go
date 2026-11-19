@@ -141,6 +141,10 @@ func connectedGeneration(t *testing.T, ch <-chan Snapshot, gen uint64) Snapshot 
 
 type dialFunc func(context.Context, transport.PeerInfo) (transport.Session, error)
 
+func (dialFunc) DialDirectPair(context.Context, string) (transport.Session, error) {
+	panic("unexpected bootstrap dial on a pinned connection")
+}
+
 func (f dialFunc) Dial(ctx context.Context, peer transport.PeerInfo) (transport.Session, error) {
 	return f(ctx, peer)
 }
@@ -152,7 +156,7 @@ type testPeer struct {
 
 type clientLoopOptions struct {
 	wait      func(context.Context, time.Duration) error
-	connector func(transport.Connector) transport.Connector
+	connector func(clientConnector) clientConnector
 }
 
 func startClientLoop(t *testing.T, n *scriptedNetwork, fixed bool, options ...clientLoopOptions) (*Runtime, ClientConfig, <-chan Snapshot, <-chan testPeer, context.CancelFunc, <-chan error) {
@@ -170,7 +174,7 @@ func startClientLoop(t *testing.T, n *scriptedNetwork, fixed bool, options ...cl
 	}
 	servers := make(chan testPeer, 16)
 	var workers sync.WaitGroup
-	var connector transport.Connector = dialFunc(func(ctx context.Context, peer transport.PeerInfo) (transport.Session, error) {
+	var connector clientConnector = dialFunc(func(ctx context.Context, peer transport.PeerInfo) (transport.Session, error) {
 		a, b := memtransport.Pair(t, identity.Fingerprint{1}, peer.ID)
 		workers.Add(1)
 		go func() {
@@ -595,7 +599,7 @@ func TestReconnectWaitAdvancesAfterTransientPeerBusy(t *testing.T) {
 	var firstLocal transport.Session
 	wait := n.manualNICWait(time.Hour)
 	options := clientLoopOptions{
-		connector: func(next transport.Connector) transport.Connector {
+		connector: func(next clientConnector) clientConnector {
 			return dialFunc(func(ctx context.Context, peer transport.PeerInfo) (transport.Session, error) {
 				attempt := dials.Add(1)
 				if attempt == 2 {

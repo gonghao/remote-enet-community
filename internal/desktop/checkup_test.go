@@ -23,6 +23,45 @@ func checkedReport() checkup.Report {
 		Findings: []checkup.Finding{{ID: "settings", Status: checkup.Pass, Code: "settings_valid"}}}
 }
 
+func TestCheckNumericInputUsesOnlyFixedCodes(t *testing.T) {
+	for _, tc := range []struct{ name, input, code string }{
+		{"valid", "192.0.2.1:47000 00001234", checkup.DirectInputValid},
+		{"host", "https://example.invalid:47000 00001234", checkup.DirectInputInvalidHost},
+		{"port", "192.0.2.1:65536 00001234", checkup.DirectInputInvalidPort},
+		{"code", "192.0.2.1:47000 00001234x", checkup.DirectInputInvalidCode},
+		{"center", "0000 1234", checkup.DirectInputAddressRequired},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := testController(t, clientSettings(), func(d *dependencies) {
+				d.readPeer = func(context.Context, string, identity.Fingerprint) (transport.PeerInfo, error) {
+					t.Fatal("direct input fell back to the saved peer")
+					return transport.PeerInfo{}, nil
+				}
+				d.checkup = func(_ context.Context, in checkup.Input) checkup.Report {
+					if in.Endpoints != nil || in.PeerCode != tc.code {
+						t.Fatal("direct input reached checkup with endpoints or the wrong result")
+					}
+					report := checkedReport()
+					report.Findings = []checkup.Finding{{ID: "peer_configuration", Status: checkup.Pass, Code: in.PeerCode}}
+					return report
+				}
+			})
+			if err := c.CheckConnection(t.Context(), tc.input); err != nil {
+				t.Fatal(err)
+			}
+			s := c.Snapshot()
+			data, err := checkup.JSON(s.Checkup)
+			if err != nil || !strings.Contains(string(data), tc.code) {
+				t.Fatal("local input result missing from the JSON report")
+			}
+			all := string(data) + s.Error + s.Notice + s.Runtime.LastError + strings.Join(s.Events, " ")
+			if strings.Contains(all, "00001234") || strings.Contains(all, "0000 1234") {
+				t.Fatal("numeric secret was retained by self-check")
+			}
+		})
+	}
+}
+
 func TestCheckEndpointsDoesNotPairOrPersist(t *testing.T) {
 	peer := transport.PeerInfo{ID: identity.Fingerprint{7}, Endpoints: []transport.Endpoint{{Kind: "hub", Addr: "fixture.invalid:47000", Hub: identity.Fingerprint{8}}}}
 	var inputs []checkup.Input

@@ -12,6 +12,7 @@ import (
 	"remote-enet/internal/hsfzcapture"
 	"remote-enet/internal/identity"
 	"remote-enet/internal/linktest"
+	"remote-enet/internal/pairing"
 	"remote-enet/internal/settings"
 )
 
@@ -22,6 +23,7 @@ type State struct {
 	Running, Stopping, Testing       bool
 	DirectWorking                    bool
 	Invitation, Notice, Error        string
+	NumericCode                      pairing.Status
 	NICs                             []carside.NIC
 	TestResult                       linktest.Result
 	Events                           []string
@@ -42,25 +44,28 @@ type Permission struct {
 // Actions run synchronously on the UI thread and must return promptly. The
 // integrator queues controller work and handles explicit clipboard requests.
 type Actions struct {
-	Save            func(settings.Config)
-	Refresh         func()
-	Connect         func(string)
-	Listen          func()
-	Stop            func()
-	IssueInvite     func()
-	TestLink        func()
-	ConnectMGU      func()
-	ConnectEVO      func()
-	DisconnectMGU   func()
-	CopyDiagnostics func()
-	Copy            func(string)
-	StartCapture    func()
-	StopCapture     func()
-	MarkCapture     func(string) bool
-	SetLanguage     func(string)
-	CheckConnection func(string)
-	CancelChecks    func()
-	Quit            func()
+	Save              func(settings.Config)
+	Refresh           func()
+	Connect           func(string)
+	Listen            func()
+	Stop              func()
+	IssueInvite       func()
+	IssueNumericCode  func()
+	CopyNumericCode   func(uint64)
+	RevokeNumericCode func(uint64)
+	TestLink          func()
+	ConnectMGU        func()
+	ConnectEVO        func()
+	DisconnectMGU     func()
+	CopyDiagnostics   func()
+	Copy              func(string)
+	StartCapture      func()
+	StopCapture       func()
+	MarkCapture       func(string) bool
+	SetLanguage       func(string)
+	CheckConnection   func(string)
+	CancelChecks      func()
+	Quit              func()
 }
 
 // Action identifies an asynchronous request completed by the integrator.
@@ -80,6 +85,9 @@ const (
 	ActionStopCapture
 	ActionCheckConnection
 	ActionCancelChecks
+	ActionIssueNumericCode
+	ActionCopyNumericCode
+	ActionRevokeNumericCode
 )
 
 // View and all of its methods belong to the UI thread.
@@ -95,6 +103,9 @@ type View struct {
 	draft                               settings.Config
 	ports                               [3]string
 	invitation                          string
+	inputGeneration                     uint64
+	numericDisplay                      pairing.Display
+	numericAction                       Action
 	submitted                           *settings.Config
 	savingAdapter                       bool
 	refreshing                          bool
@@ -165,7 +176,7 @@ func (v *View) SetState(state State) {
 		v.issuing = false
 	}
 	if state.Running && !v.state.Running {
-		v.invitation = ""
+		v.clearPairingInput()
 	}
 	if !state.Capture.StartedAt.Equal(v.state.Capture.StartedAt) {
 		v.captureHasSelection = false
@@ -176,6 +187,7 @@ func (v *View) SetState(state State) {
 	state.Capture.RecentMarkers = append([]hsfzcapture.Marker(nil), state.Capture.RecentMarkers[max(0, len(state.Capture.RecentMarkers)-200):]...)
 	state.Checkup.Findings = append([]checkup.Finding(nil), state.Checkup.Findings[:min(len(state.Checkup.Findings), 32)]...)
 	v.state = state
+	v.clearExpiredNumericCode()
 }
 
 // Complete releases the action's request latch after SetConfig and SetState.
@@ -215,6 +227,10 @@ func (v *View) Complete(action Action) {
 		v.checking = false
 	case ActionCancelChecks:
 		v.cancelingChecks = false
+	case ActionIssueNumericCode, ActionCopyNumericCode, ActionRevokeNumericCode:
+		if v.numericAction == action {
+			v.numericAction = 0
+		}
 	}
 }
 

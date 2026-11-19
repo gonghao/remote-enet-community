@@ -75,7 +75,7 @@ func (c *Controller) CheckConnection(ctx context.Context, invitation string) err
 		if cfg.Role == settings.RoleClient {
 			in.Endpoints, in.PeerCode = c.checkEndpoints(ctx, cfg, invitation)
 		}
-		if c.opts.NetworkStatus != nil && ctx.Err() == nil {
+		if cfg.Role == settings.RoleOperator && c.opts.NetworkStatus != nil && ctx.Err() == nil {
 			in.Permission = c.opts.NetworkStatus()
 		}
 		report = c.deps.checkup(ctx, in)
@@ -139,10 +139,25 @@ func sameCheckRuntime(a, b app.Snapshot) bool {
 }
 
 func (c *Controller) checkEndpoints(ctx context.Context, cfg settings.Config, code string) ([]transport.Endpoint, string) {
-	code = strings.TrimSpace(strings.TrimPrefix(code, "\uFEFF"))
+	code = strings.TrimSpace(code)
 	if code != "" {
-		i, err := invite.Decode(code)
-		if err != nil || i.Peer.ID.IsZero() || i.Token == ([16]byte{}) || len(i.Peer.Endpoints) == 0 {
+		input, err := invite.ParseInput(code)
+		switch {
+		case errors.Is(err, invite.ErrInvalidHost):
+			return nil, checkup.DirectInputInvalidHost
+		case errors.Is(err, invite.ErrInvalidPort):
+			return nil, checkup.DirectInputInvalidPort
+		case errors.Is(err, invite.ErrInvalidCode):
+			return nil, checkup.DirectInputInvalidCode
+		case err != nil:
+			return nil, "invite_invalid"
+		case input.Kind == invite.Direct:
+			return nil, checkup.DirectInputValid
+		case input.Kind == invite.Center:
+			return nil, checkup.DirectInputAddressRequired
+		}
+		i := input.Invite
+		if i.Peer.ID.IsZero() || i.Token == ([16]byte{}) || len(i.Peer.Endpoints) == 0 {
 			return nil, "invite_invalid"
 		}
 		return slices.Clone(i.Peer.Endpoints), ""

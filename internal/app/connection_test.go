@@ -204,6 +204,10 @@ func TestOperatorInvalidStateIsLocalButBindFailureIsFatal(t *testing.T) {
 
 type testConnector struct{ session transport.Session }
 
+func (testConnector) DialDirectPair(context.Context, string) (transport.Session, error) {
+	panic("unexpected bootstrap dial on a pinned connection")
+}
+
 func (c testConnector) Dial(context.Context, transport.PeerInfo) (transport.Session, error) {
 	return c.session, nil
 }
@@ -239,7 +243,7 @@ func TestClientPersistsPeerAndFailsClosedOnSaveError(t *testing.T) {
 			nic, gateway := gatewayState(t)
 			done := make(chan connectionResult, 1)
 			go func() {
-				connected, fatal, err := New().clientConnection(ctx, testConnector{a}, peer, [16]byte{}, store, nic, gateway, connectionConfig(nic))
+				_, connected, fatal, err := New().clientConnection(ctx, testConnector{a}, peer, [16]byte{}, store, nic, gateway, connectionConfig(nic))
 				done <- connectionResult{connected, fatal, err}
 			}()
 			var s *session.Session
@@ -336,7 +340,7 @@ func TestClientRecordsNICChangeWhenSessionAlreadyEnded(t *testing.T) {
 	r := New()
 	done := make(chan connectionResult, 1)
 	go func() {
-		connected, fatal, err := r.clientConnection(ctx, testConnector{a}, peer, [16]byte{}, store, nic, gateway, cfg)
+		_, connected, fatal, err := r.clientConnection(ctx, testConnector{a}, peer, [16]byte{}, store, nic, gateway, cfg)
 		done <- connectionResult{connected, fatal, err}
 	}()
 	if err := <-server; err != nil {

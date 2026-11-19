@@ -74,7 +74,7 @@ func TestStartErrorsRequireMatchingCompletion(t *testing.T) {
 			v.SetState(state)
 			tt := ui.NewTester(v.Render, 1080, 1500)
 			if action == ActionConnect {
-				input(t, tt, "Invitation code", "test-only-code")
+				input(t, tt, "Invite or address:port and code", "test-only-code")
 			}
 			label := actionName(action)
 			click(t, tt, label)
@@ -96,6 +96,13 @@ func TestStartErrorsRequireMatchingCompletion(t *testing.T) {
 			}
 			v.Complete(action)
 			tt.Frame()
+			if action == ActionConnect {
+				click(t, tt, label)
+				if calls != 1 || v.invitation != "" {
+					t.Fatal("the previous secret was retained after failed admission")
+				}
+				input(t, tt, "Invite or address:port and code", "test-only-code")
+			}
 			click(t, tt, label)
 			if calls != 2 {
 				t.Fatal("failed start was not retryable after its completion")

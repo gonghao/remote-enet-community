@@ -276,6 +276,34 @@ func Pipe(ctx context.Context, a transport.Stream, b net.Conn, st *Stats) error
 
 ---
 
+## R2. 直连数字配对（2026-11-19 增补）
+
+设计与安全论证见 [PAIRING](PAIRING.md)。以下只记录跨包接口，实现细节以代码为准。
+
+### `internal/pairing/cpace`（新增）
+
+CPace-ristretto255-SHA512，固定草案 -21，套件标识 `cpace21-r255-sha512-ir`。`Binding` 携带内层 TLS exporter、Client / Operator 完整指纹和双方原始 Hello 帧的 SHA-256，任一为零即拒绝。`Start` / `Respond` / `Initiator.Confirm` / `Initiator.Verify` / `Responder.VerifyAndConfirm` 的状态都只能用一次。`Reason` 是跨包共享的拒绝原因枚举。
+
+### `internal/pairing`（新增）
+
+`NewManager(Config) *Manager`：每个 Operator 监听一个，口令只存在于内存。`Issue` / `Status` / `Display(generation)` / `Revoke(ctx, generation)` / `Begin(ctx)` / `Close`。`Attempt` 在包内持有口令并完成 CPace 响应，状态为 attempting → committing → redeemed / revoked；`Commit(save)` 是成功授权的线性化点，save 在锁外使用独立的有界 context。`Status` 不含口令。
+
+### 既有包的新增接口
+
+| 包 | 新增 |
+|---|---|
+| `internal/trust` | `Store.Remember(ctx, fp)`：设置 Trusted，文件格式仍为版本 1 |
+| `internal/identity` | `ErrFingerprintMismatch`，由 `hub`、`secure` 包装返回 |
+| `internal/hub` | `ConnectBootstrap(ctx, addr, local) (net.Conn, identity.Fingerprint, error)`：在同一条外层连接上读取 H 并自拨；`Connect` 仍拒绝零指纹。`SetupLimits` 限制未认证 setup 的并发与速率 |
+| `internal/secure` | 内层握手后导出 `EXPORTER-renet-pair-direct-v1`，session 提供 `PairingExporter() [32]byte` |
+| `internal/transport/hub` | `New` 返回 `*Connector`，新增 `DialDirectPair(ctx, addr)`；包装后的 session 保留 `PairingExporter` |
+| `internal/proto` | `PairShareA`=11、`PairShareB`=12、`PairConfirmA`=13、`PairConfirmB`=14，只能用 `ReadPair` 严格解码；Hello 能力 `pair-direct/1` |
+| `internal/session` | `Options.DigitalCode` / `DigitalManager`（`DigitalResponder`）/ `LocalFP` / `Remember`；`(*Session).PairingOutcome()` 区分 `Legacy` 与 `DigitalPaired`。数字模式下 `PairResult(true)` 视为协议错误 |
+| `internal/invite` | `ParseInput` 区分 `Raw` / `Direct` / `Center`；`ParseAddress`；错误为固定文案，不含输入 |
+| `internal/app` | `ClientConfig.DirectPair`、`ClientHooks.OnPaired`、`OperatorConfig.ShareAddress`；`Runtime.IssueNumericCode` / `NumericCodeStatus` / `NumericCodeDisplay` / `RevokeNumericCode`；`PairingErrorKind` |
+
+---
+
 ## 通用要求
 
 - 分支名 `wave1/<A|B|C|D>-<slug>`；只改分配给自己的目录 + `go.mod/go.sum`。

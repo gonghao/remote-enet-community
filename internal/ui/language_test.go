@@ -163,7 +163,7 @@ func TestClientFormControlsAlignAcrossLanguages(t *testing.T) {
 				tt := ui.NewTester(v.Render, clientMinWidth, clientMinHeight)
 				tt.SetZoom(zoom)
 				adapter, hasAdapter := tt.Access(v.tr("Adapter selection"))
-				invitation, hasInvitation := tt.AccessByRole(ui.RoleTextField, v.tr("Invitation code"))
+				invitation, hasInvitation := tt.AccessByRole(ui.RoleTextField, v.tr("Invite or address:port and code"))
 				if !hasAdapter || !hasInvitation || adapter.Bounds.W <= 0 || invitation.Bounds.W <= 0 {
 					t.Fatal("adapter selection or invitation field is missing")
 				}

@@ -75,7 +75,7 @@ func assertRoleControls(t *testing.T, tt *ui.Tester, role string) {
 	if role == settings.RoleClient {
 		absent = append(absent, "Start operator", "Generate invitation", "Copy invitation", "Generated invitation", "Public endpoint", "Exclusive diagnostic tool access")
 	} else {
-		absent = append(absent, "Connect client", "Invitation code", "Adapter selection", "Refresh adapters")
+		absent = append(absent, "Connect client", "Invite or address:port and code", "Adapter selection", "Refresh adapters")
 	}
 	for _, label := range absent {
 		if _, found := tt.Find(label); found {
@@ -97,7 +97,7 @@ func TestDashboardPrimaryControlsAreVisible(t *testing.T) {
 				}
 				v.SetState(state)
 				width, height := clientWidth, clientHeight
-				labels := []string{"Connect client", "Stop runtime", "Invitation code", "Adapter selection", "Refresh adapters", "Settings", "Log"}
+				labels := []string{"Connect client", "Stop runtime", "Invite or address:port and code", "Adapter selection", "Refresh adapters", "Settings", "Log"}
 				if role == settings.RoleOperator {
 					width, height = 1080, 760
 					labels = []string{"Start operator", "Stop runtime", "Generate invitation", "Copy invitation", "Test connection", "Settings", "Log"}
@@ -190,7 +190,7 @@ func TestClientSettingsPreserveInvitationAndEdits(t *testing.T) {
 	cfg.Client.Peer = (identity.Fingerprint{1}).String()
 	v := New(cfg, Actions{Save: func(c settings.Config) { saved = c }})
 	tt := ui.NewTester(v.Render, clientWidth, clientHeight)
-	input(t, tt, "Invitation code", "test-only-paste")
+	input(t, tt, "Invite or address:port and code", "test-only-paste")
 	openSettings(t, tt)
 	if !tt.HasText("Remembered peer") || !tt.HasText((identity.Fingerprint{1}).Short()) {
 		t.Fatal("Settings did not show the remembered peer")

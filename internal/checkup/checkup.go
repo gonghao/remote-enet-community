@@ -59,6 +59,15 @@ type Input struct {
 	Permission netpriv.Status
 }
 
+// Direct-input results carry only syntax status across the checkup boundary.
+const (
+	DirectInputValid           = "direct_input_valid"
+	DirectInputInvalidHost     = "direct_input_invalid_host"
+	DirectInputInvalidPort     = "direct_input_invalid_port"
+	DirectInputInvalidCode     = "direct_input_invalid_code"
+	DirectInputAddressRequired = "direct_input_address_required"
+)
+
 type backend struct {
 	interfaces func() ([]carside.NIC, error)
 	lookup     func(context.Context, string) ([]netip.Addr, error)
@@ -103,7 +112,9 @@ func run(ctx context.Context, in Input, b backend) Report {
 		}
 		return Pass, "settings_valid"
 	})
-	if len(r.Findings) > 0 && r.Findings[0].Status != Failed {
+	if status, ok := directInputStatus(in.PeerCode); in.Config.Role == settings.RoleClient && ok {
+		add("peer_configuration", 0, func() (Status, string) { return status, in.PeerCode })
+	} else if len(r.Findings) > 0 && r.Findings[0].Status != Failed {
 		var nics []carside.NIC
 		var interfaceErr error
 		add("interfaces", 0, func() (Status, string) {
@@ -261,6 +272,19 @@ func run(ctx context.Context, in Input, b backend) Report {
 	r.TimedOut = errors.Is(ctx.Err(), context.DeadlineExceeded)
 	r.Complete = ctx.Err() == nil
 	return r
+}
+
+func directInputStatus(code string) (Status, bool) {
+	switch code {
+	case DirectInputValid:
+		return Pass, true
+	case DirectInputInvalidHost, DirectInputInvalidPort, DirectInputInvalidCode:
+		return Failed, true
+	case DirectInputAddressRequired:
+		return Warning, true
+	default:
+		return "", false
+	}
 }
 
 func peerCode(code string) bool {

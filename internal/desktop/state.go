@@ -11,6 +11,7 @@ import (
 
 	"remote-enet/internal/app"
 	"remote-enet/internal/linktest"
+	"remote-enet/internal/locales"
 )
 
 const maxEvents = 200
@@ -28,8 +29,13 @@ func (c *Controller) failure(message string, err error) {
 // Error objects and arbitrary error text never enter the operation history.
 // Raw app diagnostics remain available in Runtime, with invitation codes scrubbed.
 func (c *Controller) failureLocked(message string, err error) {
+	c.setFailureLocked(message, err, "")
+}
+
+func (c *Controller) setFailureLocked(message string, err error, pairingHint string) {
 	c.state.Notice = ""
 	c.state.Error = message
+	c.state.PairingHint = pairingHint
 	if errors.Is(err, ErrBusy) || errors.Is(err, linktest.ErrBusy) {
 		c.state.Error = "Operation busy."
 	} else if errors.Is(err, context.DeadlineExceeded) {
@@ -43,6 +49,7 @@ func (c *Controller) failureLocked(message string, err error) {
 
 func (c *Controller) successLocked(message string) {
 	c.state.Notice, c.state.Error = message, ""
+	c.state.PairingHint = ""
 	c.eventLocked(message)
 	c.publishLocked()
 }
@@ -108,6 +115,9 @@ func displayText(value string) string {
 // The controller never copies an app error or remote log into its own Events.
 func displayRuntime(s app.Snapshot) app.Snapshot {
 	s = cloneRuntime(s)
+	if message := locales.PairingMessage(s.LastError); message != "" {
+		s.LastError = message
+	}
 	s.LastError, s.VIN, s.NIC.Name = displayText(s.LastError), displayText(s.VIN), displayText(s.NIC.Name)
 	s.Direct.Adapter, s.Direct.LastError = displayText(s.Direct.Adapter), displayText(s.Direct.LastError)
 	s.Path.LocalAddr, s.Path.RemoteAddr, s.Path.Via = displayText(s.Path.LocalAddr), displayText(s.Path.RemoteAddr), displayText(s.Path.Via)

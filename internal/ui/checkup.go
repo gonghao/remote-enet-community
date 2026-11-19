@@ -158,6 +158,16 @@ func checkHint(code, role string) string {
 		return "The saved peer could not be read. Retry with a current invitation."
 	case "invite_invalid":
 		return "The invitation is invalid or expired. Request a new invitation."
+	case checkup.DirectInputValid:
+		return "Direct address and code format are valid."
+	case checkup.DirectInputInvalidHost:
+		return "Invalid host"
+	case checkup.DirectInputInvalidPort:
+		return "Invalid port"
+	case checkup.DirectInputInvalidCode:
+		return "Enter eight digits"
+	case checkup.DirectInputAddressRequired:
+		return "Enter the direct address and port"
 	case "endpoint_invalid":
 		return "The endpoint is invalid. Check the saved endpoint or request a new invitation."
 	case "literal_address":

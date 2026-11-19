@@ -7,6 +7,7 @@ import (
 
 	"remote-enet/internal/brand"
 	"remote-enet/internal/identity"
+	"remote-enet/internal/locales"
 	"remote-enet/internal/settings"
 )
 
@@ -159,14 +160,15 @@ func (v *View) pageTitle(c *ui.Context, title, subtitle string) {
 }
 
 func (v *View) messages(c *ui.Context) {
+	errText := v.tr(v.state.Error)
 	if v.state.Error != "" {
-		v.banner(c.Key("error"), "Action failed", v.tr(v.state.Error), c.Theme().Danger, errorSurface, ui.RoleAlert)
+		v.banner(c.Key("error"), "Action failed", errText, c.Theme().Danger, errorSurface, ui.RoleAlert)
 	}
 	if v.state.Notice != "" {
 		v.banner(c.Key("notice"), "Update", v.tr(v.state.Notice), blue, infoSurface, ui.RoleStatus)
 	}
-	if v.state.Runtime.LastError != "" && v.state.Runtime.LastError != v.state.Error {
-		v.banner(c.Key("runtime-error"), "Runtime message", v.state.Runtime.LastError, amber, warningSurface, ui.RoleStatus)
+	if runtimeError := locales.RuntimeErrorText(v.language, v.state.Runtime.LastError); runtimeError != "" && runtimeError != errText {
+		v.banner(c.Key("runtime-error"), "Runtime message", runtimeError, amber, warningSurface, ui.RoleStatus)
 	}
 }
 
@@ -191,7 +193,9 @@ func (v *View) startControls(c *ui.Context) {
 			}
 			if ui.PrimaryButton(c.Key("connect"), v.tr(label)).Label(v.tr("Connect client")).Grow(1).Height(height).Disabled(!v.canConnect()).Clicked() {
 				v.connecting = true
-				v.actions.Connect(strings.TrimSpace(v.invitation))
+				input := strings.TrimSpace(v.invitation)
+				v.clearPairingInput()
+				v.actions.Connect(input)
 			}
 		} else {
 			label := "Start listening"
@@ -212,6 +216,7 @@ func (v *View) startControls(c *ui.Context) {
 		}
 		if ui.Button(c.Key("stop"), v.tr(label)).Label(v.tr("Stop runtime")).Grow(1).Height(height).TextColor(c.Theme().Danger).Disabled(!v.canStop()).Clicked() {
 			v.stopping = true
+			v.ClearPairingSecrets()
 			v.actions.Stop()
 		}
 	})
@@ -226,9 +231,9 @@ func (v *View) startControls(c *ui.Context) {
 	case v.dirty():
 		status = "Unsaved changes · open Settings and save before starting."
 	case client && strings.TrimSpace(v.invitation) == "":
-		status = "Leave the invitation empty to use the remembered peer."
+		status = "Leave the pairing input empty to use the remembered peer."
 		if v.saved.Client.Peer == "" {
-			status = "Paste an invitation from your operator to connect."
+			return
 		}
 	case v.role == settings.RoleOperator && (v.saved.Operator.Endpoint == "" || v.saved.Operator.Bind == ""):
 		status = "Open Settings to save a public endpoint and presentation IPv4."

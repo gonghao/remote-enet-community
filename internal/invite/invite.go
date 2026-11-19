@@ -97,7 +97,7 @@ func DecodeAt(s string, now time.Time) (Invite, error) {
 	}
 	i.ExpiresAt = time.Unix(expiry, 0).UTC()
 	if !now.Before(i.ExpiresAt) {
-		return Invite{}, fmt.Errorf("invite: expired")
+		return Invite{}, ErrInviteExpired
 	}
 	for range int(count) {
 		var e transport.Endpoint

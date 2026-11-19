@@ -246,3 +246,38 @@ func TestFailedTransactionDoesNotPersistTrust(t *testing.T) {
 		t.Fatalf("failed transaction persisted trust: %t %v", ok, err)
 	}
 }
+
+func TestRememberConcurrentStoresPreserveVersionOne(t *testing.T) {
+	s := openStore(t)
+	other, err := Open(t.Context(), filepath.Dir(s.path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := s.Issue(t.Context(), time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := make(chan struct{})
+	done := make(chan error, 2)
+	for i, store := range []*Store{s, other} {
+		go func() { <-start; done <- store.Remember(t.Context(), identity.Fingerprint{byte(i + 1)}) }()
+	}
+	close(start)
+	for range 2 {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	st, err := s.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Version != 1 || len(st.Trusted) != 2 || st.Invites[tokenHash(token)] == 0 || len(st.Peers) != 0 {
+		t.Fatal("invalid version 1 state after remember")
+	}
+	for _, peer := range []identity.Fingerprint{{1}, {2}} {
+		if !st.Trusted[peer.String()] {
+			t.Fatal("lost concurrent update")
+		}
+	}
+}

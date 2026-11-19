@@ -17,6 +17,11 @@ func TestCheckAttemptsEveryEntryInOrder(t *testing.T) {
 	requests := make(chan string, 4)
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests <- r.URL.Path
+		if got := r.Header.Get("Renet-Client"); got != "operator/1.2.3" {
+			t.Errorf("Renet-Client on %s = %q, want operator/1.2.3", r.URL.Path, got)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 		switch r.URL.Path {
 		case "/primary/v1/meta":
 			_, _ = io.WriteString(w, validMeta)
@@ -36,7 +41,7 @@ func TestCheckAttemptsEveryEntryInOrder(t *testing.T) {
 	cfg := settings.Center{ID: "garage", API: []string{
 		server.URL + "/primary", server.URL + "/slow", server.URL + "/mismatch", server.URL + "/unavailable",
 	}}
-	got := check(t.Context(), server.Client(), cfg, 300*time.Millisecond)
+	got := check(t.Context(), server.Client(), cfg, "operator", "1.2.3", 300*time.Millisecond)
 	want := []EntryResult{
 		{Entry: cfg.API[0], Status: Verified},
 		{Entry: cfg.API[1], Status: Unreachable},
@@ -54,10 +59,10 @@ func TestCheckAttemptsEveryEntryInOrder(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if results := Check(ctx, cfg); len(results) != 0 {
+	if results := Check(ctx, cfg, "operator", "1.2.3"); len(results) != 0 {
 		t.Fatalf("canceled scan returned results: %v", results)
 	}
-	if results := Check(t.Context(), settings.Center{}); len(results) != 0 {
+	if results := Check(t.Context(), settings.Center{}, "operator", "1.2.3"); len(results) != 0 {
 		t.Fatalf("unconfigured scan returned results: %v", results)
 	}
 }

@@ -11,11 +11,23 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"remote-enet/internal/settings"
 )
 
 const maxMetaBody = 16 * 1024
 
 var centerIDPattern = regexp.MustCompile(`^[a-z0-9.-]{1,32}$`)
+
+const (
+	devVersion    = "0.0.0-dev"
+	versionNumber = `(?:0|[1-9][0-9]*)`
+	prereleaseID  = `(?:` + versionNumber + `|[0-9]*[A-Za-z-][0-9A-Za-z-]*)`
+	buildID       = `[0-9A-Za-z-]+`
+)
+
+var semverPattern = regexp.MustCompile(`^` + versionNumber + `\.` + versionNumber + `\.` + versionNumber +
+	`(?:-` + prereleaseID + `(?:\.` + prereleaseID + `)*)?(?:\+` + buildID + `(?:\.` + buildID + `)*)?$`)
 
 // Meta contains the public fields from /v1/meta. ServerTime is decoded from Unix seconds.
 type Meta struct {
@@ -42,9 +54,15 @@ func (e *HTTPError) Error() string {
 	return fmt.Sprintf("center: meta returned HTTP %d", e.StatusCode)
 }
 
-// FetchMeta accepts a prevalidated HTTPS entry and a client whose transport is
-// trusted to verify TLS and leave the request anonymous. The caller controls the deadline.
-func FetchMeta(ctx context.Context, client *http.Client, entry string) (Meta, error) {
+// FetchMeta requires a TLS-verifying transport without credentials and a client or operator role.
+// The caller controls the deadline. Non-SemVer builds advertise 0.0.0-dev.
+func FetchMeta(ctx context.Context, client *http.Client, entry, role, appVersion string) (Meta, error) {
+	if role != settings.RoleClient && role != settings.RoleOperator {
+		return Meta{}, fmt.Errorf("center: meta requires a client or operator role")
+	}
+	if !semverPattern.MatchString(appVersion) {
+		appVersion = devVersion
+	}
 	u, err := url.Parse(entry)
 	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil ||
 		u.ForceQuery || u.RawQuery != "" || strings.Contains(entry, "#") {
@@ -55,6 +73,7 @@ func FetchMeta(ctx context.Context, client *http.Client, entry string) (Meta, er
 		return Meta{}, fmt.Errorf("center: build meta request: %w", err)
 	}
 	req.Header.Set("User-Agent", "Remote-ENET")
+	req.Header.Set("Renet-Client", role+"/"+appVersion)
 	probe := *client
 	probe.Jar = nil
 	probe.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }

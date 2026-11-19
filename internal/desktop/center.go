@@ -13,7 +13,7 @@ import (
 func (c *Controller) CheckCenter(ctx context.Context) (settings.Center, []center.EntryResult, error) {
 	c.mu.Lock()
 	ctx, finish, _, err := c.operationLocked(ctx, false)
-	cfg := c.state.Config.Center
+	role, cfg := c.state.Config.Role, c.state.Config.Center
 	cfg.API = slices.Clone(cfg.API)
 	c.mu.Unlock()
 	if err != nil {
@@ -21,6 +21,6 @@ func (c *Controller) CheckCenter(ctx context.Context) (settings.Center, []center
 	}
 	defer finish()
 
-	results := c.deps.checkCenter(ctx, cfg)
+	results := c.deps.checkCenter(ctx, cfg, role, c.opts.AppVersion)
 	return cfg, results, ctx.Err()
 }

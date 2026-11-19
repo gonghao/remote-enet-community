@@ -17,18 +17,30 @@ import (
 const validMeta = `{"center_id":"garage","api_versions":["v1"],"server_time":1795132800,"min_app_version":{"operator":"1.2.3","client":"1.2.4","hub":"1.2.5","future":true},"future":{"a":1}}`
 
 func TestFetchMetaAnonymous(t *testing.T) {
+	cases := []struct{ role, version, want string }{
+		{"client", "1.2.3", "client/1.2.3"},
+		{"operator", "0.1.0-preview.wave14.3-worktree+001", "operator/0.1.0-preview.wave14.3-worktree+001"},
+		{"operator", "dev", "operator/0.0.0-dev"},
+		{"client", "", "client/0.0.0-dev"},
+		{"client", "v1.2.3", "client/0.0.0-dev"},
+		{"client", "01.2.3", "client/0.0.0-dev"},
+		{"client", "1.2.3-01", "client/0.0.0-dev"},
+		{"client", "1.2.3+private data", "client/0.0.0-dev"},
+	}
+	headers := make(chan []string, len(cases))
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.EscapedPath() != "/edge%2Fapi/v1/meta" || r.ContentLength != 0 {
 			t.Errorf("unexpected request: %s %s, length %d", r.Method, r.URL, r.ContentLength)
 		}
 		for name := range r.Header {
-			if name != "User-Agent" && name != "Accept-Encoding" {
+			if name != "User-Agent" && name != "Accept-Encoding" && name != "Renet-Client" {
 				t.Errorf("unexpected request header: %s", name)
 			}
 		}
 		if r.UserAgent() != "Remote-ENET" {
 			t.Errorf("unexpected user agent: %q", r.UserAgent())
 		}
+		headers <- r.Header.Values("Renet-Client")
 		http.SetCookie(w, &http.Cookie{Name: "issued", Value: "ignored"})
 		_, _ = io.WriteString(w, validMeta)
 	}))
@@ -44,10 +56,13 @@ func TestFetchMetaAnonymous(t *testing.T) {
 	jar.SetCookies(base, []*http.Cookie{{Name: "session", Value: "private", Path: "/"}})
 	client := server.Client()
 	client.Jar = jar
-	for range 2 {
-		meta, err := FetchMeta(t.Context(), client, server.URL+"/edge%2Fapi/")
+	for _, tc := range cases {
+		meta, err := FetchMeta(t.Context(), client, server.URL+"/edge%2Fapi/", tc.role, tc.version)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if got := <-headers; !slices.Equal(got, []string{tc.want}) {
+			t.Errorf("Renet-Client for %q = %q, want %q", tc.version, got, tc.want)
 		}
 		if meta.CenterID != "garage" || !slices.Equal(meta.APIVersions, []string{"v1"}) ||
 			meta.ServerTime != time.Unix(1795132800, 0).UTC() ||
@@ -78,7 +93,7 @@ func TestFetchMetaResponse(t *testing.T) {
 				_, _ = io.WriteString(w, tc.body)
 			}))
 			defer server.Close()
-			_, err := FetchMeta(t.Context(), server.Client(), server.URL)
+			_, err := FetchMeta(t.Context(), server.Client(), server.URL, "client", "dev")
 			switch {
 			case tc.status != http.StatusOK:
 				var status *HTTPError
@@ -121,14 +136,17 @@ func TestFetchMetaRejectsRedirectAndHTTP(t *testing.T) {
 		return nil
 	}
 	for _, prefix := range []string{"/same", "/other"} {
-		_, err := FetchMeta(t.Context(), client, server.URL+prefix)
+		_, err := FetchMeta(t.Context(), client, server.URL+prefix, "client", "dev")
 		var status *HTTPError
 		if !errors.As(err, &status) || status.StatusCode != http.StatusFound {
 			t.Errorf("%s: expected redirect error, got %v", prefix, err)
 		}
 	}
-	if _, err := FetchMeta(t.Context(), client, "http:"+strings.TrimPrefix(server.URL, "https:")); err == nil || !strings.Contains(err.Error(), "invalid HTTPS entry") {
+	if _, err := FetchMeta(t.Context(), client, "http:"+strings.TrimPrefix(server.URL, "https:"), "client", "dev"); err == nil || !strings.Contains(err.Error(), "invalid HTTPS entry") {
 		t.Fatalf("expected HTTPS validation error, got %v", err)
+	}
+	if _, err := FetchMeta(t.Context(), client, server.URL, "hub", "1.2.3"); err == nil || !strings.Contains(err.Error(), "requires a client or operator role") {
+		t.Fatalf("expected role validation error, got %v", err)
 	}
 }
 
@@ -161,7 +179,7 @@ func TestMetaRejectsInvalidRequiredFields(t *testing.T) {
 				_, _ = io.WriteString(w, body)
 			}))
 			defer server.Close()
-			if _, err := FetchMeta(t.Context(), server.Client(), server.URL); err == nil {
+			if _, err := FetchMeta(t.Context(), server.Client(), server.URL, "client", "dev"); err == nil {
 				t.Fatal("accepted invalid meta")
 			}
 		})

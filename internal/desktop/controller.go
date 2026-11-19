@@ -37,6 +37,8 @@ type Options struct {
 	ConfigPath, StateDir string
 	// FixedRole is client or operator; empty preserves generic behavior.
 	FixedRole string
+	// AppVersion is the executable's build version used for center requests.
+	AppVersion string
 	// DirectFactory confines platform authorization to an explicit Operator action.
 	DirectFactory app.DirectFactory
 	// NetworkStatus only inspects capabilities; it must never request authorization.
@@ -84,7 +86,7 @@ type dependencies struct {
 	pairedPeer  func(context.Context, string, transport.PeerInfo) error
 	readPeer    func(context.Context, string, identity.Fingerprint) (transport.PeerInfo, error)
 	checkup     func(context.Context, checkup.Input) checkup.Report
-	checkCenter func(context.Context, settings.Center) []center.EntryResult
+	checkCenter func(ctx context.Context, cfg settings.Center, role, appVersion string) []center.EntryResult
 }
 
 func production() dependencies {

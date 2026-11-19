@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -515,6 +516,177 @@ func TestSelfhostTransparentForwarding(t *testing.T) {
 	trusted, err := numericStore(t, f.operator.StateDir).Trusted(f.ctx, cs.Device)
 	if err != nil || !trusted {
 		t.Fatal("missing operator trust", err)
+	}
+}
+
+// impostorPolicy offers the impostor Hub's own pairing entry to anyone and
+// routes it to the relay device R, as a hostile Hub operator would.
+type impostorPolicy struct {
+	hub, relay identity.Fingerprint
+	until      time.Time
+	mu         sync.Mutex
+	entered    []identity.Fingerprint
+}
+
+func (p *impostorPolicy) Admit(dev identity.Fingerprint, req hub.Request, _ time.Time) (hub.Grant, error) {
+	switch {
+	case req.Role == hub.RoleDial && req.Target == p.hub && len(req.Token) == 0:
+		p.mu.Lock()
+		p.entered = append(p.entered, dev)
+		p.mu.Unlock()
+		return hub.Grant{PairingUntil: p.until}, nil
+	case req.Role == hub.RoleWait && dev == p.relay && req.Target.IsZero():
+		return hub.Grant{PairingUntil: p.until}, nil
+	}
+	return hub.Grant{}, errors.New("impostor: route not offered")
+}
+
+func (p *impostorPolicy) Valid(hub.Grant, identity.Fingerprint) bool { return true }
+
+func (p *impostorPolicy) PairingOperator() identity.Fingerprint { return p.relay }
+
+func (p *impostorPolicy) dials() []identity.Fingerprint {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]identity.Fingerprint(nil), p.entered...)
+}
+
+// relayToPairingEntry keeps the impostor wait silent until the Client's first
+// inner bytes arrive, then enters the real Hub's pairing entry as the relay
+// device and copies opaque bytes both ways. It returns the real Hub admission
+// result; copy errors are the expected end of the relay.
+func relayToPairingEntry(ctx context.Context, wait net.Conn, addr string, relay *identity.Local, hubFP identity.Fingerprint) error {
+	defer wait.Close()
+	stop := context.AfterFunc(ctx, func() { _ = wait.Close() })
+	defer stop()
+	first := make([]byte, 32*1024)
+	n, err := wait.Read(first)
+	if err != nil {
+		return fmt.Errorf("read first inner bytes: %w", err)
+	}
+	dial, err := hub.Connect(ctx, addr, relay, hubFP, hub.Request{Role: hub.RoleDial, Target: hubFP})
+	if err != nil {
+		return fmt.Errorf("enter real pairing entry: %w", err)
+	}
+	defer dial.Close()
+	stopDial := context.AfterFunc(ctx, func() { _ = dial.Close() })
+	defer stopDial()
+	if _, err := dial.Write(first[:n]); err != nil {
+		return nil
+	}
+	var copies sync.WaitGroup
+	copies.Go(func() {
+		_, _ = io.Copy(dial, wait)
+		_ = dial.Close()
+	})
+	_, _ = io.Copy(wait, dial)
+	_ = wait.Close()
+	copies.Wait()
+	return nil
+}
+
+// sessionEnds forwards the error of each operator session end record.
+type sessionEnds struct {
+	slog.Handler
+	errs chan<- error
+}
+
+func (h sessionEnds) Handle(ctx context.Context, r slog.Record) error {
+	if r.Message == "operator session ended" {
+		r.Attrs(func(a slog.Attr) bool {
+			if err, ok := a.Value.Any().(error); ok && a.Key == "error" {
+				select {
+				case h.errs <- err:
+				default:
+				}
+			}
+			return true
+		})
+	}
+	return h.Handler.Handle(ctx, r)
+}
+
+func (h sessionEnds) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return sessionEnds{h.Handler.WithAttrs(attrs), h.errs}
+}
+
+func (h sessionEnds) WithGroup(name string) slog.Handler {
+	return sessionEnds{h.Handler.WithGroup(name), h.errs}
+}
+
+// An impostor Hub H' terminates the Client's outer TLS and forwards the inner
+// bytes through the real Hub's pairing entry with its own relay device. Unlike
+// TestSelfhostTransparentForwarding, the outer identity seen by the Client is
+// H', so the hub_fp bound into the PAKE differs and both ends must refuse.
+func TestSelfhostImpostorHubFailsPairing(t *testing.T) {
+	f := newSelfhost(t)
+	ended := make(chan error, 4)
+	f.operator.Logger = slog.New(sessionEnds{f.operator.Logger.Handler(), ended})
+	op := f.operatorReady(t)
+	d := f.issue(t, op)
+	f.waiting(t, op)
+	realHub, operator := f.host.Fingerprint(), op.Snapshot().Device
+	impostor, relay := localIdentity(t), localIdentity(t)
+	policy := &impostorPolicy{hub: impostor.Fingerprint(), relay: relay.Fingerprint(), until: d.ExpiresAt}
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := hub.NewServer(hub.Options{Local: impostor, Policy: policy, Logger: f.operator.Logger})
+	runRuntime(t, f.ctx, func(ctx context.Context) error { return srv.Serve(ctx, ln) })
+	wait, err := hub.Connect(f.ctx, ln.Addr().String(), relay, impostor.Fingerprint(), hub.Request{Role: hub.RoleWait})
+	if err != nil {
+		t.Fatal(err)
+	}
+	relayed := make(chan error, 1)
+	var relaying sync.WaitGroup
+	relaying.Go(func() { relayed <- relayToPairingEntry(f.ctx, wait, f.cfg.Listen, relay, realHub) })
+	defer func() {
+		_ = wait.Close()
+		relaying.Wait()
+	}()
+
+	f.client.DirectPair.Address = ln.Addr().String()
+	c := f.fail(t, "confirmation")
+	device := c.Snapshot().Device
+	select {
+	case err := <-ended:
+		if !errors.Is(err, cpace.ReasonConfirmation) {
+			t.Fatal("operator confirmation", err)
+		}
+	case <-f.ctx.Done():
+		t.Fatal(f.ctx.Err())
+	}
+	select {
+	case err := <-relayed:
+		if err != nil {
+			t.Fatal("relay did not reach the real operator", err)
+		}
+	case <-f.ctx.Done():
+		t.Fatal(f.ctx.Err())
+	}
+	// The Client sent target = its verified outer fingerprint, so the impostor
+	// admitting its own pairing entry proves the Client saw H'. The real Hub
+	// routes its pairing entry only to the real Operator, whose code budget
+	// below proves it ran the PAKE: the inner peer O differs from H', so the
+	// Client bound pair-hub/1 to H' while the Operator bound its configured H.
+	if dials := policy.dials(); len(dials) != 1 || dials[0] != device {
+		t.Fatal("client did not enter the impostor pairing entry", dials)
+	}
+	if operator == impostor.Fingerprint() || realHub == impostor.Fingerprint() || f.operator.Hub.FP != realHub {
+		t.Fatal("fixture identities overlap")
+	}
+	if st := op.NumericCodeStatus(); st.Generation != d.Generation || st.AttemptsLeft != d.AttemptsLeft-1 || st.Redeemed {
+		t.Fatalf("unexpected failure budget: generation=%d remaining=%d redeemed=%v", st.Generation, st.AttemptsLeft, st.Redeemed)
+	}
+	trusted, err := numericStore(t, f.operator.StateDir).Trusted(f.ctx, device)
+	if err != nil || trusted {
+		t.Fatal("unexpected operator trust", err)
+	}
+	f.absent(t, operator)
+	f.absent(t, impostor.Fingerprint())
+	if _, err := os.Stat(filepath.Join(f.client.StateDir, "trust.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("failed pairing did not leave client store unwritten", err)
 	}
 }
 

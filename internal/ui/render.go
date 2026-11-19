@@ -161,21 +161,52 @@ func (v *View) pageTitle(c *ui.Context, title, subtitle string) {
 
 func (v *View) messages(c *ui.Context) {
 	errText := v.tr(v.state.Error)
-	if v.state.Error != "" {
-		v.banner(c.Key("error"), "Action failed", errText, c.Theme().Danger, errorSurface, ui.RoleAlert)
+	runtimeError := locales.RuntimeErrorText(v.language, v.state.Runtime.LastError)
+	updates := func() {
+		if errText != "" {
+			v.banner(c.Key("error"), "Action failed", errText, c.Theme().Danger, errorSurface, ui.RoleAlert)
+		}
+		if v.state.Notice != "" {
+			v.banner(c.Key("notice"), "Update", v.tr(v.state.Notice), blue, infoSurface, ui.RoleStatus)
+		}
 	}
-	if v.state.Notice != "" {
-		v.banner(c.Key("notice"), "Update", v.tr(v.state.Notice), blue, infoSurface, ui.RoleStatus)
+	runtimeMessage := func() {
+		if runtimeError != "" && runtimeError != errText {
+			v.banner(c.Key("runtime-error"), "Runtime message", runtimeError, amber, warningSurface, ui.RoleStatus)
+		}
 	}
-	if runtimeError := locales.RuntimeErrorText(v.language, v.state.Runtime.LastError); runtimeError != "" && runtimeError != errText {
-		v.banner(c.Key("runtime-error"), "Runtime message", runtimeError, amber, warningSurface, ui.RoleStatus)
+	if v.page == sessionPage {
+		// Operator has room to share a line and needs the vertical space for pairing at 150%.
+		if v.role == settings.RoleOperator {
+			ui.Row(c.Key("session-messages")).FillWidth().Height(16).Shrink(0).Gap(4).Children(func() {
+				updates()
+				runtimeMessage()
+			})
+			return
+		}
+		ui.Column(c.Key("session-messages")).FillWidth().Height(32).Shrink(0).Children(func() {
+			ui.Row(c.Key("updates")).FillWidth().Height(16).Shrink(0).Gap(4).Children(updates)
+			ui.Row(c.Key("runtime-message")).FillWidth().Height(16).Shrink(0).Children(runtimeMessage)
+		})
+		return
 	}
+	updates()
+	runtimeMessage()
 }
 
 func (v *View) banner(c *ui.Context, title, message string, text, fill ui.Color, role ui.Role) {
-	ui.Row(c).FillWidth().Padding(8, 12).Gap(8).Radius(0).Background(fill).TextColor(text).Role(role).Children(func() {
+	row := ui.Row(c).Radius(0).Background(fill).TextColor(text).Role(role)
+	if v.page == sessionPage {
+		row.Grow(1).Basis(0).MinWidth(0).Height(16).Padding(0, 8).Gap(4).AlignItems(ui.Center).Tooltip(message)
+	} else {
+		row.FillWidth().Padding(8, 12).Gap(8)
+	}
+	row.Children(func() {
 		ui.Text(c, v.tr(title)).Bold().FontSize(11).Shrink(0)
-		ui.Text(c, message).Grow(1).MinWidth(0).FontSize(11)
+		label := ui.Text(c, message).Grow(1).MinWidth(0).FontSize(11)
+		if v.page == sessionPage {
+			label.SingleLine().TruncateMiddle()
+		}
 	})
 }
 

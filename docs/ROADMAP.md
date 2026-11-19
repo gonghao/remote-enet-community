@@ -80,14 +80,12 @@
 
 2026-11-19 已完成：Client 会话结束原因改用 `context.Cause`、车端发现的部分发送失败补 warn 日志、`renet-tuncheck` 报告改为原子 0600 写入、Peer ID 默认显示短 ID。
 
+2026-11-19 另完成：Operator / Client 提示区固定高度，消息变化不再挤动下方控件；linktest 请求预算改为收齐请求后起算，并在 I/O 错误时核对本地截止时间，修正超时被判为中断；L3 出口队列按一个最大 TCP 窗口及其 ACK 定容（原误用最大连接数，默认仅 64 包，大流量时尾部丢包）；Operator 抓取测试等待录制完成再停止。三个偶发失败修复前后：8/400 → 0/400、2/15 → 0/40（-race）、3/200 → 0/200（-race）。
+
 | 项目 | 说明 |
 |---|---|
 | 设备名 | Peer ID 已改为默认显示短 ID、详情页可复制完整 ID；设备名目前协议里没有，需在握手中新增字段，属于协议变更，单独设计 |
-| Operator 顶部提示条引起布局跳动 | 运行信息条出现或消失时，下方控件整体上下移动；2026-11-19 台架上自动点击因此误点「生成邀请码」。考虑为提示区保留固定高度 |
-| `TestL3FaultBulk/8MiB` 在 -race 下偶发读超时 | 2026-11-19 两次全量 race 首轮各超时一次，单独重跑通过；需确认是 race 开销下的时限过紧还是真实丢包恢复问题 |
 | settings 可选加固（Wave 5 审查，当时有意未做） | 路径以分隔符结尾时留下空目录；rename 后未 fsync 父目录；监听地址接受 `[]:47000`；`NICName` 未拒绝 U+202E 等 Cf 类控制字符；缺字段报错不指明字段 |
-| linktest 超时竞争 | `TestPublicRuntimesReconnectAndReleasePresenter` 在 CI 上偶发失败（2026-11-19，PR #1 两次，重跑通过）。用 1ms 超时测连接测试时，服务端预算从 `Serve` 入口起算，可能先于客户端到期并关闭流，客户端读到 EOF 时自身 ctx 尚未超时，结果被归为 `ErrTransport`，显示 Interrupted 而非 TimedOut。R2 前已存在：以 `-cpu 1,2` 复测，1d3dd1f 为 1/200、8dd645b 为 4/200、e6e1557 为 1/200。需区分测试时序与结果分类问题。可考虑服务端预算从收到请求起算或加少量余量，改动涉及 linktest 预算语义，单独设计 |
-| operator 抓取测试偶发失败 | `TestCapturePresenterLifecycleAndDiscovery` 在 CI race 任务偶发失败一次（2026-11-19，`capture_test.go:148`，`starts=4` 且 frames 计数不符），重跑通过；需确认断言是否依赖未同步的时序 |
 
 ## 研究项（未排期）
 

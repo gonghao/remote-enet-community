@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -116,6 +117,73 @@ func TestDashboardPrimaryControlsAreVisible(t *testing.T) {
 				}
 				if !tt.HasText("VEHICLE") || !tt.HasText("CONNECTION") || !tt.HasText("SESSION") {
 					t.Fatal("dashboard did not expose all three information groups")
+				}
+			})
+		}
+	}
+}
+
+func TestSessionControlsStayInPlaceWhenMessagesChange(t *testing.T) {
+	for _, role := range []string{settings.RoleClient, settings.RoleOperator} {
+		for _, zoom := range []float32{1, 1.5} {
+			t.Run(fmt.Sprintf("%s/%.1f", role, zoom), func(t *testing.T) {
+				cfg := operatorConfig()
+				cfg.Role = role
+				width, height := clientMinWidth, clientMinHeight
+				labels := []string{"Adapter selection", "Invite or address:port and code", "Connect client"}
+				if role == settings.RoleOperator {
+					width, height = operatorMinWidth, operatorMinHeight
+					labels = []string{"Start operator"}
+					if zoom == 1 {
+						labels = append(labels, "Generate numeric code", "Generate invitation")
+					}
+				}
+				v := New(cfg, Actions{})
+				tt := ui.NewTester(v.Render, width, height)
+				tt.SetZoom(zoom)
+				positions := make([]float32, len(labels))
+				for i, label := range labels {
+					bounds, ok := tt.Find(label)
+					if !ok || bounds.Y < 0 || bounds.H <= 0 || bounds.Y+bounds.H > float32(height) {
+						t.Fatalf("control %q is outside the minimum window: %+v", label, bounds)
+					}
+					positions[i] = bounds.Y
+				}
+				const notice, runtimeMessage = "Interfaces refreshed.", "Client disconnected."
+				for _, sample := range []struct {
+					name, notice, runtimeMessage, actionError string
+				}{
+					{name: "notice only", notice: notice},
+					{name: "runtime only", runtimeMessage: runtimeMessage},
+					{name: "both messages", notice: notice, runtimeMessage: runtimeMessage},
+					{name: "long messages and error", notice: strings.Repeat(notice+" ", 20),
+						runtimeMessage: strings.Repeat(runtimeMessage+" ", 20), actionError: "Action failed."},
+					{name: "cleared"},
+				} {
+					v.SetState(State{Notice: sample.notice, Error: sample.actionError,
+						Runtime: app.Snapshot{LastError: sample.runtimeMessage}})
+					tt.Frame()
+					for i, label := range labels {
+						bounds, ok := tt.Find(label)
+						if !ok || bounds.Y != positions[i] {
+							t.Errorf("%s: control %q moved from y=%v to y=%v (found=%t)", sample.name, label, positions[i], bounds.Y, ok)
+						}
+					}
+					for _, title := range []struct {
+						label, message string
+					}{{"Update", sample.notice}, {"Runtime message", sample.runtimeMessage}, {"Action failed", sample.actionError}} {
+						bounds, found := tt.Find(title.label)
+						if visible := found && bounds.W > 0 && bounds.H > 0; visible != (title.message != "") {
+							t.Errorf("%s: banner %q visible = %t", sample.name, title.label, visible)
+						}
+						if found && sample.name == "long messages and error" && title.label != "Action failed" {
+							tt.Move(bounds.X+bounds.W/2, bounds.Y+bounds.H/2)
+							tt.Advance(time.Second)
+							if _, shown := tt.AccessByRole(ui.RoleTooltip, title.message); !shown {
+								t.Errorf("banner %q did not show its full message on hover", title.label)
+							}
+						}
+					}
 				}
 			})
 		}

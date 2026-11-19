@@ -125,19 +125,6 @@ func (a *Connector) DialBootstrap(ctx context.Context, addr string) (transport.S
 	return s, h, nil
 }
 
-// DialDirectPair binds the inner identity to the hub reached by this self-dial.
-func (a *Connector) DialDirectPair(ctx context.Context, addr string) (transport.Session, error) {
-	if a.isClosed() {
-		return nil, net.ErrClosed
-	}
-	conn, hubID, err := router.ConnectBootstrap(ctx, addr, a.o.Local)
-	if err != nil {
-		return nil, err
-	}
-	p := transport.PathInfo{Kind: transport.PathDirect, Hub: hubID, LocalAddr: conn.LocalAddr().String(), RemoteAddr: conn.RemoteAddr().String()}
-	return a.wrap(ctx, conn, true, hubID, p, nil)
-}
-
 func (a *Connector) Dial(ctx context.Context, peer transport.PeerInfo) (transport.Session, error) {
 	if a.isClosed() {
 		return nil, net.ErrClosed

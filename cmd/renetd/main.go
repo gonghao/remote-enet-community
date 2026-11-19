@@ -23,15 +23,17 @@ func main() {
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: renetd invite|operator|client [options]; use --help")
+		return fmt.Errorf("usage: renetd invite|issuer|operator|client [options]; use --help")
 	}
 	if args[0] == "--help" || args[0] == "-h" || args[0] == "help" {
-		_, err := fmt.Fprintln(stdout, "Usage: renetd invite|operator|client [options]\nUse renetd <command> --help for command options.")
+		_, err := fmt.Fprintln(stdout, "Usage: renetd invite|issuer|operator|client [options]\nUse renetd <command> --help for command options.")
 		return err
 	}
 	logger := slog.New(slog.NewTextHandler(stderr, nil))
 	var err error
 	switch args[0] {
+	case "issuer":
+		err = runIssuer(ctx, args[1:], stdout, stderr)
 	case "invite":
 		err = runInvite(ctx, args[1:], stdout, stderr)
 	case "operator":

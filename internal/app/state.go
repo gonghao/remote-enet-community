@@ -8,7 +8,10 @@ import (
 	"net"
 	"net/netip"
 	"sync"
+	"syscall"
 	"time"
+
+	"github.com/hashicorp/yamux"
 
 	"remote-enet/internal/carside"
 	"remote-enet/internal/exclusive"
@@ -54,6 +57,7 @@ type Snapshot struct {
 	Generation uint64
 	LastError  string
 	NextRetry  time.Time
+	HubWaiting bool // The standalone Hub acknowledged the current idle wait.
 	RTT        time.Duration
 	RTTValid   bool
 	Diagnostic netip.AddrPort
@@ -197,6 +201,7 @@ func (r *Runtime) begin(role session.Role) error {
 func (r *Runtime) finish(err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.state.HubWaiting = false
 	r.state.Phase, r.state.NextRetry = PhaseStopped, time.Time{}
 	if err != nil && !errors.Is(err, context.Canceled) {
 		r.state.LastError = protocolErrorMessage(err)
@@ -233,7 +238,8 @@ func sessionEndMessage(role session.Role, err error) string {
 	}
 	switch {
 	case err == nil, errors.Is(err, context.Canceled), errors.Is(err, io.EOF),
-		errors.Is(err, io.ErrUnexpectedEOF), errors.Is(err, io.ErrClosedPipe), errors.Is(err, net.ErrClosed):
+		errors.Is(err, io.ErrUnexpectedEOF), errors.Is(err, io.ErrClosedPipe), errors.Is(err, net.ErrClosed),
+		errors.Is(err, syscall.ECONNRESET), errors.Is(err, syscall.EPIPE), errors.Is(err, yamux.ErrSessionShutdown):
 		if role == session.RoleClient {
 			return "Operator disconnected."
 		}

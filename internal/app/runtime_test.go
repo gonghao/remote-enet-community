@@ -9,8 +9,11 @@ import (
 	"net"
 	"net/netip"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
+
+	"github.com/hashicorp/yamux"
 
 	"remote-enet/internal/carside"
 	"remote-enet/internal/exclusive"
@@ -313,6 +316,8 @@ func TestSessionEndMessage(t *testing.T) {
 		client   string
 	}{
 		{io.EOF, "Client disconnected.", "Operator disconnected."},
+		{yamux.ErrSessionShutdown, "Client disconnected.", "Operator disconnected."},
+		{syscall.ECONNRESET, "Client disconnected.", "Operator disconnected."},
 		{net.ErrClosed, "Client disconnected.", "Operator disconnected."},
 		{context.Canceled, "Client disconnected.", "Operator disconnected."},
 		{session.ErrPairing, "Pairing rejected.", "Pairing rejected."},

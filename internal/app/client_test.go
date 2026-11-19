@@ -141,7 +141,7 @@ func connectedGeneration(t *testing.T, ch <-chan Snapshot, gen uint64) Snapshot 
 
 type dialFunc func(context.Context, transport.PeerInfo) (transport.Session, error)
 
-func (dialFunc) DialDirectPair(context.Context, string) (transport.Session, error) {
+func (dialFunc) DialBootstrap(context.Context, string) (transport.Session, identity.Fingerprint, error) {
 	panic("unexpected bootstrap dial on a pinned connection")
 }
 

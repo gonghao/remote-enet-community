@@ -18,6 +18,8 @@ import (
 func runOperator(ctx context.Context, args []string, stderr io.Writer, logger *slog.Logger) (runErr error) {
 	fs := flags("operator", stderr)
 	stateDir := fs.String("state-dir", "", "operator state directory (required)")
+	hubFlags := addHubFlags(fs)
+	share := fs.String("share-address", "", "address shared with clients")
 	listen := fs.String("listen", "0.0.0.0:47000", "embedded hub listen host:port")
 	bind := fs.String("bind", "", "local IPv4 address presented to diagnostic tools (required)")
 	diagPort := fs.Int("diag-port", 6801, "local diagnostic TCP port; 0 chooses an ephemeral port")
@@ -43,13 +45,21 @@ func runOperator(ctx context.Context, args []string, stderr io.Writer, logger *s
 	if err != nil {
 		return err
 	}
-	_, listenPort, err := net.SplitHostPort(*listen)
+	hub, err := hubFlags.config(fs, "listen")
 	if err != nil {
-		return fmt.Errorf("--listen must be host:port")
+		return err
 	}
-	n, err := strconv.Atoi(listenPort)
-	if err != nil || port(n, "--listen port", false) != nil {
-		return fmt.Errorf("--listen port must be in 1..65535")
+	if hub != nil {
+		*listen = ""
+	} else {
+		_, listenPort, err := net.SplitHostPort(*listen)
+		if err != nil {
+			return fmt.Errorf("--listen must be host:port")
+		}
+		n, err := strconv.Atoi(listenPort)
+		if err != nil || port(n, "--listen port", false) != nil {
+			return fmt.Errorf("--listen port must be in 1..65535")
+		}
 	}
 	for _, entry := range []struct {
 		value int
@@ -77,7 +87,7 @@ func runOperator(ctx context.Context, args []string, stderr io.Writer, logger *s
 	r := app.New()
 	return runRuntime(ctx, r, func(ctx context.Context) error {
 		return r.RunOperator(ctx, app.OperatorConfig{
-			StateDir: *stateDir, Listen: *listen, Bind: bindAddr, Exclusive: *exclusive, AllowLinkTest: opts.allowLinkTest,
+			StateDir: *stateDir, Listen: *listen, Hub: hub, ShareAddress: *share, Bind: bindAddr, Exclusive: *exclusive, AllowLinkTest: opts.allowLinkTest,
 			AutoMGU:              *autoMGU,
 			AutoEVO:              *autoEVO,
 			Capture:              capture,

@@ -334,7 +334,7 @@ func dialNumeric(t *testing.T, ctx context.Context, addr string, id *identity.Lo
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts, err := c.DialDirectPair(ctx, addr)
+	ts, _, err := c.DialBootstrap(ctx, addr)
 	if err != nil {
 		t.Fatal(err)
 	}

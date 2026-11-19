@@ -180,7 +180,15 @@ func (c *Controller) runtimeConfigs(cfg settings.Config, code string) (app.Clien
 			return client, op, pairing, fmt.Errorf("desktop: invitation or saved paired peer required")
 		}
 	} else {
-		if cfg.Operator.Endpoint == "" || cfg.Operator.Bind == "" {
+		share := cfg.Operator.Endpoint
+		if cfg.Operator.Mode == "hub" {
+			fp, _ := identity.ParseFingerprint(cfg.Operator.Hub.FP) // cfg.Validate checked the pin.
+			op.Listen, op.Hub = "", &app.HubConfig{Addr: cfg.Operator.Hub.Addr, FP: fp}
+			if share == "" {
+				share = op.Hub.Addr
+			}
+		}
+		if share == "" || cfg.Operator.Bind == "" {
 			return client, op, pairing, fmt.Errorf("desktop: operator endpoint and presentation IP required")
 		}
 		if cfg.Operator.Exclusive && runtime.GOOS != "windows" {
@@ -189,7 +197,7 @@ func (c *Controller) runtimeConfigs(cfg settings.Config, code string) (app.Clien
 		op.Bind, _ = netip.ParseAddr(cfg.Operator.Bind)
 		// Reuse direct-input address validation for sharing. A legacy endpoint
 		// that cannot be used for numeric pairing still supports raw invitations.
-		op.ShareAddress, _ = invite.ParseAddress(cfg.Operator.Endpoint)
+		op.ShareAddress, _ = invite.ParseAddress(share)
 	}
 	return client, op, pairing, nil
 }

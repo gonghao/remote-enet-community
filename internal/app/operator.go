@@ -33,6 +33,7 @@ import (
 type OperatorConfig struct {
 	StateDir             string
 	Listen               string
+	Hub                  *HubConfig
 	ShareAddress         string
 	Bind                 netip.Addr
 	Ports                operator.Ports
@@ -62,13 +63,22 @@ func (cfg OperatorConfig) validate() error {
 	if !unicastIPv4(cfg.Bind) {
 		return fmt.Errorf("app: operator bind must be unicast IPv4")
 	}
-	_, p, err := net.SplitHostPort(cfg.Listen)
-	if err != nil {
-		return fmt.Errorf("app: operator listen must be host:port")
-	}
-	n, err := strconv.ParseUint(p, 10, 16)
-	if err != nil || n == 0 {
-		return fmt.Errorf("app: operator listen port must be in 1..65535")
+	if cfg.Hub != nil {
+		if cfg.Listen != "" {
+			return fmt.Errorf("app: listen and hub are mutually exclusive")
+		}
+		if err := cfg.Hub.validate(); err != nil {
+			return err
+		}
+	} else {
+		_, p, err := net.SplitHostPort(cfg.Listen)
+		if err != nil {
+			return fmt.Errorf("app: operator listen must be host:port")
+		}
+		n, err := strconv.ParseUint(p, 10, 16)
+		if err != nil || n == 0 {
+			return fmt.Errorf("app: operator listen port must be in 1..65535")
+		}
 	}
 	for _, p := range []int{cfg.Ports.Diagnostic, cfg.Ports.Control, cfg.Ports.Discovery} {
 		if p < 0 || p > 65535 {
@@ -111,11 +121,52 @@ func (r *Runtime) RunOperator(ctx context.Context, cfg OperatorConfig) (err erro
 	if err != nil {
 		return err
 	}
-	_, acceptor, err := hubtransport.New(hubtransport.Options{Local: id, Wrap: wrap(id), Listen: cfg.Listen})
+	opts := hubtransport.Options{Local: id, Wrap: wrap(id), Listen: cfg.Listen}
+	if cfg.Hub != nil {
+		if cfg.Hub.FP == id.Fingerprint() {
+			return fmt.Errorf("app: standalone hub requires a separate identity")
+		}
+		if cfg.ShareAddress == "" {
+			cfg.ShareAddress, _ = invite.ParseAddress(cfg.Hub.Addr)
+		}
+		opts.Endpoints = []transport.Endpoint{{Kind: "hub", Addr: cfg.Hub.Addr, Hub: cfg.Hub.FP}}
+	}
+	manager := pairing.NewManager(pairing.Config{Address: cfg.ShareAddress})
+	responder := &digitalResponder{Manager: manager, listener: ctx}
+	if cfg.Hub != nil {
+		issuer, err := loadIssuer(cfg.StateDir)
+		if err != nil {
+			return err
+		}
+		hubFP := cfg.Hub.FP
+		responder.grant = func(client identity.Fingerprint) ([]byte, error) {
+			return issuer.Dial(time.Now(), client, id.Fingerprint(), hubFP)
+		}
+		opts.WaitToken = func(ctx context.Context, hub identity.Fingerprint) ([]byte, error) {
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			status := manager.Status()
+			var until time.Time
+			if status.Reason == "" {
+				until = status.ExpiresAt
+			}
+			raw, err := issuer.Wait(time.Now(), id.Fingerprint(), hub, until)
+			responder.waitToken = string(raw)
+			responder.waitGeneration = status.Generation
+			return raw, err
+		}
+		opts.OnRegister = func(_ identity.Fingerprint, token []byte, err error) { r.onRegister(responder, token, err) }
+	}
+	connector, acceptor, err := hubtransport.New(opts)
 	if err != nil {
 		return err
 	}
-	manager := pairing.NewManager(pairing.Config{Address: cfg.ShareAddress})
+	if cfg.Hub != nil {
+		responder.refresh = connector.Refresh
+	}
 	stopClose := context.AfterFunc(ctx, manager.Close)
 	defer func() {
 		stopClose()
@@ -123,7 +174,7 @@ func (r *Runtime) RunOperator(ctx context.Context, cfg OperatorConfig) (err erro
 		_ = acceptor.Close()
 	}()
 	r.mu.Lock()
-	r.numeric = &digitalResponder{Manager: manager, listener: ctx}
+	r.numeric = responder
 	r.mu.Unlock()
 	r.update(func(s *Snapshot) { s.Device = id.Fingerprint() })
 	cfg.Logger.Info("operator ready", "device", id.Fingerprint().String(), "listen", cfg.Listen, "bind", cfg.Bind.String())
@@ -139,11 +190,15 @@ func (r *Runtime) operatorLoop(ctx context.Context, acceptor transport.Acceptor,
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
+			if cfg.Hub != nil && errors.Is(err, identity.ErrFingerprintMismatch) {
+				return fmt.Errorf("%w: %w", HubIdentityMismatch, err)
+			}
 			if errors.Is(err, context.Canceled) || errors.Is(err, net.ErrClosed) {
 				return fmt.Errorf("operator hub stopped: %w", err)
 			}
 			cfg.Logger.Warn("operator connection rejected", "error", err)
 			r.update(func(s *Snapshot) {
+				s.HubWaiting = false
 				s.Phase, s.LastError, s.NextRetry = PhaseBackoff, "Client connection could not be accepted.", time.Now().Add(delay)
 			})
 			if err := pause(ctx, delay); err != nil {
@@ -153,7 +208,11 @@ func (r *Runtime) operatorLoop(ctx context.Context, acceptor transport.Acceptor,
 			continue
 		}
 		delay = 100 * time.Millisecond
-		r.update(func(s *Snapshot) { s.Phase, s.LastError = PhaseConnecting, "" })
+		r.update(func(s *Snapshot) {
+			r.numeric.waitToken = ""
+			s.HubWaiting = false
+			s.Phase, s.LastError = PhaseConnecting, ""
+		})
 		fatal, err := r.operatorConnection(ctx, ts, cfg, store, cfg.Logger)
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -192,13 +251,19 @@ func (r *Runtime) operatorConnection(ctx context.Context, ts transport.Session, 
 	states := make(chan proto.VehicleState, 1)
 	var authErr error
 	var responder session.DigitalResponder
+	var grant func(identity.Fingerprint) ([]byte, error)
+	var hubFP identity.Fingerprint
 	r.mu.Lock()
 	if r.numeric != nil {
-		responder = r.numeric
+		responder, grant = r.numeric, r.numeric.grant
 	}
 	localFP := r.state.Device
 	r.mu.Unlock()
+	if cfg.Hub != nil {
+		hubFP = cfg.Hub.FP
+	}
 	s, err := session.Run(connectionCtx, ts, session.Options{
+		HubFP: hubFP, GrantTicket: grant,
 		Role: session.RoleOperator, AppVersion: "dev", Logger: logger, AllowLinkTest: cfg.AllowLinkTest, OnRTT: metrics.onRTT,
 		DigitalManager: responder, LocalFP: localFP, Remember: store.Remember,
 		Trusted: func(peer identity.Fingerprint) bool {

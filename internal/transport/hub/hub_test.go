@@ -7,7 +7,6 @@ import (
 	"net"
 	"runtime"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -110,25 +109,6 @@ func id(t *testing.T) *identity.Local {
 
 func startHub(t *testing.T, h *identity.Local, e *router.Embedded) transport.Endpoint {
 	t.Helper()
-	ep, _ := startCountedHub(t, h, e)
-	return ep
-}
-
-type countedListener struct {
-	net.Listener
-	count atomic.Int32
-}
-
-func (l *countedListener) Accept() (net.Conn, error) {
-	conn, err := l.Listener.Accept()
-	if err == nil {
-		l.count.Add(1)
-	}
-	return conn, err
-}
-
-func startCountedHub(t *testing.T, h *identity.Local, e *router.Embedded) (transport.Endpoint, *countedListener) {
-	t.Helper()
 	options := router.Options{Local: h, Embedded: e}
 	if e == nil {
 		options.Policy = relayPolicy{}
@@ -136,16 +116,15 @@ func startCountedHub(t *testing.T, h *identity.Local, e *router.Embedded) (trans
 	return startTestHub(t, options)
 }
 
-func startTestHub(t *testing.T, options router.Options) (transport.Endpoint, *countedListener) {
+func startTestHub(t *testing.T, options router.Options) transport.Endpoint {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	counted := &countedListener{Listener: ln}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
-	go func() { done <- router.NewServer(options).Serve(ctx, counted) }()
+	go func() { done <- router.NewServer(options).Serve(ctx, ln) }()
 	t.Cleanup(func() {
 		cancel()
 		select {
@@ -157,7 +136,7 @@ func startTestHub(t *testing.T, options router.Options) (transport.Endpoint, *co
 			t.Error("server handler leaked")
 		}
 	})
-	return transport.Endpoint{Kind: "hub", Addr: ln.Addr().String(), Hub: options.Local.Fingerprint()}, counted
+	return transport.Endpoint{Kind: "hub", Addr: ln.Addr().String(), Hub: options.Local.Fingerprint()}
 }
 
 func build(t *testing.T, o Options) (transport.Connector, transport.Acceptor) {

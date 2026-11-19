@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"remote-enet/internal/app"
+	"remote-enet/internal/identity"
 )
 
 func TestNetworkFactoryIsDeferredUntilExplicitDirectSetup(t *testing.T) {
@@ -32,5 +33,27 @@ func TestNetworkFactoryIsDeferredUntilExplicitDirectSetup(t *testing.T) {
 	_, _, _, err = c.runtimeConfigs(clientSettings(), "")
 	if err != nil || called != 1 {
 		t.Fatalf("Client configuration triggered network authorization: %d %v", called, err)
+	}
+}
+
+func TestHubRuntimeConfig(t *testing.T) {
+	c := &Controller{opts: Options{StateDir: t.TempDir()}}
+	cfg := operatorSettings()
+	_, op, _, err := c.runtimeConfigs(cfg, "")
+	if err != nil || op.Hub != nil || op.Listen != cfg.Operator.Listen {
+		t.Fatal("direct configuration", err)
+	}
+	fp := identity.Fingerprint{1}
+	cfg.Operator.Mode = "hub"
+	cfg.Operator.Hub.Addr, cfg.Operator.Hub.FP = "localhost:47001", fp.String()
+	for _, share := range []string{"", "public.example:47002"} {
+		cfg.Operator.Endpoint = share
+		_, op, _, err := c.runtimeConfigs(cfg, "")
+		if share == "" {
+			share = cfg.Operator.Hub.Addr
+		}
+		if err != nil || op.Hub == nil || op.Hub.FP != fp || op.Hub.Addr != cfg.Operator.Hub.Addr || op.Listen != "" || op.ShareAddress != share {
+			t.Fatal("hub configuration", err)
+		}
 	}
 }

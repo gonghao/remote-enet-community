@@ -41,7 +41,7 @@ func TestEndpointTickets(t *testing.T) {
 			observed.Add(1)
 			return router.Grant{}, router.ErrUnauthorized
 		}}
-		ep, _ := startTestHub(t, router.Options{Local: id(t), Policy: p})
+		ep := startTestHub(t, router.Options{Local: id(t), Policy: p})
 		ep.Ticket = ticket
 		endpoints = append(endpoints, ep)
 	}
@@ -114,7 +114,7 @@ func TestBootstrapAndRefresh(t *testing.T) {
 					}
 					return router.Grant{}, nil
 				}}
-				ep, _ = startTestHub(t, router.Options{Local: host, Policy: policy})
+				ep = startTestHub(t, router.Options{Local: host, Policy: policy})
 				opOpts.Endpoints = []transport.Endpoint{ep}
 				opOpts.WaitToken = func(_ context.Context, h identity.Fingerprint) ([]byte, error) {
 					if h != ep.Hub {

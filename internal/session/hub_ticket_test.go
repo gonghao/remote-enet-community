@@ -13,6 +13,7 @@ import (
 	"remote-enet/internal/proto"
 	"remote-enet/internal/testutil/memtransport"
 	"remote-enet/internal/ticket"
+	"remote-enet/internal/trust"
 )
 
 func deviceClaims() ticket.Claims {
@@ -150,5 +151,49 @@ func TestOldClientGetsNoHubTicket(t *testing.T) {
 	want := encodedMessages(t, proto.Hello{ProtoVersion: proto.Version, Role: "operator", Capabilities: s.opts.Capabilities}, proto.PairResult{Accepted: true})
 	if len(s.NegotiatedCapabilities) != 0 || !bytes.Equal(record.output.Bytes(), want) {
 		t.Fatal("unexpected negotiated capability or frame")
+	}
+}
+
+func TestInvitationSurvivesIssuerFailure(t *testing.T) {
+	ctx := testContext(t)
+	store, err := trust.Open(ctx, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := store.Issue(ctx, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims := deviceClaims()
+	raw := signedTicket(t, claims)
+	for _, fail := range []bool{true, false} {
+		a, b := memtransport.Pair(t, claims.Device, claims.Peer)
+		o := Options{Role: RoleOperator, AcceptToken: func(fp identity.Fingerprint, v [16]byte) bool {
+			ok, err := store.Consume(ctx, fp, v)
+			if err != nil {
+				t.Error(err)
+			}
+			return ok
+		}, GrantTicket: func(identity.Fingerprint) ([]byte, error) {
+			if fail {
+				return nil, errors.New("issuer unavailable")
+			}
+			return raw, nil
+		}}
+		op := make(chan error, 1)
+		go func() { _, err := Run(ctx, b, o); op <- err }()
+		client, err := Run(ctx, a, Options{Role: RoleClient, Initiator: true, Token: token, LocalFP: claims.Device, EndpointHub: claims.Hub, RequireHubTicket: true, Now: func() time.Time { return claims.IssuedAt }})
+		opErr := <-op
+		trusted, storeErr := store.Trusted(ctx, claims.Device)
+		if storeErr != nil || trusted == fail {
+			t.Fatalf("trust after issuer failure=%t: %t, %v", fail, trusted, storeErr)
+		}
+		if fail {
+			if !errors.Is(err, ReasonHubTicket) || !errors.Is(opErr, ReasonHubTicket) {
+				t.Fatalf("issuer refusal: %v, %v", err, opErr)
+			}
+		} else if err != nil || opErr != nil || !bytes.Equal(client.HubTicket(), raw) {
+			t.Fatalf("retry: %v, %v", err, opErr)
+		}
 	}
 }

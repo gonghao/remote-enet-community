@@ -91,6 +91,7 @@ type Session struct {
 	setupTimer             *time.Timer
 	outcome                PairingOutcome
 	hubTicket              []byte
+	pendingTicket          []byte
 	linkTestNegotiated     bool
 	linkTestIn             atomic.Bool
 	linkTestOut            atomic.Bool
@@ -284,6 +285,9 @@ func (s *Session) authorize(ctx context.Context, hello proto.Hello, localHash, p
 			return fmt.Errorf("session: expected PairResult, got %T", msg)
 		}
 		if !result.Accepted {
+			if result.Reason == string(ReasonHubTicket) && slices.Contains(s.NegotiatedCapabilities, proto.HubTicketCapability) {
+				return pairingFailure(ReasonHubTicket)
+			}
 			if result.Reason == invalidPairingToken {
 				return fmt.Errorf("%w: %s", ErrPairing, invalidPairingToken)
 			}
@@ -292,13 +296,24 @@ func (s *Session) authorize(ctx context.Context, hello proto.Hello, localHash, p
 		return nil
 	}
 	trusted := s.opts.Trusted != nil && s.opts.Trusted(s.Peer())
+	var token proto.PairToken
 	if !trusted {
 		msg, err := proto.Read(s.control, proto.MaxFrameLen)
 		if err != nil {
 			return err
 		}
-		token, ok := msg.(proto.PairToken)
-		trusted = ok && token.Token != [16]byte{} && s.opts.AcceptToken != nil && s.opts.AcceptToken(s.Peer(), token.Token)
+		token, _ = msg.(proto.PairToken)
+	}
+	if trusted || (token.Token != [16]byte{} && s.opts.AcceptToken != nil) {
+		if err := s.prepareHubTicket(); err != nil {
+			if proto.Write(s.control, proto.PairResult{Reason: string(ReasonHubTicket)}) == nil {
+				s.finishRejection()
+			}
+			return err
+		}
+		if !trusted {
+			trusted = s.opts.AcceptToken(s.Peer(), token.Token)
+		}
 	}
 	result := proto.PairResult{Accepted: trusted}
 	if !trusted {

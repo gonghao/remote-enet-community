@@ -14,7 +14,12 @@ func (s *Session) HubTicket() []byte { return slices.Clone(s.hubTicket) }
 
 func (s *Session) exchangeHubTicket() error {
 	if s.opts.Role == RoleOperator {
-		return s.sendHubTicket()
+		raw := s.pendingTicket
+		s.pendingTicket = nil
+		if err := proto.Write(s.control, proto.HubTicket{Ticket: raw}); err != nil {
+			return pairingFailure(ReasonHubTicket)
+		}
+		return nil
 	}
 
 	msg, err := proto.ReadHubTicket(s.control)
@@ -30,7 +35,10 @@ func (s *Session) exchangeHubTicket() error {
 	return nil
 }
 
-func (s *Session) sendHubTicket() error {
+func (s *Session) prepareHubTicket() error {
+	if !slices.Contains(s.NegotiatedCapabilities, proto.HubTicketCapability) {
+		return nil
+	}
 	client := s.Peer()
 	raw, err := s.opts.GrantTicket(client)
 	var claims ticket.Claims
@@ -40,12 +48,9 @@ func (s *Session) sendHubTicket() error {
 	if err != nil {
 		// Issuer errors can contain key paths or ticket material.
 		s.opts.Logger.Error("hub ticket issuance failed", "client", client.Short())
-		s.finishRejection()
 		return pairingFailure(ReasonHubTicket)
 	}
-	if err := proto.Write(s.control, proto.HubTicket{Ticket: raw}); err != nil {
-		return pairingFailure(ReasonHubTicket)
-	}
+	s.pendingTicket = raw
 	s.opts.Logger.Info("issued hub ticket", "client", client.Short(), "jti", fmt.Sprintf("%x", claims.JTI), "exp", claims.Expires.Unix())
 	return nil
 }

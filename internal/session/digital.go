@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"time"
 
 	"remote-enet/internal/identity"
@@ -182,6 +183,9 @@ func (s *Session) digitalClient(ctx context.Context, b cpace.Binding) error {
 	if decision.Accepted && decision.Reason == "accepted" {
 		return nil
 	}
+	if !decision.Accepted && decision.Reason == string(ReasonHubTicket) && slices.Contains(s.NegotiatedCapabilities, proto.HubTicketCapability) {
+		return pairingFailure(ReasonHubTicket)
+	}
 	if !decision.Accepted && decision.Reason == string(cpace.ReasonStoreFailed) {
 		return pairingFailure(cpace.ReasonStoreFailed)
 	}
@@ -228,6 +232,9 @@ func (s *Session) digitalOperator(ctx context.Context, b cpace.Binding) error {
 	}
 	if err = s.confirmSAS(attempt.Context(), sas); err != nil {
 		return err
+	}
+	if err := s.prepareHubTicket(); err != nil {
+		return s.rejectPair(ReasonHubTicket)
 	}
 	// Commit rechecks the generation and may cancel the attempt context itself.
 	stop()

@@ -536,7 +536,7 @@ type Presenter interface {
 - 设备身份不变（本机密钥对）；coord 把账号映射到设备并授权使用 Hub。设备间仍是端到端 mTLS。
 - Client 免费免注册、Operator 付费（与 remote-enet 一致）。配对码从自包含长邀请码变成 coord 签发的短码。
 - **许可在服务端执行**（令牌是否签发、配额）；客户端本地校验挡不住人。
-- 单会话：一个 Operator 同时只接一个 Client；商业版的账号设备绑定与跨 Hub 并发限制由后续 coord / Hub 授权协议共同约束，不能仅靠各 Hub 的本地占位实现全局限制（见 9.8）。
+- 单会话：一个 Operator 同时只接一个 Client；中心模式的账号级并发额度与跨 Hub 并发限制由后续 coord / Hub 授权协议共同约束，不能仅靠各 Hub 的本地占位实现全局限制（见 9.8）。
 - 安全：令牌短期有效；按租户限速和流量配额；审计只记元数据（谁、何时、多少字节），不记内容；车端 UI 始终显示当前连着哪个 Operator，并有「停止中继」。
 
 **现在要做的只有**：`internal/hub` 从第一天起就是独立包（内嵌模式只是 Operator import 它），`Directory`、`PeerInfo.Endpoints[]`、`Hello.capabilities` 的形状定对，`secure.WrapStream` 独立于 Path。coord 进来时只新增包，不改 session/tunnel。
@@ -568,7 +568,7 @@ type Presenter interface {
   - Presenter 是全局单例，不是每会话一份；「暴露地址」只有一套。
   - Operator 的会话列表 = 当前会话 + 最近配对过的 Client（来自 `trusted_peers`），不是并行会话。
   - 第二个 Client 连入时，Hub 直接回 `busy`；Client 端显示「Operator 忙」并定时重试，不排队、不抢占。
-  - 商业版：一个账号 = 一台 Operator 设备（设备绑定，换机走迁移）+ 同时一个 Client 会话。当前 Hub 只按设备在单实例内占位；商业化需由 coord 将账号绑定到指定 Hub，并签发受限令牌，跨区域迁移和全局并发约束届时实现。
+  - 中心模式（2026-11-19 修订）：一个账号可在多台 Operator 设备登录，不绑定单设备；同时进行的接待数受账号级并发额度约束，额度跨所有 Hub 统一计算。当前 Hub 只按设备在单实例内占位；中心模式由中心原子占位、签发绑定 Hub 的受限票据，见 [CENTER-CONTRACT](CENTER-CONTRACT.md)。
 - **命名采用 remote-enet 的 Client / Operator**（车端 / 诊断端），代码包 `carside/` 与 `operator/`。不再用 "Tester" 称呼诊断端，因为在 UDS/HSFZ 语境里 "tester" 是协议术语（源地址 `F4` 那一方），容易混淆；文档里保留 "UDS tester 地址" 这种用法仅指协议字段。
 
 ### 9.9 分发、更新与控制平面（v0.5）

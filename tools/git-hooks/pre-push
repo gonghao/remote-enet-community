@@ -1,0 +1,16 @@
+#!/bin/sh
+# Example pre-push hook: scan commits about to be pushed for private markers.
+# Install: ln -s ../../tools/git-hooks/pre-push .git/hooks/pre-push
+# Private rules: export REPO_GUARD_RULES=/path/to/private-rules.txt
+set -eu
+root=$(git rev-parse --show-toplevel)
+zero=0000000000000000000000000000000000000000
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+    [ "$local_sha" = "$zero" ] && continue
+    if [ "$remote_sha" = "$zero" ]; then
+        range="$local_sha --not --remotes"
+    else
+        range="$remote_sha..$local_sha"
+    fi
+    python3 -B "$root/tools/repo-guard.py" --rev-range "$range" || exit 1
+done

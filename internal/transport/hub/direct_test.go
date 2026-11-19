@@ -67,7 +67,7 @@ func TestDirectPairInnerExporter(t *testing.T) {
 					return
 				}
 				state := tc.ConnectionState()
-				data, err := state.ExportKeyingMaterial("EXPORTER-renet-pair-direct-v1", nil, 32)
+				data, err := state.ExportKeyingMaterial("EXPORTER-renet-pake-sid-v1", nil, 32)
 				if err == nil {
 					want = [32]byte(data)
 					_, err = tc.Write([]byte{1})

@@ -32,10 +32,12 @@ const (
 	TypeExposeResult  MsgType = 8
 	TypeLog           MsgType = 9
 	TypeOpenTunnel    MsgType = 10
-	TypePairShareA    MsgType = 11
-	TypePairShareB    MsgType = 12
-	TypePairConfirmA  MsgType = 13
-	TypePairConfirmB  MsgType = 14
+	TypePakeCommit    MsgType = 11
+	TypePakeShareB    MsgType = 12
+	TypePakeShareA    MsgType = 13
+	TypePakeConfirmB  MsgType = 14
+	TypePakeConfirmA  MsgType = 15
+	TypePairDecision  MsgType = 16
 )
 
 type Hello struct {
@@ -47,10 +49,14 @@ type Hello struct {
 type pairValue struct {
 	Value [32]byte `cbor:"1,keyasint"`
 }
-type PairShareA pairValue
-type PairShareB pairValue
-type PairConfirmA pairValue
-type PairConfirmB pairValue
+type PakeShareA pairValue
+type PakeShareB pairValue
+type PakeCommit struct {
+	Value [64]byte `cbor:"1,keyasint"`
+}
+type PairDecision PairResult
+type PakeConfirmA PakeCommit
+type PakeConfirmB PakeCommit
 type PairToken struct {
 	Token [16]byte `cbor:"1,keyasint"`
 }
@@ -120,14 +126,18 @@ func Write(w io.Writer, msg any) error {
 	switch msg.(type) {
 	case Hello:
 		typ = TypeHello
-	case PairShareA:
-		typ = TypePairShareA
-	case PairShareB:
-		typ = TypePairShareB
-	case PairConfirmA:
-		typ = TypePairConfirmA
-	case PairConfirmB:
-		typ = TypePairConfirmB
+	case PakeCommit:
+		typ = TypePakeCommit
+	case PairDecision:
+		typ = TypePairDecision
+	case PakeShareA:
+		typ = TypePakeShareA
+	case PakeShareB:
+		typ = TypePakeShareB
+	case PakeConfirmA:
+		typ = TypePakeConfirmA
+	case PakeConfirmB:
+		typ = TypePakeConfirmB
 	case PairToken:
 		typ = TypePairToken
 	case PairResult:
@@ -185,7 +195,7 @@ func Read(r io.Reader, maxLen int) (any, error) {
 	return read(r, maxLen, false)
 }
 
-// ReadPair bounds allocation and accepts only digital frames or a PairResult.
+// ReadPair bounds allocation and accepts only messages 11 through 16.
 func ReadPair(r io.Reader) (any, error) { return read(r, 256, true) }
 
 func read(r io.Reader, maxLen int, pairOnly bool) (any, error) {
@@ -208,22 +218,26 @@ func read(r io.Reader, maxLen int, pairOnly bool) (any, error) {
 	if e.Type == 0 || len(e.Body) == 0 {
 		return nil, fmt.Errorf("proto: missing envelope type or body")
 	}
-	digital := e.Type >= TypePairShareA && e.Type <= TypePairConfirmB
-	if pairOnly && !digital && e.Type != TypePairResult {
+	digital := e.Type >= TypePakeCommit && e.Type <= TypePairDecision
+	if pairOnly && !digital {
 		return nil, fmt.Errorf("proto: unexpected pairing type %d", e.Type)
 	}
 	var msg any
 	switch e.Type {
 	case TypeHello:
 		msg = new(Hello)
-	case TypePairShareA:
-		msg = new(PairShareA)
-	case TypePairShareB:
-		msg = new(PairShareB)
-	case TypePairConfirmA:
-		msg = new(PairConfirmA)
-	case TypePairConfirmB:
-		msg = new(PairConfirmB)
+	case TypePakeCommit:
+		msg = new(PakeCommit)
+	case TypePairDecision:
+		msg = new(PairDecision)
+	case TypePakeShareA:
+		msg = new(PakeShareA)
+	case TypePakeShareB:
+		msg = new(PakeShareB)
+	case TypePakeConfirmA:
+		msg = new(PakeConfirmA)
+	case TypePakeConfirmB:
+		msg = new(PakeConfirmB)
 	case TypePairToken:
 		msg = new(PairToken)
 	case TypePairResult:

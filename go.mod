@@ -15,7 +15,7 @@ require (
 )
 
 require (
-	filippo.io/edwards25519 v1.1.0 // indirect
+	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/go-text/typesetting v0.3.5 // indirect
 	github.com/google/btree v1.1.2 // indirect
 	github.com/x448/float16 v0.8.4 // indirect

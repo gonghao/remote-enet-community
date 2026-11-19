@@ -282,7 +282,7 @@ func Pipe(ctx context.Context, a transport.Stream, b net.Conn, st *Stats) error
 
 ### `internal/pairing/cpace`（新增）
 
-CPace-ristretto255-SHA512，固定草案 -21，套件标识 `cpace21-r255-sha512-ir`。`Binding` 携带内层 TLS exporter、Client / Operator 完整指纹和双方原始 Hello 帧的 SHA-256，任一为零即拒绝。`Start` / `Respond` / `Initiator.Confirm` / `Initiator.Verify` / `Responder.VerifyAndConfirm` 的状态都只能用一次。`Reason` 是跨包共享的拒绝原因枚举。
+CPace-ristretto255-SHA512，固定草案 -21，套件标识 `CPACE-RISTR255-SHA512`。`Binding` 携带内层 TLS exporter、Client / Operator 完整指纹和双方原始 Hello 帧的 SHA-256。Client 的 Start / Reveal / Finish 和 Operator 的 Respond / Open / Verify 的状态都只能用一次。`Reason` 是跨包共享的拒绝原因枚举。
 
 ### `internal/pairing`（新增）
 
@@ -295,10 +295,10 @@ CPace-ristretto255-SHA512，固定草案 -21，套件标识 `cpace21-r255-sha512
 | `internal/trust` | `Store.Remember(ctx, fp)`：设置 Trusted，文件格式仍为版本 1 |
 | `internal/identity` | `ErrFingerprintMismatch`，由 `hub`、`secure` 包装返回 |
 | `internal/hub` | `ConnectBootstrap(ctx, addr, local) (net.Conn, identity.Fingerprint, error)`：在同一条外层连接上读取 H 并自拨；`Connect` 仍拒绝零指纹。`SetupLimits` 限制未认证 setup 的并发与速率 |
-| `internal/secure` | 内层握手后导出 `EXPORTER-renet-pair-direct-v1`，session 提供 `PairingExporter() [32]byte` |
+| `internal/secure` | 内层握手后导出 `EXPORTER-renet-pake-sid-v1`，session 提供 `PairingExporter() [32]byte` |
 | `internal/transport/hub` | `New` 返回 `*Connector`，新增 `DialDirectPair(ctx, addr)`；包装后的 session 保留 `PairingExporter` |
-| `internal/proto` | `PairShareA`=11、`PairShareB`=12、`PairConfirmA`=13、`PairConfirmB`=14，只能用 `ReadPair` 严格解码；Hello 能力 `pair-direct/1` |
-| `internal/session` | `Options.DigitalCode` / `DigitalManager`（`DigitalResponder`）/ `LocalFP` / `Remember`；`(*Session).PairingOutcome()` 区分 `Legacy` 与 `DigitalPaired`。数字模式下 `PairResult(true)` 视为协议错误 |
+| `internal/proto` | 11 PakeCommit、12 PakeShareB、13 PakeShareA、14 PakeConfirmB、15 PakeConfirmA、16 PairDecision，只能用 `ReadPair` 严格解码；Hello 能力 `pair-direct/1` |
+| `internal/session` | `Options.DigitalCode` / `DigitalManager`（`DigitalResponder`）/ `LocalFP` / `Remember` / `ConfirmSAS`（nil 自动通过）；`(*Session).PairingOutcome()` 区分 `Legacy` 与 `DigitalPaired`。Operator 确认并落盘后发 16 accepted，Client 确认并收到该决定后才报告成功 |
 | `internal/invite` | `ParseInput` 区分 `Raw` / `Direct` / `Center`；`ParseAddress`；错误为固定文案，不含输入 |
 | `internal/app` | `ClientConfig.DirectPair`、`ClientHooks.OnPaired`、`OperatorConfig.ShareAddress`；`Runtime.IssueNumericCode` / `NumericCodeStatus` / `NumericCodeDisplay` / `RevokeNumericCode`；`PairingErrorKind` |
 

@@ -65,7 +65,7 @@ func TestPairingErrorClassification(t *testing.T) {
 		{session.ReasonUnsupported, "unsupported"},
 		{cpace.ReasonStoreFailed, "store_failed"},
 		{cpace.ReasonRateLimited, "rate_limited"},
-		{cpace.ReasonExhausted, "exhausted"},
+		{cpace.ReasonBudgetExhausted, "budget_exhausted"},
 		{cpace.Reason(secret), "interrupted"},
 		{io.ErrUnexpectedEOF, "interrupted"},
 		{context.Canceled, "interrupted"},

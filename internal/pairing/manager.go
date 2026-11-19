@@ -241,22 +241,22 @@ func (m *Manager) Begin(ctx context.Context) (*Attempt, error) {
 	return a, nil
 }
 
-// Respond charges both budgets before point validation.
-func (a *Attempt) Respond(b cpace.Binding, share [32]byte) (*cpace.Responder, [32]byte, error) {
+// Respond charges both budgets before generating Yb.
+func (a *Attempt) Respond(b cpace.Binding, commit [64]byte) (*cpace.Responder, [32]byte, error) {
 	m := a.m
 	code, err := a.charge()
 	if err != nil {
 		return nil, [32]byte{}, err
 	}
-	r, y, err := cpace.Respond(code, b, share)
+	r, y, err := cpace.Respond(code, b, commit)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.refresh()
 	if m.owner != a {
-		return nil, [32]byte{}, a.inactiveReason()
+		return nil, [32]byte{}, context.Canceled
 	}
 	if err != nil {
-		// Leave the stream usable for the caller to send the rejection before Finish.
+		// A charged attempt ends without an admission rejection.
 		a.releaseLocked()
 		return nil, [32]byte{}, cpace.ReasonConfirmation
 	}
@@ -310,7 +310,7 @@ func (a *Attempt) releaseLocked() {
 	}
 	m.owner = nil
 	if m.status.AttemptsLeft == 0 {
-		m.retire(cpace.ReasonExhausted)
+		m.retire(cpace.ReasonBudgetExhausted)
 	} else if a.lastGlobal {
 		m.retire(cpace.ReasonRateLimited)
 	}

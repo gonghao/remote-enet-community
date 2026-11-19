@@ -64,7 +64,7 @@ func ParseInput(s string) (Input, error) {
 	if _, ok := parseCode(fields); ok {
 		return Input{Kind: Center}, nil
 	}
-	if len(fields) == 0 || len(fields) > 3 {
+	if len(fields) == 0 {
 		return Input{}, ErrInvalidCode
 	}
 	address, err := ParseAddress(fields[0])
@@ -79,26 +79,25 @@ func ParseInput(s string) (Input, error) {
 }
 
 func parseCode(fields []string) (string, bool) {
-	if len(fields) == 0 || len(fields) > 2 {
-		return "", false
-	}
 	var digits [8]byte
-	width := len(digits) / len(fields)
-	for i, field := range fields {
-		n := 0
+	n := 0
+	for _, field := range fields {
 		for _, r := range field {
+			if r == '-' {
+				continue
+			}
 			if r >= '０' && r <= '９' {
 				r = r - '０' + '0'
 			}
-			if r < '0' || r > '9' || n == width {
+			if r < '0' || r > '9' || n == len(digits) {
 				return "", false
 			}
-			digits[i*width+n] = byte(r)
+			digits[n] = byte(r)
 			n++
 		}
-		if n != width {
-			return "", false
-		}
+	}
+	if n != len(digits) {
+		return "", false
 	}
 	return string(digits[:]), true
 }

@@ -19,8 +19,9 @@ const (
 )
 
 var (
-	invitationText  = regexp.MustCompile(`(?i)renet1:[a-z0-9=]*`)
-	numericCodeText = regexp.MustCompile(`[0-9０-９]{4}[\s\p{Zs}]*[0-9０-９]{4}`)
+	invitationText = regexp.MustCompile(`(?i)renet1:[a-z0-9=]*`)
+	// Dates such as 2026-11-19 also match; prefer hiding a date to leaking a grouped code.
+	numericCodeText = regexp.MustCompile(`[0-9０-９](?:[-\s\p{Z}\x0b\x{0085}]*[0-9０-９]){7}`)
 )
 
 func (c *Controller) failure(message string, err error) {

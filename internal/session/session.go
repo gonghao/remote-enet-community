@@ -47,8 +47,10 @@ type Options struct {
 	Token          [16]byte
 	DigitalCode    string
 	DigitalManager DigitalResponder
-	LocalFP        identity.Fingerprint
-	Remember       func(context.Context, identity.Fingerprint) error
+	// ConfirmSAS may block until ctx is canceled. A nil hook accepts automatically.
+	ConfirmSAS func(context.Context, string, identity.Fingerprint) (bool, error)
+	LocalFP    identity.Fingerprint
+	Remember   func(context.Context, identity.Fingerprint) error
 	// Callbacks must return when ctx is canceled. OnMessage must not block.
 	OnTunnel  func(context.Context, proto.OpenTunnel, transport.Stream)
 	OnMessage func(any)
@@ -75,6 +77,7 @@ type Session struct {
 	sent    time.Time
 	// NegotiatedCapabilities is immutable after Run returns.
 	NegotiatedCapabilities []string
+	setupTimer             *time.Timer
 	outcome                PairingOutcome
 	linkTestNegotiated     bool
 	linkTestIn             atomic.Bool
@@ -116,12 +119,15 @@ func Run(ctx context.Context, ts transport.Session, o Options) (*Session, error)
 	// Transport shutdown also cancels runCtx. The handshake budget must depend
 	// only on the caller, or teardown can replace a decoded protocol rejection
 	// with context.Canceled before handshake returns.
-	hctx, hcancel := context.WithTimeout(ctx, handshakeTimeout)
-	stop := context.AfterFunc(hctx, func() { s.finish(hctx.Err()) })
+	hctx, hcancel := context.WithCancelCause(ctx)
+	s.setupTimer = time.AfterFunc(handshakeTimeout, func() { hcancel(context.DeadlineExceeded) })
+	stop := context.AfterFunc(hctx, func() { s.finish(context.Cause(hctx)) })
 	err := s.handshake(hctx)
 	s.opts.DigitalCode = ""
+	s.setupTimer.Stop()
+	s.setupTimer = nil
 	stop()
-	handshakeContextErr := hctx.Err()
+	handshakeContextErr := context.Cause(hctx)
 	protocolErr := errors.Is(err, ErrPairing) || errors.Is(err, ErrVersion)
 	if !protocolErr {
 		if handshakeContextErr != nil {
@@ -130,7 +136,7 @@ func Run(ctx context.Context, ts transport.Session, o Options) (*Session, error)
 			err = fmt.Errorf("%w: %w", transportErr, err)
 		}
 	}
-	hcancel()
+	hcancel(context.Canceled)
 	if err != nil {
 		if o.Role == RoleClient && o.DigitalCode != "" && !protocolErr {
 			// Hello and transport errors can contain unauthenticated peer text.
@@ -257,10 +263,25 @@ func (s *Session) handshake(ctx context.Context) error {
 		return err
 	}
 	if !trusted {
+		s.finishRejection()
 		return ErrPairing
 	}
 	return nil
 }
+
+// The request's yamux Write can still be waiting for completion after we have
+// read it. Keep the mux alive until the peer consumes the rejection and closes.
+func (s *Session) finishRejection() {
+	// A manual SAS check may have extended the setup timer beyond the I/O budget.
+	if s.opts.ConfirmSAS != nil && s.setupTimer.Stop() {
+		s.setupTimer.Reset(handshakeTimeout)
+	}
+	if err := s.control.CloseWrite(); err == nil {
+		// Run closes the transport on either setup timeout or caller cancellation.
+		_, _ = io.Copy(io.Discard, s.control)
+	}
+}
+
 func (s *Session) finish(err error) {
 	if err == nil {
 		err = io.EOF
@@ -320,7 +341,7 @@ func (s *Session) readControl() {
 				s.opts.OnRTT(sample)
 			}
 		case proto.PairToken: // A trusted peer may still send an invitation token.
-		case proto.Hello, proto.PairResult, proto.OpenTunnel, proto.PairShareA, proto.PairShareB, proto.PairConfirmA, proto.PairConfirmB:
+		case proto.Hello, proto.PairResult, proto.OpenTunnel, proto.PakeCommit, proto.PairDecision, proto.PakeShareA, proto.PakeShareB, proto.PakeConfirmA, proto.PakeConfirmB:
 			s.finish(fmt.Errorf("session: unexpected control message %T", m))
 			return
 		default:

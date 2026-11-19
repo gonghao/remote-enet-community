@@ -6,4 +6,4 @@
 
 专用连接测试复用 Hello 的 `linktest/1` capability 与现有 `OpenTunnel{Kind:"linktest/1", Target:"", Origin:""}` 头，不新增消息编号或字段、不改变版本。头之后的有界二进制 echo 协议只在两个 renet session 内处理，见 [linktest](../linktest/README.md)，不作为车辆 TCP/reverse 隧道下发。
 
-数字配对能力为 `pair-direct/1`。PairShareA=11、PairShareB=12、PairConfirmA=13、PairConfirmB=14 的正文均为键 1 对应 32 字节 bstr 的单字段 map；这四种帧要求规范编码。握手使用 `ReadPair`，读取长度后先检查 256 字节上限，也允许读取原有 PairResult 以处理拒绝。
+数字配对能力为 `pair-direct/1`。11 PakeCommit、12 PakeShareB、13 PakeShareA、14 PakeConfirmB、15 PakeConfirmA、16 PairDecision。11、14、15 的键 1 为 64 字节串，12、13 为 32 字节串。16 的键 1 为布尔值，键 2 为原因文本。ReadPair 先检查 256 字节上限，再严格解码这六种规范 CBOR 帧。

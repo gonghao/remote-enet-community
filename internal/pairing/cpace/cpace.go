@@ -13,13 +13,13 @@ import (
 type Reason string
 
 const (
-	ReasonUnavailable  Reason = "unavailable"
-	ReasonExpired      Reason = "expired"
-	ReasonExhausted    Reason = "exhausted"
-	ReasonRateLimited  Reason = "rate_limited"
-	ReasonBusy         Reason = "busy"
-	ReasonConfirmation Reason = "confirmation"
-	ReasonStoreFailed  Reason = "store_failed"
+	ReasonUnavailable     Reason = "unavailable"
+	ReasonExpired         Reason = "expired"
+	ReasonBudgetExhausted Reason = "budget_exhausted"
+	ReasonRateLimited     Reason = "rate_limited"
+	ReasonBusy            Reason = "busy"
+	ReasonConfirmation    Reason = "confirmation"
+	ReasonStoreFailed     Reason = "store_failed"
 )
 
 func (r Reason) Error() string { return string(r) }
@@ -28,109 +28,128 @@ var errCode = errors.New("expected eight ASCII digits")
 var errBinding = errors.New("invalid CPace binding")
 var errState = errors.New("invalid CPace handshake state")
 
-// Initiator handles share a single confirmation attempt, even when copied.
-type Initiator struct{ s *initiatorState }
-type initiatorState struct {
-	mu       sync.Mutex
-	scalar   *ristretto255.Scalar
-	binding  Binding
-	a        [32]byte
-	expected *[32]byte
-}
+// Initiator handles share one commitment and confirmation attempt, even when copied.
+type Initiator struct{ s *exchange }
 
-// Responder handles share a single verification attempt, even when copied.
-type Responder struct{ s *responderState }
-type responderState struct {
+// Responder handles share one opening and verification attempt, even when copied.
+type Responder struct{ s *exchange }
+type exchange struct {
 	mu      sync.Mutex
+	scalar  *ristretto255.Scalar
+	binding Binding
+	own     [32]byte
+	commit  [64]byte
 	pending *tags
 }
 
-// Start requires eight ASCII digits and a nonzero exporter and peer fingerprints.
-func Start(code string, b Binding) (*Initiator, [32]byte, error) {
-	s, a, err := share(code, b)
+// Start hides the initiator share until the responder chooses its own.
+func Start(code string, b Binding) (*Initiator, [64]byte, error) {
+	scalar, a, err := share(code, b)
 	if err != nil {
-		return nil, [32]byte{}, err
+		return nil, [64]byte{}, err
 	}
-	return &Initiator{&initiatorState{scalar: s, binding: b, a: a}}, a, nil
+	return &Initiator{&exchange{scalar: scalar, binding: b, own: a}}, commitment(a), nil
 }
 
-// Respond binds the operator's share to the client's canonical nonidentity point.
-func Respond(code string, b Binding, a [32]byte) (*Responder, [32]byte, error) {
-	s, y, err := share(code, b)
+// Respond generates a fresh share for each commitment.
+func Respond(code string, b Binding, commit [64]byte) (*Responder, [32]byte, error) {
+	scalar, y, err := share(code, b)
 	if err != nil {
 		return nil, [32]byte{}, err
 	}
-	defer s.Zero()
-	shared, err := sharedPoint(s, a[:])
-	if err != nil {
-		return nil, [32]byte{}, err
-	}
-	t := confirmationTags(b, shared, a, y)
-	return &Responder{&responderState{pending: &t}}, y, nil
+	return &Responder{&exchange{scalar: scalar, binding: b, own: y, commit: commit}}, y, nil
 }
 
-// Confirm consumes the private scalar, including on invalid input.
-func (i *Initiator) Confirm(y [32]byte) ([32]byte, error) {
+// Reveal consumes the scalar even if the peer share is invalid.
+func (i *Initiator) Reveal(y [32]byte) ([32]byte, error) {
 	s := i.s
 	if s == nil {
 		return [32]byte{}, errState
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.scalar == nil {
-		s.expected = nil
-		return [32]byte{}, errState
-	}
-	shared, err := sharedPoint(s.scalar, y[:])
-	s.scalar.Zero()
-	s.scalar = nil
+	err := s.derive(y, s.own, y)
 	if err != nil {
 		return [32]byte{}, err
 	}
-	t := confirmationTags(s.binding, shared, s.a, y)
-	s.expected = &t.operator
-	return t.client, nil
+	return s.own, nil
 }
 
-// Verify consumes the expected operator tag on success or failure.
-func (i *Initiator) Verify(tag [32]byte) error {
-	s := i.s
+// Open checks the committed share before releasing Tb.
+func (r *Responder) Open(a [32]byte) ([64]byte, error) {
+	s := r.s
 	if s == nil {
-		return errState
+		return [64]byte{}, errState
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.expected == nil {
-		if s.scalar != nil {
-			s.scalar.Zero()
-			s.scalar = nil
-		}
+	c := commitment(a)
+	if !hmac.Equal(c[:], s.commit[:]) {
+		s.discard()
+		return [64]byte{}, ReasonConfirmation
+	}
+	if err := s.derive(a, a, s.own); err != nil {
+		return [64]byte{}, err
+	}
+	return s.pending.operator, nil
+}
+
+func (s *exchange) discard() {
+	if s.scalar != nil {
+		s.scalar.Zero()
+		s.scalar = nil
+	}
+	s.pending = nil
+}
+func (s *exchange) derive(peer, a, y [32]byte) error {
+	if s.scalar == nil {
+		s.discard()
 		return errState
 	}
-	ok := hmac.Equal(s.expected[:], tag[:])
-	s.expected = nil
-	if !ok {
-		return ReasonConfirmation
+	shared, err := sharedPoint(s.scalar, peer[:])
+	s.discard()
+	if err != nil {
+		return err
 	}
+	t := confirmationTags(s.binding, shared, a, y)
+	s.pending = &t
 	return nil
 }
 
-// VerifyAndConfirm releases the operator tag only on successful verification.
-// The caller must commit trust before sending the tag.
-func (r *Responder) VerifyAndConfirm(tag [32]byte) ([32]byte, error) {
-	s := r.s
+// Finish releases Ta and SAS only after verifying Tb.
+func (i *Initiator) Finish(tb [64]byte) ([64]byte, string, error) {
+	s := i.s
 	if s == nil {
-		return [32]byte{}, errState
+		return [64]byte{}, "", errState
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	t := s.pending
-	s.pending = nil
+	s.discard()
 	if t == nil {
-		return [32]byte{}, errState
+		return [64]byte{}, "", errState
 	}
-	if !hmac.Equal(t.client[:], tag[:]) {
-		return [32]byte{}, ReasonConfirmation
+	if !hmac.Equal(tb[:], t.operator[:]) {
+		return [64]byte{}, "", ReasonConfirmation
 	}
-	return t.operator, nil
+	return t.client, t.sas, nil
+}
+
+// Verify consumes the expected Ta on success or failure.
+func (r *Responder) Verify(ta [64]byte) (string, error) {
+	s := r.s
+	if s == nil {
+		return "", errState
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t := s.pending
+	s.discard()
+	if t == nil {
+		return "", errState
+	}
+	if !hmac.Equal(ta[:], t.client[:]) {
+		return "", ReasonConfirmation
+	}
+	return t.sas, nil
 }

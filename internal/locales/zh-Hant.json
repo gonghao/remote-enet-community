@@ -55,7 +55,7 @@
   "Client settings": "車端設定",
   "Closing the runtime and releasing its resources.": "正在關閉執行工作階段並釋放資源。",
   "Code expired": "數字碼已過期",
-  "Code or peer confirmation failed": "數字碼或對端確認失敗",
+  "Incorrect code or connection tampered": "數字碼不正確或連線遭竄改",
   "Code redeemed": "數字碼已兌換",
   "Code unavailable": "數字碼無法使用",
   "Completing pairing": "正在完成配對",

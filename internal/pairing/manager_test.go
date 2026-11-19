@@ -41,11 +41,19 @@ func verify(a *Attempt, code string) error {
 	if err != nil {
 		return err
 	}
-	tag, err := client.Confirm(y)
+	ya, err := client.Reveal(y)
 	if err != nil {
 		return err
 	}
-	_, err = server.VerifyAndConfirm(tag)
+	tb, err := server.Open(ya)
+	if err != nil {
+		return err
+	}
+	tag, _, err := client.Finish(tb)
+	if err != nil {
+		return err
+	}
+	_, err = server.Verify(tag)
 	return err
 }
 func wantErr(t *testing.T, got, want error) {
@@ -94,16 +102,19 @@ func TestRollingBudget(t *testing.T) {
 					wantErr(t, err, cpace.ReasonRateLimited)
 					a.Abort()
 				} else {
-					_, _, err := a.Respond(testBinding, [32]byte{})
-					wantErr(t, err, cpace.ReasonConfirmation)
+					_, _, err := a.Respond(testBinding, [64]byte{})
+					if err != nil {
+						t.Fatal(err)
+					}
+					a.Finish()
 				}
 				if m.Status().AttemptsLeft != 4-i {
 					t.Fatal("incorrect per-code budget")
 				}
 			}
 			_, err := m.Begin(t.Context())
-			wantErr(t, err, cpace.ReasonExhausted)
-			if m.Status().Reason != cpace.ReasonExhausted {
+			wantErr(t, err, cpace.ReasonBudgetExhausted)
+			if m.Status().Reason != cpace.ReasonBudgetExhausted {
 				t.Fatal("retired code should be exhausted")
 			}
 			time.Sleep(time.Minute)
@@ -113,12 +124,15 @@ func TestRollingBudget(t *testing.T) {
 		wantErr(t, err, cpace.ReasonRateLimited)
 		time.Sleep(time.Nanosecond)
 		_, err = m.Begin(t.Context())
-		wantErr(t, err, cpace.ReasonExhausted)
+		wantErr(t, err, cpace.ReasonBudgetExhausted)
 		issue(t, m)
 		for range 5 {
 			a := begin(t, m, t.Context())
-			_, _, err := a.Respond(testBinding, [32]byte{})
-			wantErr(t, err, cpace.ReasonConfirmation)
+			_, _, err := a.Respond(testBinding, [64]byte{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			a.Finish()
 		}
 		_, err = m.Issue()
 		wantErr(t, err, cpace.ReasonRateLimited)
@@ -210,7 +224,7 @@ func TestStaleCallbacks(t *testing.T) {
 				t.Fatal("stale handle not canceled")
 			}
 			before := m.Status()
-			_, _, err := late.Respond(testBinding, [32]byte{})
+			_, _, err := late.Respond(testBinding, [64]byte{})
 			wantErr(t, err, cpace.ReasonUnavailable)
 			wantErr(t, a.Commit(nil), cpace.ReasonUnavailable)
 			late.Finish()
@@ -234,7 +248,7 @@ func TestBlockedSave(t *testing.T) {
 		if err := verify(a, d.Code); err != nil {
 			t.Fatal(err)
 		}
-		_, _, err := late.Respond(testBinding, [32]byte{})
+		_, _, err := late.Respond(testBinding, [64]byte{})
 		wantErr(t, err, cpace.ReasonBusy)
 		_, err = m.Begin(ctx)
 		wantErr(t, err, cpace.ReasonBusy)

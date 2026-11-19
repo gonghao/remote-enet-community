@@ -10,7 +10,7 @@
 
 | 组件 | 固定版本 | 上游许可/范围 | 许可原文 |
 |---|---|---|---|
-| [filippo.io/edwards25519](https://pkg.go.dev/filippo.io/edwards25519@v1.1.0) | `v1.1.0` | BSD-3-Clause | [LICENSE](third_party/licenses/go/filippo.io/edwards25519/LICENSE) |
+| [filippo.io/edwards25519](https://pkg.go.dev/filippo.io/edwards25519@v1.2.0) | `v1.2.0` | BSD-3-Clause | [LICENSE](third_party/licenses/go/filippo.io/edwards25519/LICENSE) |
 | [github.com/ebitengine/purego](https://pkg.go.dev/github.com/ebitengine/purego@v0.11.1) | `v0.11.1` | Apache-2.0 | [LICENSE](third_party/licenses/go/github.com/ebitengine/purego/LICENSE) |
 | [github.com/egoist/mygo](https://pkg.go.dev/github.com/egoist/mygo@v0.9.1) | `v0.9.1` | MIT；内部 shader 另附 Apache-2.0 | [LICENSE](third_party/licenses/go/github.com/egoist/mygo/LICENSE)、[LICENSE](third_party/licenses/go/github.com/egoist/mygo/internal/shader/LICENSE) |
 | [github.com/fxamacker/cbor/v2](https://pkg.go.dev/github.com/fxamacker/cbor/v2@v2.10.0) | `v2.10.0` | MIT | [LICENSE](third_party/licenses/go/github.com/fxamacker/cbor/v2/LICENSE) |

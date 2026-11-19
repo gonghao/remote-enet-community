@@ -4,7 +4,7 @@ import (
 	"crypto/hkdf"
 	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
+
 	"crypto/sha512"
 	"encoding/binary"
 	"errors"
@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	suiteID = "cpace21-r255-sha512-ir"
+	suiteID = "CPACE-RISTR255-SHA512"
 	dsi     = "CPaceRistretto255"
 )
 
@@ -29,20 +29,8 @@ type Binding struct {
 }
 
 func (b Binding) ci() []byte {
-	return lengthPrefixed(
-		[]byte("renet/1"), []byte("pair-direct/1"), []byte(suiteID),
-		[]byte("client"), b.ClientFP[:], []byte("operator"), b.OperatorFP[:],
-		b.HelloClientHash[:], b.HelloOperatorHash[:],
-	)
-}
-
-func lengthPrefixed(parts ...[]byte) []byte {
-	var buf []byte
-	for _, p := range parts {
-		buf = binary.BigEndian.AppendUint32(buf, uint32(len(p)))
-		buf = append(buf, p...)
-	}
-	return buf
+	return lvCat([]byte("renet-pake-v1"), []byte(suiteID), []byte("pair-direct/1"), []byte("renet/1"),
+		b.ClientFP[:], b.OperatorFP[:], b.HelloClientHash[:], b.HelloOperatorHash[:])
 }
 
 // The draft uses unsigned LEB128 lengths, including for empty AD.
@@ -134,29 +122,26 @@ func isk(sid, shared, a, adA, b, adB []byte) [64]byte {
 	return sha512.Sum512(append(prefix, lvCat(a, adA, b, adB)...))
 }
 
-func transcript(b Binding, a, y [32]byte) [32]byte {
-	return sha256.Sum256(lengthPrefixed([]byte("renet-pair-confirm/1"), b.Exporter[:], b.ci(), a[:], y[:]))
+func commitment(a [32]byte) [64]byte {
+	return sha512.Sum512(lvCat([]byte("renet-sas-commit-v1"), a[:], nil))
 }
 
-type tags struct{ client, operator [32]byte }
+type tags struct {
+	client, operator [64]byte
+	sas              string
+}
 
 func confirmationTags(b Binding, shared, a, y [32]byte) tags {
 	key := isk(b.Exporter[:], shared[:], a[:], nil, y[:], nil)
-	t := transcript(b, a, y)
-	// SHA-256 and a single 32-byte output block satisfy the HKDF limits.
-	prk, err := hkdf.Extract(sha256.New, key[:], t[:])
+	macKey := sha512.Sum512(append(append([]byte("CPaceMac"), b.Exporter[:]...), key[:]...))
+	tag := func(point [32]byte) [64]byte {
+		mac := hmac.New(sha512.New, macKey[:])
+		mac.Write(lvCat(point[:], nil))
+		return [64]byte(mac.Sum(nil))
+	}
+	raw, err := hkdf.Key(sha512.New, key[:], nil, "renet-sas-v1", 8)
 	if err != nil {
 		panic(err)
 	}
-	tag := func(role string) [32]byte {
-		info := lengthPrefixed([]byte("confirm"), []byte(role))
-		k, err := hkdf.Expand(sha256.New, prk, string(info), sha256.Size)
-		if err != nil {
-			panic(err)
-		}
-		mac := hmac.New(sha256.New, k)
-		mac.Write(t[:])
-		return [32]byte(mac.Sum(nil))
-	}
-	return tags{tag("client"), tag("operator")}
+	return tags{tag(a), tag(y), fmt.Sprintf("%06d", binary.BigEndian.Uint64(raw)%1000000)}
 }

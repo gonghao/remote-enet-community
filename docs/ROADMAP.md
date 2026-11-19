@@ -18,7 +18,7 @@
 | 公网入口、TLS 钉扎、配对复连、peer-only echo | [Wave 17](WAVE17.md) |
 | F20 实车只读：E-Sys 建连及 FA / SVT / ECU 读取，ISTA 识别及 ECU 树 | [F20 只读验收](research/f20-readonly-2026-11-18.md) |
 | AGPL-3.0-only 与第三方许可随包携带 | [OPEN-SOURCE-READINESS](OPEN-SOURCE-READINESS.md) |
-| 直连数字配对（地址 + 8 位码，CPace -21）与 LAN 台架验收 | [PAIRING](PAIRING.md)、PR #2 |
+| 直连数字配对（地址 + 8 位码，CPace -21）与 LAN 台架验收 | [PAIRING](PAIRING.md)、PR #2、PR #4 |
 
 ## R1 · 公开仓库与发行基础
 
@@ -30,11 +30,9 @@
 | 版本与发布 | 版本号与 tag 规则、对应版本源码的获取入口、CI 构建制品 |
 | 签名与更新 | macOS Developer ID 与公证、Windows Authenticode、签名更新清单；只属于官方发行层，功能代码不分叉 |
 
-## R2 · 直连数字配对（已合并，待与中心契约对齐，设计见 [PAIRING](PAIRING.md)）
+## R2 · 直连数字配对（已完成，设计见 [PAIRING](PAIRING.md)）
 
-待办（2026-11-19）：直连与中心模式共用同一套配对消息、状态机和测试向量（[CENTER-CONTRACT §10](CENTER-CONTRACT.md#10-中心模式的首次配对)）。PR #2 合并的实现在 CI 编码、确认 MAC、承诺与 SAS、exporter 标签、消息 11–16、原因枚举、数字码输入与失败文案上都与契约不一致，`filippo.io/edwards25519` 也需升到 v1.1.1 以上。对齐前不打 tag；对齐时直接修改线格式，不保留旧格式兼容。
-
-状态（2026-11-19）：经 PR #2 合并。1–6 已实现，离线测试与独立审查通过。7 已完成 LAN 台架：Windows GUI Operator + Linux CLI Client + 假网关，覆盖首次配对、无码重连、旧码重用、猜错计数与第 5 次成功、撤销、次数用尽、过期和复制格式。Mac GUI Client 与公网验证移入下方「并行验收线」；Mac 经 WG 访问台架时无法发现非同链路网关，属车端有意限制。独立密码学复核列为后续项，不阻塞发布。
+待办（2026-1对齐（2026-11-19）：经 PR #4 按 [CENTER-CONTRACT §10](CENTER-CONTRACT.md#10-中心模式的首次配对) 改写线格式（LEB128 CI、HMAC-SHA-512 确认、承诺与 SAS、消息 11–16、exporter 标签 `EXPORTER-renet-pake-sid-v1`），与 PR #2 的格式不兼容；应用向量由独立生成器产出。同时修复 Operator 拒绝后立即关流导致 Client 把拒绝原因误报为中断的竞态。下方第 7 项的 LAN 台架是对旧格式做的，打 tag 前需在台架重跑一次首次配对与拒绝场景。-11-19）：经 PR #2 合并。1–6 已实现，离线测试与独立审查通过。7 已完成 LAN 台架：Windows GUI Operator + Linux CLI Client + 假网关，覆盖首次配对、无码重连、旧码重用、猜错计数与第 5 次成功、撤销、次数用尽、过期和复制格式。Mac GUI Client 与公网验证移入下方「并行验收线」；Mac 经 WG 访问台架时无法发现非同链路网关，属车端有意限制。独立密码学复核列为后续项，不阻塞发布。
 
 目标：Client 输入「地址:端口 + 8 位数字码」即可完成首次配对，原始邀请码保留。
 

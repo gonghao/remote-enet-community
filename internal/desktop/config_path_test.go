@@ -24,7 +24,7 @@ func TestFixedRoleMissingPathMustUseLoader(t *testing.T) {
 					}
 					return settings.Default(), &os.PathError{Op: "lstat", Path: path, Err: cause}
 				})
-				if !called || !errors.Is(err, cause) || cfg != (settings.Config{}) {
+				if !called || !errors.Is(err, cause) || !cfg.Equal(settings.Config{}) {
 					t.Fatalf("fixed role bypassed load failure %v: called=%t, config=%+v, err=%v", cause, called, cfg, err)
 				}
 			}
@@ -57,7 +57,7 @@ func TestFixedRoleConfigurationPathClassification(t *testing.T) {
 					opts := Options{FixedRole: role, ConfigPath: filepath.Join(parent, tc.suffix), StateDir: filepath.Join(dir, "state")}
 					cfg, err := loadConfig(opts, settings.Load)
 					if tc.parentFile {
-						if err == nil || cfg != (settings.Config{}) {
+						if err == nil || !cfg.Equal(settings.Config{}) {
 							t.Fatalf("non-directory ancestor returned %+v, %v", cfg, err)
 						}
 						c, err := New(t.Context(), opts)
@@ -73,10 +73,10 @@ func TestFixedRoleConfigurationPathClassification(t *testing.T) {
 					} else {
 						want := settings.Default()
 						want.Role = role
-						if err != nil || cfg != want {
+						if err != nil || !cfg.Equal(want) {
 							t.Fatalf("missing fixed-role config returned %+v, %v", cfg, err)
 						}
-						if c := fixedController(t, opts, production()); c.Snapshot().Config != want {
+						if c := fixedController(t, opts, production()); !c.Snapshot().Config.Equal(want) {
 							t.Fatal("New did not use fixed-role defaults")
 						}
 					}
@@ -124,7 +124,7 @@ func TestFixedRoleRejectsSymlinkConfigurationPaths(t *testing.T) {
 					t.Fatal(err)
 				}
 				opts := Options{FixedRole: role, ConfigPath: path, StateDir: filepath.Join(dir, "state")}
-				if cfg, err := loadConfig(opts, settings.Load); err == nil || cfg != (settings.Config{}) {
+				if cfg, err := loadConfig(opts, settings.Load); err == nil || !cfg.Equal(settings.Config{}) {
 					t.Fatalf("symlink configuration returned %+v, %v", cfg, err)
 				}
 				if got, err := os.Readlink(link); err != nil || got != target {

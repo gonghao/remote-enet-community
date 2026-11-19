@@ -21,7 +21,7 @@ func TestDisplayLanguageDoesNotModifyControllerOrDiagnostics(t *testing.T) {
 		if !tt.HasText(s.tr("Settings saved.")) {
 			t.Fatal("product status was not localized")
 		}
-		if s.controller.Snapshot().Config != before.Config || s.state.Notice != "Settings saved." {
+		if !s.controller.Snapshot().Config.Equal(before.Config) || s.state.Notice != "Settings saved." {
 			t.Fatal("display translation mutated the underlying data")
 		}
 		s.copyDiagnostics()

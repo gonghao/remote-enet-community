@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"net/url"
+	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -15,7 +18,7 @@ import (
 )
 
 // Version changes when the persisted schema changes incompatibly.
-const Version = 1
+const Version = 2
 
 const (
 	// RoleClient selects the car-side role.
@@ -35,6 +38,8 @@ type Client struct {
 // Operator permits empty Endpoint and Bind until the controller starts listening.
 // Diagnostic and control use distinct TCP ports; discovery uses UDP.
 type Operator struct {
+	Mode           string `json:"mode"`
+	Hub            Hub    `json:"hub"`
 	Listen         string `json:"listen"`
 	Endpoint       string `json:"endpoint"`
 	Bind           string `json:"bind"`
@@ -44,6 +49,18 @@ type Operator struct {
 	Exclusive      bool   `json:"exclusive"`
 }
 
+// Hub stores the dial address and full outer TLS pin for Hub mode.
+type Hub struct {
+	Addr string `json:"addr"`
+	FP   string `json:"fp"`
+}
+
+// Center is unconfigured when both ID and API are empty.
+type Center struct {
+	ID  string   `json:"id"`
+	API []string `json:"api"`
+}
+
 // Config contains preferences for both roles, independent of the active role.
 type Config struct {
 	Version       int      `json:"version"`
@@ -51,15 +68,32 @@ type Config struct {
 	AllowLinkTest bool     `json:"allow_link_test"`
 	Client        Client   `json:"client"`
 	Operator      Operator `json:"operator"`
+	Center        Center   `json:"center"`
+}
+
+// Equal compares configuration values, treating nil and empty API lists alike.
+func (c Config) Equal(other Config) bool {
+	return c.Version == other.Version && c.Role == other.Role &&
+		c.AllowLinkTest == other.AllowLinkTest && c.Client == other.Client &&
+		c.Operator == other.Operator && c.Center.ID == other.Center.ID &&
+		slices.Equal(c.Center.API, other.Center.API)
 }
 
 // Default leaves addresses that require a user's choice unconfigured.
+// Use Load to report a malformed build-time center.
 func Default() Config {
+	cfg := baseConfig()
+	cfg.Center, _ = loadDefaultCenter()
+	return cfg
+}
+
+func baseConfig() Config {
 	return Config{
 		Version:       Version,
 		Role:          RoleClient,
 		AllowLinkTest: true,
 		Operator: Operator{
+			Mode:           "direct",
 			Listen:         "0.0.0.0:47000",
 			DiagnosticPort: 6801,
 			ControlPort:    6811,
@@ -90,12 +124,31 @@ func (c Config) Validate() error {
 			return fmt.Errorf("settings: client.peer must be a nonzero device fingerprint")
 		}
 	}
-	if c.Operator.Listen == "" {
-		if c.Role == RoleOperator {
-			return fmt.Errorf("settings: operator.listen is required for the operator role")
+	switch c.Operator.Mode {
+	case "direct":
+		if c.Operator.Hub.Addr != "" {
+			return fmt.Errorf("settings: operator.hub.addr must be empty in direct mode")
 		}
-	} else if err := address(c.Operator.Listen, true); err != nil {
-		return fmt.Errorf("settings: operator.listen: %w", err)
+		if c.Operator.Hub.FP != "" {
+			return fmt.Errorf("settings: operator.hub.fp must be empty in direct mode")
+		}
+		if c.Operator.Listen == "" {
+			if c.Role == RoleOperator {
+				return fmt.Errorf("settings: operator.listen is required for the operator role")
+			}
+		} else if err := address(c.Operator.Listen, true); err != nil {
+			return fmt.Errorf("settings: operator.listen: %w", err)
+		}
+	case "hub":
+		if err := address(c.Operator.Hub.Addr, false); err != nil {
+			return fmt.Errorf("settings: operator.hub.addr: %w", err)
+		}
+		fp, err := identity.ParseFingerprint(c.Operator.Hub.FP)
+		if err != nil || fp.IsZero() {
+			return fmt.Errorf("settings: operator.hub.fp must be a nonzero device fingerprint")
+		}
+	default:
+		return fmt.Errorf("settings: operator.mode must be direct or hub")
 	}
 	if c.Operator.Endpoint != "" {
 		if err := address(c.Operator.Endpoint, false); err != nil {
@@ -118,7 +171,32 @@ func (c Config) Validate() error {
 		}
 	}
 	if c.Operator.DiagnosticPort == c.Operator.ControlPort {
-		return fmt.Errorf("settings: operator diagnostic and control TCP ports must differ")
+		return fmt.Errorf("settings: operator.diagnostic_port and operator.control_port must differ")
+	}
+	return c.Center.validate()
+}
+
+var centerID = regexp.MustCompile(`^[a-z0-9.-]{1,32}$`)
+
+func (c Center) validate() error {
+	if c.ID == "" && len(c.API) == 0 {
+		return nil
+	}
+	if !centerID.MatchString(c.ID) {
+		return fmt.Errorf("settings: center.id must match [a-z0-9.-]{1,32} when configured")
+	}
+	if len(c.API) < 1 || len(c.API) > 4 {
+		return fmt.Errorf("settings: center.api must contain 1 to 4 URLs when configured")
+	}
+	for i, entry := range c.API {
+		if len(entry) > 256 || !utf8.ValidString(entry) || strings.IndexFunc(entry, func(r rune) bool { return r == ' ' || unicode.IsControl(r) }) >= 0 {
+			return fmt.Errorf("settings: center.api[%d] must be valid text of at most 256 bytes", i)
+		}
+		u, err := url.Parse(entry)
+		if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil ||
+			u.ForceQuery || u.RawQuery != "" || strings.Contains(entry, "#") {
+			return fmt.Errorf("settings: center.api[%d] must be an absolute HTTPS URL without userinfo, query or fragment", i)
+		}
 	}
 	return nil
 }

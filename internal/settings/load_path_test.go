@@ -40,11 +40,11 @@ func TestLoadPathClassification(t *testing.T) {
 			}
 			cfg, err := Load(path)
 			if tc.parentFile {
-				if err == nil || cfg != (Config{}) {
+				if err == nil || !cfg.Equal(Config{}) {
 					t.Fatalf("non-directory ancestor returned %+v, %v", cfg, err)
 				}
 				assertFileUnchanged(t, parent, []byte("not a directory"))
-			} else if err != nil || cfg != Default() {
+			} else if err != nil || !cfg.Equal(Default()) {
 				t.Fatalf("missing config returned %+v, %v", cfg, err)
 			}
 			entries, err := os.ReadDir(dir)
@@ -66,7 +66,7 @@ func TestLoadMissingRelativeAncestors(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 	path := filepath.Join("missing", "nested", "settings.json")
-	if cfg, err := Load(path); err != nil || cfg != Default() {
+	if cfg, err := Load(path); err != nil || !cfg.Equal(Default()) {
 		t.Fatalf("missing relative config returned %+v, %v", cfg, err)
 	}
 	if entries, err := os.ReadDir(dir); err != nil || len(entries) != 0 {
@@ -103,13 +103,13 @@ func TestLoadSymlinkParents(t *testing.T) {
 			for _, suffix := range suffixes {
 				cfg, err := Load(link + string(os.PathSeparator) + suffix)
 				if kind == "directory" {
-					if err != nil || cfg != Default() {
+					if err != nil || !cfg.Equal(Default()) {
 						t.Fatalf("valid directory symlink with suffix %q returned %+v, %v", suffix, cfg, err)
 					}
 					if entries, err := os.ReadDir(target); err != nil || len(entries) != 0 {
 						t.Fatalf("Load changed symlink target: %v, %v", entries, err)
 					}
-				} else if err == nil || cfg != (Config{}) {
+				} else if err == nil || !cfg.Equal(Config{}) {
 					t.Fatalf("invalid symlink ancestor with suffix %q returned %+v, %v", suffix, cfg, err)
 				}
 			}
@@ -137,7 +137,7 @@ func TestLoadUnsearchableParent(t *testing.T) {
 		}
 		t.Fatalf("permission probe: %v", err)
 	}
-	if cfg, err := Load(path); !errors.Is(err, os.ErrPermission) || cfg != (Config{}) {
+	if cfg, err := Load(path); !errors.Is(err, os.ErrPermission) || !cfg.Equal(Config{}) {
 		t.Fatalf("lost load permission error: %+v, %v", cfg, err)
 	}
 }

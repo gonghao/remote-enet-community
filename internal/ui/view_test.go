@@ -295,7 +295,7 @@ func TestClientAdapterSavePreservesSettingsDraft(t *testing.T) {
 			click(t, tt, "Ethernet · 169.254.10.1")
 			want := cfg
 			want.Client.NICName, want.Client.NICAddr = "Ethernet", "169.254.10.1"
-			if len(requests) != 1 || requests[0] != want || v.submitted == nil || v.draft.Client != want.Client {
+			if len(requests) != 1 || !requests[0].Equal(want) || v.submitted == nil || v.draft.Client != want.Client {
 				t.Fatalf("adapter choice did not submit only the NIC fields: %+v", requests)
 			}
 			v.SetConfig(cfg)
@@ -319,7 +319,7 @@ func TestClientAdapterSavePreservesSettingsDraft(t *testing.T) {
 				wantDraft.AllowLinkTest = !cfg.AllowLinkTest
 				wantConnects = 0
 			}
-			if v.submitted != nil || v.saved != want || v.draft != wantDraft || v.dirty() != editPreference {
+			if v.submitted != nil || !v.saved.Equal(want) || !v.draft.Equal(wantDraft) || v.dirty() != editPreference {
 				t.Fatal("adapter save acknowledgement did not preserve the remaining edits")
 			}
 			click(t, tt, "Adapter selection")
@@ -364,7 +364,7 @@ func TestClientAdapterSaveFailureRestoresSelection(t *testing.T) {
 			click(t, tt, "USB LAN · 169.254.20.1")
 			wantSave := cfg
 			wantSave.Client.NICName, wantSave.Client.NICAddr = "USB LAN", "169.254.20.1"
-			if len(requests) != 1 || requests[0] != wantSave {
+			if len(requests) != 1 || !requests[0].Equal(wantSave) {
 				t.Fatalf("adapter choice did not submit a save: %+v", requests)
 			}
 
@@ -372,7 +372,7 @@ func TestClientAdapterSaveFailureRestoresSelection(t *testing.T) {
 			v.SetState(state)
 			v.Complete(ActionSave)
 			tt.Frame()
-			if v.submitted != nil || v.saved != cfg || v.draft != wantDraft || v.dirty() != editPreference {
+			if v.submitted != nil || !v.saved.Equal(cfg) || !v.draft.Equal(wantDraft) || v.dirty() != editPreference {
 				t.Fatal("failed save did not restore the saved adapter while preserving other edits")
 			}
 			if v.canConnect() != !editPreference || !tt.HasText("Ethernet · 169.254.10.1") {
@@ -381,7 +381,7 @@ func TestClientAdapterSaveFailureRestoresSelection(t *testing.T) {
 
 			click(t, tt, "Adapter selection")
 			click(t, tt, "USB LAN · 169.254.20.1")
-			if len(requests) != 2 || requests[1] != wantSave {
+			if len(requests) != 2 || !requests[1].Equal(wantSave) {
 				t.Fatalf("choosing the same adapter did not retry the save: %+v", requests)
 			}
 		})

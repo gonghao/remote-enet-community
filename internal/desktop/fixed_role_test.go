@@ -70,7 +70,7 @@ func TestFixedRoleMissingDefaultsDoNotMigrateSharedConfig(t *testing.T) {
 		}
 		want := settings.Default()
 		want.Role = role
-		if c.Snapshot().Config != want {
+		if !c.Snapshot().Config.Equal(want) {
 			t.Fatal("missing configuration did not use role defaults")
 		}
 		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
@@ -79,7 +79,7 @@ func TestFixedRoleMissingDefaultsDoNotMigrateSharedConfig(t *testing.T) {
 		if err := c.Save(t.Context(), want); err != nil {
 			t.Fatal(err)
 		}
-		if got, err := settings.Load(path); err != nil || got != want {
+		if got, err := settings.Load(path); err != nil || !got.Equal(want) {
 			t.Fatal("fixed configuration failed v1 round trip")
 		}
 	}
@@ -87,7 +87,7 @@ func TestFixedRoleMissingDefaultsDoNotMigrateSharedConfig(t *testing.T) {
 		t.Fatal("role defaults migrated or changed shared configuration")
 	}
 	generic := fixedController(t, Options{}, production())
-	if generic.Snapshot().Config != legacy || generic.opts.ConfigPath != sharedPath {
+	if !generic.Snapshot().Config.Equal(legacy) || generic.opts.ConfigPath != sharedPath {
 		t.Fatal("generic library behavior changed")
 	}
 }
@@ -125,7 +125,7 @@ func TestFixedRoleExplicitPathsAndExistingConfigurationFailClosed(t *testing.T) 
 			stateDir := filepath.Join(t.TempDir(), "state")
 			opts := Options{ConfigPath: path, StateDir: stateDir, FixedRole: role}
 			matching := fixedController(t, opts, production())
-			if matching.Snapshot().Config != cfg {
+			if !matching.Snapshot().Config.Equal(cfg) {
 				t.Fatal("matching explicit legacy configuration was not reused")
 			}
 			other := settings.RoleClient
@@ -198,7 +198,7 @@ func TestFixedRoleRejectsRoleChangesAndForeignActions(t *testing.T) {
 			if err := c.Save(t.Context(), wrong); !errors.Is(err, ErrRole) {
 				t.Fatalf("save changed fixed role: %v", err)
 			}
-			if s := c.Snapshot(); s.Config != cfg || s.Error == "" || s.Notice != "" {
+			if s := c.Snapshot(); !s.Config.Equal(cfg) || s.Error == "" || s.Notice != "" {
 				t.Fatal("rejected save changed baseline or failed to publish error")
 			}
 			if raw, err := os.ReadFile(opts.ConfigPath); err != nil || !bytes.Equal(raw, original) {
@@ -236,7 +236,7 @@ func TestFixedRoleRejectsRoleChangesAndForeignActions(t *testing.T) {
 				t.Fatal(err)
 			}
 			cfg.AllowLinkTest = !cfg.AllowLinkTest
-			if err := c.Save(t.Context(), cfg); err != nil || c.Snapshot().Config != cfg {
+			if err := c.Save(t.Context(), cfg); err != nil || !c.Snapshot().Config.Equal(cfg) {
 				t.Fatal("fixed role rejected its own configuration")
 			}
 		})
@@ -331,11 +331,11 @@ func TestFixedControllersRunInParallelWithoutSharingPreferencesOrIdentities(t *t
 	operatorRuntime.emit(operatorState)
 	stateWhere(t, client, func(s State) bool { return s.Config.Client.Peer == operatorIdentity.Fingerprint().String() })
 	stateWhere(t, operator, func(s State) bool { return s.Runtime.Phase == app.PhaseConnected })
-	if got, err := settings.Load(operatorPath); err != nil || got != operatorCfg || operator.Snapshot().Config != operatorCfg {
+	if got, err := settings.Load(operatorPath); err != nil || !got.Equal(operatorCfg) || !operator.Snapshot().Config.Equal(operatorCfg) {
 		t.Fatal("client pairing or save changed operator preferences")
 	}
 	clientCfg.Client.Peer = operatorIdentity.Fingerprint().String()
-	if got, err := settings.Load(clientPath); err != nil || got != clientCfg {
+	if got, err := settings.Load(clientPath); err != nil || !got.Equal(clientCfg) {
 		t.Fatal("parallel saves or pairing lost client preferences")
 	}
 	if err := client.Stop(t.Context()); err != nil {

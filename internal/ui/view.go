@@ -148,9 +148,9 @@ func (v *View) SetConfig(cfg settings.Config) {
 	v.draft.Client.Peer = cfg.Client.Peer
 	if v.submitted != nil {
 		v.submitted.Client.Peer = cfg.Client.Peer
-		if *v.submitted == cfg {
+		if v.submitted.Equal(cfg) {
 			current, err := v.config()
-			clean = err == nil && current == cfg
+			clean = err == nil && current.Equal(cfg)
 			v.submitted = nil
 			v.savingAdapter = false
 		}
@@ -263,7 +263,7 @@ func (v *View) config() (settings.Config, error) {
 
 func (v *View) dirty() bool {
 	cfg, err := v.config()
-	return err != nil || cfg != v.saved
+	return err != nil || !cfg.Equal(v.saved)
 }
 
 func (v *View) locked() bool {

@@ -13,6 +13,9 @@ import (
 
 const maxConfigBytes = 64 << 10
 
+// Set with -ldflags '-X remote-enet/internal/settings.defaultCenterJSON=...'.
+var defaultCenterJSON string
+
 // Load returns defaults only when the file is absent. Existing files must be
 // regular files containing one complete versioned object, at most 64 KiB.
 func Load(path string) (Config, error) {
@@ -24,7 +27,12 @@ func Load(path string) (Config, error) {
 		if err := checkMissingConfigParents(path); err != nil {
 			return Config{}, err
 		}
-		return Default(), nil
+		cfg := baseConfig()
+		cfg.Center, err = loadDefaultCenter()
+		if err != nil {
+			return Config{}, err
+		}
+		return cfg, nil
 	}
 	if err != nil {
 		return Config{}, fmt.Errorf("settings: inspect config: %w", err)
@@ -54,8 +62,32 @@ func Load(path string) (Config, error) {
 	if !utf8.Valid(data) {
 		return Config{}, fmt.Errorf("settings: config must be valid UTF-8")
 	}
+	return decodeConfig(data)
+}
+
+func decodeConfig(data []byte) (Config, error) {
+	const name = "config"
+	object, err := readObject(data, name)
+	if err != nil {
+		return Config{}, fmt.Errorf("settings: decode config: %w", err)
+	}
 	var cfg Config
-	err = decodeObject(data, "config", map[string]any{
+	if err := decodeField(object["version"], "config.version", &cfg.Version); err != nil {
+		return Config{}, fmt.Errorf("settings: decode config: %w", err)
+	}
+	if cfg.Version != 1 && cfg.Version != Version {
+		return Config{}, fmt.Errorf("settings: unsupported version %d", cfg.Version)
+	}
+	operator := map[string]any{
+		"listen":          &cfg.Operator.Listen,
+		"endpoint":        &cfg.Operator.Endpoint,
+		"bind":            &cfg.Operator.Bind,
+		"diagnostic_port": &cfg.Operator.DiagnosticPort,
+		"control_port":    &cfg.Operator.ControlPort,
+		"discovery_port":  &cfg.Operator.DiscoveryPort,
+		"exclusive":       &cfg.Operator.Exclusive,
+	}
+	fields := map[string]any{
 		"version":         &cfg.Version,
 		"role":            &cfg.Role,
 		"allow_link_test": &cfg.AllowLinkTest,
@@ -64,18 +96,24 @@ func Load(path string) (Config, error) {
 			"nic_addr": &cfg.Client.NICAddr,
 			"peer":     &cfg.Client.Peer,
 		},
-		"operator": map[string]any{
-			"listen":          &cfg.Operator.Listen,
-			"endpoint":        &cfg.Operator.Endpoint,
-			"bind":            &cfg.Operator.Bind,
-			"diagnostic_port": &cfg.Operator.DiagnosticPort,
-			"control_port":    &cfg.Operator.ControlPort,
-			"discovery_port":  &cfg.Operator.DiscoveryPort,
-			"exclusive":       &cfg.Operator.Exclusive,
-		},
-	})
-	if err != nil {
+		"operator": operator,
+	}
+	if cfg.Version == Version {
+		operator["mode"] = &cfg.Operator.Mode
+		operator["hub"] = map[string]any{"addr": &cfg.Operator.Hub.Addr, "fp": &cfg.Operator.Hub.FP}
+		fields["center"] = centerFields(&cfg.Center)
+	}
+	if err := decodeFields(object, name, fields); err != nil {
 		return Config{}, fmt.Errorf("settings: decode config: %w", err)
+	}
+	center, err := loadDefaultCenter()
+	if err != nil {
+		return Config{}, err
+	}
+	if cfg.Version == 1 {
+		cfg.Version = Version
+		cfg.Operator.Mode = "direct"
+		cfg.Center = center
 	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
@@ -120,57 +158,115 @@ func configParent(path string) string {
 	return dir
 }
 
-// decodeObject rejects null, missing, duplicate and case-variant fields that
-// encoding/json would otherwise silently accept or merge into zero values.
-func decodeObject(data []byte, name string, fields map[string]any) error {
+func loadDefaultCenter() (Center, error) {
+	var center Center
+	if defaultCenterJSON == "" {
+		return center, nil
+	}
+	data := []byte(defaultCenterJSON)
+	if !utf8.Valid(data) {
+		return Center{}, fmt.Errorf("settings: default center must be valid UTF-8")
+	}
+	if err := decodeField(data, "center", centerFields(&center)); err != nil {
+		return Center{}, fmt.Errorf("settings: decode default center: %w", err)
+	}
+	if err := center.validate(); err != nil {
+		return Center{}, fmt.Errorf("settings: invalid default center: %w", err)
+	}
+	return center, nil
+}
+
+func centerFields(c *Center) map[string]any {
+	return map[string]any{
+		"id": &c.ID,
+		"api": func(raw json.RawMessage, name string) error {
+			var entries []*string
+			if err := json.Unmarshal(raw, &entries); err != nil {
+				return fmt.Errorf("%s: invalid value: %w", name, err)
+			}
+			c.API = make([]string, len(entries))
+			for i, entry := range entries {
+				if entry == nil {
+					return fmt.Errorf("%s[%d]: null is not allowed", name, i)
+				}
+				c.API[i] = *entry
+			}
+			return nil
+		},
+	}
+}
+
+// readObject preserves exact keys and checks duplicates before selecting a schema.
+func readObject(data []byte, name string) (map[string]json.RawMessage, error) {
 	d := json.NewDecoder(bytes.NewReader(data))
 	token, err := d.Token()
 	if err != nil {
-		return fmt.Errorf("%s: read object: %w", name, err)
+		return nil, fmt.Errorf("%s: read object: %w", name, err)
 	}
 	if token != json.Delim('{') {
-		return fmt.Errorf("%s: expected an object", name)
+		return nil, fmt.Errorf("%s: expected an object", name)
 	}
-	seen := make(map[string]bool, len(fields))
+	object := make(map[string]json.RawMessage)
 	for d.More() {
 		token, err := d.Token()
 		if err != nil {
-			return fmt.Errorf("%s: read field: %w", name, err)
+			return nil, fmt.Errorf("%s: read field: %w", name, err)
 		}
 		key := token.(string)
-		target, ok := fields[key]
-		if !ok {
-			return fmt.Errorf("%s: unknown field %q", name, key)
+		if _, ok := object[key]; ok {
+			return nil, fmt.Errorf("%s: duplicate field %q", name, key)
 		}
-		if seen[key] {
-			return fmt.Errorf("%s: duplicate field %q", name, key)
-		}
-		seen[key] = true
 		var raw json.RawMessage
 		if err := d.Decode(&raw); err != nil {
-			return fmt.Errorf("%s.%s: read value: %w", name, key, err)
+			return nil, fmt.Errorf("%s.%s: read value: %w", name, key, err)
 		}
-		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-			return fmt.Errorf("%s.%s: null is not allowed", name, key)
-		}
-		if nested, ok := target.(map[string]any); ok {
-			if err := decodeObject(raw, name+"."+key, nested); err != nil {
-				return err
-			}
-		} else if err := json.Unmarshal(raw, target); err != nil {
-			return fmt.Errorf("%s.%s: invalid value: %w", name, key, err)
-		}
+		object[key] = raw
 	}
 	if _, err := d.Token(); err != nil {
-		return fmt.Errorf("%s: close object: %w", name, err)
+		return nil, fmt.Errorf("%s: close object: %w", name, err)
 	}
 	if err := d.Decode(new(any)); err != io.EOF {
-		return fmt.Errorf("%s: trailing data", name)
+		return nil, fmt.Errorf("%s: trailing data", name)
 	}
-	if len(seen) != len(fields) {
-		return fmt.Errorf("%s: missing required fields", name)
+	return object, nil
+}
+
+func decodeFields(object map[string]json.RawMessage, name string, fields map[string]any) error {
+	for key := range object {
+		if _, ok := fields[key]; !ok {
+			return fmt.Errorf("%s: unknown field %q", name, key)
+		}
+	}
+	for key, target := range fields {
+		if err := decodeField(object[key], name+"."+key, target); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+func decodeField(raw json.RawMessage, name string, target any) error {
+	if raw == nil {
+		return fmt.Errorf("%s: missing required field", name)
+	}
+	if bytes.Equal(raw, []byte("null")) {
+		return fmt.Errorf("%s: null is not allowed", name)
+	}
+	switch target := target.(type) {
+	case map[string]any:
+		object, err := readObject(raw, name)
+		if err != nil {
+			return err
+		}
+		return decodeFields(object, name, target)
+	case func(json.RawMessage, string) error:
+		return target(raw, name)
+	default:
+		if err := json.Unmarshal(raw, target); err != nil {
+			return fmt.Errorf("%s: invalid value: %w", name, err)
+		}
+		return nil
+	}
 }
 
 // Save validates before touching disk and replaces the file only after the
@@ -181,6 +277,9 @@ func Save(path string, cfg Config) error {
 	}
 	if path == "" {
 		return fmt.Errorf("settings: config path is required")
+	}
+	if cfg.Center.API == nil {
+		cfg.Center.API = []string{}
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {

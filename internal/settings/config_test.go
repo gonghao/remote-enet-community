@@ -10,13 +10,14 @@ import (
 
 func TestDefault(t *testing.T) {
 	want := Config{
-		Version: 1, Role: "client", AllowLinkTest: true,
+		Version: 2, Role: "client", AllowLinkTest: true,
 		Operator: Operator{
+			Mode:   "direct",
 			Listen: "0.0.0.0:47000", DiagnosticPort: 6801, ControlPort: 6811,
 			DiscoveryPort: 6811, Exclusive: runtime.GOOS == "windows",
 		},
 	}
-	if got := Default(); got != want {
+	if got := Default(); !got.Equal(want) {
 		t.Fatalf("default = %+v, want %+v", got, want)
 	}
 	for _, role := range []string{RoleClient, RoleOperator} {
@@ -29,7 +30,7 @@ func TestDefault(t *testing.T) {
 }
 
 func TestValidateRoleAndVersion(t *testing.T) {
-	for _, version := range []int{-1, 0, 2} {
+	for _, version := range []int{-1, 0, 1, 3} {
 		cfg := Default()
 		cfg.Version = version
 		if err := cfg.Validate(); err == nil {

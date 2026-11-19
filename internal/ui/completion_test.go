@@ -48,7 +48,7 @@ func TestUnrelatedErrorsDoNotCompletePendingActions(t *testing.T) {
 				}
 				v.Complete(action)
 				current, err := v.config()
-				if err != nil || current != draft || v.saved != baseline {
+				if err != nil || !current.Equal(draft) || !v.saved.Equal(baseline) {
 					t.Fatal("completion changed the form or saved configuration")
 				}
 				tt.Frame()

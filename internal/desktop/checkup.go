@@ -68,7 +68,7 @@ func (c *Controller) CheckConnection(ctx context.Context, invitation string) err
 		}
 	}
 	c.mu.Lock()
-	current := epoch == c.stopEpoch && cfg == c.state.Config && c.run == g
+	current := epoch == c.stopEpoch && cfg.Equal(c.state.Config) && c.run == g
 	c.mu.Unlock()
 	if err == nil && current {
 		in := checkup.Input{Config: cfg, Runtime: pending.sample, Running: g != nil}
@@ -91,7 +91,7 @@ func (c *Controller) CheckConnection(ctx context.Context, invitation string) err
 	defer c.mu.Unlock()
 	c.check = nil
 	c.state.Checking = false
-	current = !c.closed && c.ctx.Err() == nil && epoch == c.stopEpoch && cfg == c.state.Config && c.run == g
+	current = !c.closed && c.ctx.Err() == nil && epoch == c.stopEpoch && cfg.Equal(c.state.Config) && c.run == g
 	if current && g != nil {
 		current = !g.stopping && g.ctx.Err() == nil && sameCheckRuntime(pending.sample, g.runtime.Snapshot())
 	}

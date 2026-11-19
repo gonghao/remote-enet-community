@@ -32,7 +32,7 @@ func TestFixedRoleAcrossPagesAndConfigUpdates(t *testing.T) {
 			wrong.AllowLinkTest = !cfg.AllowLinkTest
 			v.SetConfig(wrong)
 			tt.Frame()
-			if v.saved != cfg || v.draft != cfg {
+			if !v.saved.Equal(cfg) || !v.draft.Equal(cfg) {
 				t.Fatal("a mismatched config replaced the fixed role or saved settings")
 			}
 			openSettings(t, tt)

@@ -47,7 +47,7 @@ func TestDirectActionsUseIndependentCompletion(t *testing.T) {
 
 func TestClientDoesNotExposeDirectActions(t *testing.T) {
 	v := New(settings.Default(), Actions{ConnectMGU: func() { t.Error("Client admitted Operator action") }, ConnectEVO: func() { t.Error("Client admitted EVO action") }, DisconnectMGU: func() { t.Error("Client admitted Operator action") }})
-	tt := ui.NewTester(v.Render, 820, 640)
+	tt := ui.NewTester(v.Render, clientWidth, clientHeight)
 	for _, label := range []string{"Enable MGU direct link", "Enable EVO direct link", "Disable head unit direct link"} {
 		if _, found := tt.Find(label); found {
 			t.Fatal("Client exposed a direct-access control")

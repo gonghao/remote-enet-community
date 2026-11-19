@@ -8,6 +8,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"remote-enet/internal/app"
+	"remote-enet/internal/identity"
 	"remote-enet/internal/settings"
 )
 
@@ -35,6 +36,11 @@ func TestFixedRoleAcrossPagesAndConfigUpdates(t *testing.T) {
 			}
 			openSettings(t, tt)
 			assertRoleControls(t, tt, role)
+			for _, label := range []string{"Adapter selection", "Refresh adapters"} {
+				if _, found := tt.Find(label); found {
+					t.Errorf("%s Settings exposed %q", role, label)
+				}
+			}
 			click(t, tt, "Allow peer connection tests")
 			click(t, tt, "Save settings")
 			if len(saved) != 1 || saved[0].Role != role || !v.dirty() {
@@ -90,8 +96,8 @@ func TestDashboardPrimaryControlsAreVisible(t *testing.T) {
 					state = previewState()
 				}
 				v.SetState(state)
-				width, height := 820, 640
-				labels := []string{"Connect client", "Stop runtime", "Invitation code", "Settings", "Log"}
+				width, height := clientWidth, clientHeight
+				labels := []string{"Connect client", "Stop runtime", "Invitation code", "Adapter selection", "Refresh adapters", "Settings", "Log"}
 				if role == settings.RoleOperator {
 					width, height = 1080, 760
 					labels = []string{"Start operator", "Stop runtime", "Generate invitation", "Copy invitation", "Test connection", "Settings", "Log"}
@@ -103,13 +109,46 @@ func TestDashboardPrimaryControlsAreVisible(t *testing.T) {
 						t.Errorf("primary control %q is not visible: %+v", label, r)
 					}
 				}
-				for _, absent := range []string{"Public endpoint", "Refresh adapters", "Save settings"} {
+				for _, absent := range []string{"Public endpoint", "Save settings"} {
 					if _, found := tt.Find(absent); found {
 						t.Errorf("dashboard still contains configuration control %q", absent)
 					}
 				}
 				if !tt.HasText("VEHICLE") || !tt.HasText("CONNECTION") || !tt.HasText("SESSION") {
 					t.Fatal("dashboard did not expose all three information groups")
+				}
+			})
+		}
+	}
+}
+
+func TestClientDefaultWindowFitsHomeWithoutScrolling(t *testing.T) {
+	for _, language := range []string{"en", "zh-Hans", "zh-Hant"} {
+		for _, running := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/connected=%t", language, running), func(t *testing.T) {
+				v := New(settings.Default(), Actions{})
+				v.SetLanguage(language)
+				state := State{}
+				if running {
+					state = clientPreviewState()
+				}
+				state.Notice = "Interfaces refreshed."
+				v.SetState(state)
+				// Shrink the viewport to verify that the full content, including
+				// its bottom padding, leaves room for taller platform fonts.
+				const height = clientHeight - 24
+				tt := ui.NewTester(v.Render, clientWidth, height)
+				if !tt.HasText(v.tr(state.Notice)) {
+					t.Fatal("adapter refresh notice is missing")
+				}
+				last := v.tr("Next retry")
+				bottom, ok := tt.Find(last)
+				if !ok || bottom.Y < 0 || bottom.H <= 0 || bottom.Y+bottom.H > height {
+					t.Fatalf("last information row encroaches on the 24 DIP reserve: %+v", bottom)
+				}
+				tt.Scroll(clientWidth/2, height/2, 0, 600)
+				if after, _ := tt.Find(last); after != bottom {
+					t.Fatalf("default dashboard scrolled: %+v → %+v", bottom, after)
 				}
 			})
 		}
@@ -147,10 +186,15 @@ func TestLogIsBoundedAndDoesNotExposeInvitation(t *testing.T) {
 
 func TestClientSettingsPreserveInvitationAndEdits(t *testing.T) {
 	var saved settings.Config
-	v := New(settings.Default(), Actions{Save: func(c settings.Config) { saved = c }})
-	tt := ui.NewTester(v.Render, 820, 640)
+	cfg := settings.Default()
+	cfg.Client.Peer = (identity.Fingerprint{1}).String()
+	v := New(cfg, Actions{Save: func(c settings.Config) { saved = c }})
+	tt := ui.NewTester(v.Render, clientWidth, clientHeight)
 	input(t, tt, "Invitation code", "test-only-paste")
 	openSettings(t, tt)
+	if !tt.HasText("Remembered peer") || !tt.HasText(cfg.Client.Peer) {
+		t.Fatal("Settings did not show the remembered peer")
+	}
 	click(t, tt, "Allow peer connection tests")
 	click(t, tt, "Log")
 	v.SetState(State{Runtime: app.Snapshot{Phase: app.PhaseIdle}, Notice: "Adapters refreshed."})

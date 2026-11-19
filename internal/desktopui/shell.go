@@ -96,12 +96,17 @@ func (s *shell) ready() {
 	}
 	s.view = renetui.New(s.state.Config, actions)
 
+	workArea := mygo.Screen.PrimaryDisplay().WorkArea
+	width, height := s.product.initialSize(workArea.Width, workArea.Height)
 	s.window = mygo.NewWindow(mygo.WindowOptions{
-		Title: s.tr(s.product.name), Width: s.product.width, Height: s.product.height,
+		Title: s.tr(s.product.name), Width: width, Height: height,
 		MinWidth: s.product.minWidth, MinHeight: s.product.minHeight,
+		DisableResize: s.product.fixedSize, DisableMaximize: s.product.fixedSize,
+		Frameless: true, Hidden: mainWindowStartsHidden,
 		BackgroundColor: renetui.BackgroundColor,
 		Content:         ui.View(s.view.Render),
 	})
+	prepareMainWindow(s.window)
 	s.post, s.invalidate = s.window.Update, s.window.Invalidate
 	_ = s.window.SetIcon(brand.PNG(256, true, false))
 	s.registerCaptureShortcut = func(acc string, keys func(string), trigger func()) error {

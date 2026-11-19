@@ -21,6 +21,14 @@ import (
 	"remote-enet/internal/transport"
 )
 
+// Match the desktop host's Client sizes in internal/desktopui/product.go.
+const (
+	clientWidth     = 440
+	clientHeight    = 700
+	clientMinWidth  = 420
+	clientMinHeight = 480
+)
+
 // Preview fixtures contain no real invitations, device identities or vehicle data.
 func previewState() State {
 	return State{
@@ -42,6 +50,14 @@ func previewState() State {
 	}
 }
 
+func clientPreviewState() State {
+	state := previewState()
+	state.Runtime.RTT = 999900 * time.Microsecond
+	state.Runtime.Metrics.Totals = observe.Bytes{In: 10239 * (1 << 20) / 10, Out: 10238 * (1 << 20) / 10}
+	state.Runtime.Metrics.Rate = observe.Rate{Window: time.Second, InBytesPerSecond: 1023.9 * (1 << 20), OutBytesPerSecond: 1023.8 * (1 << 20)}
+	return state
+}
+
 func TestWorkspacePreview(t *testing.T) {
 	dir := os.Getenv("RENET_UI_PREVIEW_DIR")
 	if dir == "" {
@@ -51,16 +67,21 @@ func TestWorkspacePreview(t *testing.T) {
 		t.Fatal(err)
 	}
 	actions := Actions{Save: func(settings.Config) {}, Connect: func(string) {}, Listen: func() {}, Stop: func() {}, IssueInvite: func() {}, TestLink: func() {}, Copy: func(string) {}, Refresh: func() {}, Quit: func() {}}
+	clientState := clientPreviewState()
+	clientState.Notice = "Interfaces refreshed."
 	for _, role := range []string{settings.RoleClient, settings.RoleOperator} {
 		cfg := operatorConfig()
 		cfg.Role = role
 		cfg.Operator.Exclusive = role == settings.RoleOperator
 		v := New(cfg, actions)
-		v.SetState(previewState())
-		width, height := 820, 640
+		state := previewState()
+		width, height := clientWidth, clientHeight
 		if role == settings.RoleOperator {
 			width, height = 1080, 760
+		} else {
+			state = clientState
 		}
+		v.SetState(state)
 		tt := ui.NewTester(v.Render, width, height)
 		writePreview(t, tt, filepath.Join(dir, role+"-100.png"))
 		tt.SetZoom(1.5)
@@ -71,6 +92,23 @@ func TestWorkspacePreview(t *testing.T) {
 		click(t, tt, "Log")
 		writePreview(t, tt, filepath.Join(dir, role+"-log.png"))
 	}
+
+	cfg := settings.Default()
+	cfg.Client.NICName, cfg.Client.NICAddr = "Ethernet", "169.254.10.1"
+	client := New(cfg, actions)
+	client.SetState(clientState)
+	for _, language := range []string{"zh-Hans", "zh-Hant"} {
+		client.SetLanguage(language)
+		tt := ui.NewTester(client.Render, clientWidth, clientHeight)
+		writePreview(t, tt, filepath.Join(dir, "client-"+language+"-100.png"))
+	}
+	client.SetLanguage("en")
+	client.SetState(State{NICs: previewState().NICs})
+	tt := ui.NewTester(client.Render, clientMinWidth, clientMinHeight)
+	input(t, tt, "Invitation code", "renet1:DEMO")
+	writePreview(t, tt, filepath.Join(dir, "client-min-100.png"))
+	tt.SetZoom(1.5)
+	writePreview(t, tt, filepath.Join(dir, "client-min-150.png"))
 }
 
 func writePreview(t *testing.T, tt *ui.Tester, path string) {

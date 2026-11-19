@@ -52,18 +52,14 @@ func nicLabel(nic carside.NIC) string {
 	return nic.Name + " · " + nic.Address.String()
 }
 
-func (v *View) nicSelect(c *ui.Context) {
+func (v *View) nicSelect(c *ui.Context, label string, labelWidth float32) {
 	choices, selected := v.nicChoices()
-	ui.Column(c).FillWidth().MinWidth(0).Gap(6).Children(func() {
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
-			ui.Text(c, v.tr("Vehicle-side adapter")).Grow(1).FontSize(12).Bold()
-			if ui.Button(c.Key("refresh-nics"), v.tr("Refresh")).Label(v.tr("Refresh adapters")).FontSize(11).Disabled(v.locked() || v.refreshing || v.actions.Refresh == nil).Clicked() {
-				v.refreshing = true
-				v.actions.Refresh()
-			}
-		})
+	ui.Row(c).FillWidth().MinWidth(0).Gap(8).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, label).FontSize(clientFieldLabelSize).Width(labelWidth).Shrink(0)
 		sel := ui.SelectBase(c.Key("adapter"), &selected)
-		sel.Trigger.Label(v.tr("Adapter selection")).Disabled(v.locked()).FillWidth().MinWidth(0).Height(32).Padding(8, 12).Background(inputSurface).Border(1, controlStroke).Radius(0).Children(func() {
+		disabled := v.locked() || v.submitted != nil || v.actions.Save == nil
+		sel.Trigger.Label(v.tr("Adapter selection")).Disabled(disabled).Grow(1).MinWidth(0).Height(32).Padding(4, 8).Background(inputSurface).Border(1, controlStroke).Radius(0).
+			Tooltip(v.tr("Automatic requires one unambiguous adapter. Fixed selections are kept if an adapter disappears.")).Children(func() {
 			ui.Text(c, choices[selected].label).Grow(1).MinWidth(0).SingleLine().TruncateMiddle()
 			ui.Text(c, "⌄").TextColor(muted)
 		})
@@ -79,11 +75,21 @@ func (v *View) nicSelect(c *ui.Context) {
 				}
 			})
 		})
-		if sel.Trigger.Changed() {
+		if !disabled && sel.Trigger.Changed() {
 			choice := choices[selected]
 			v.draft.Client.NICName, v.draft.Client.NICAddr = choice.name, choice.address
+			cfg := v.saved
+			cfg.Client.NICName, cfg.Client.NICAddr = choice.name, choice.address
+			v.submitted = &cfg
+			v.savingAdapter = true
+			v.actions.Save(cfg)
 		}
-		ui.Text(c, v.tr("Automatic requires one unambiguous adapter. Fixed selections are kept if an adapter disappears.")).FontSize(11).TextColor(muted)
+		refresh := v.tr("Refresh adapters")
+		if ui.Button(c.Key("refresh-nics"), "↻").Label(refresh).Tooltip(refresh).Size(32, 32).Padding(0).Shrink(0).
+			Disabled(v.locked() || v.refreshing || v.actions.Refresh == nil).Clicked() {
+			v.refreshing = true
+			v.actions.Refresh()
+		}
 	})
 }
 
@@ -102,13 +108,14 @@ func (v *View) operatorForm(c *ui.Context) {
 	ui.Text(c, v.tr("Windows: one diagnostic process at a time. Owner detection is unavailable on other platforms.")).FontSize(11).TextColor(muted)
 }
 
-func (v *View) value(c *ui.Context, label, text string) {
-	if text == "" {
-		text = "—"
+func (v *View) value(c *ui.Context, label, text string) ui.Element {
+	display := text
+	if display == "" {
+		display = "—"
 	}
-	ui.Row(c).FillWidth().MinWidth(0).MinHeight(20).Gap(8).AlignItems(ui.Center).Children(func() {
+	return ui.Row(c).FillWidth().MinWidth(0).MinHeight(20).Gap(8).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, v.tr(label)).FontSize(11).TextColor(muted).Shrink(0)
-		ui.Text(c, text).Grow(1).MinWidth(0).SingleLine().TruncateMiddle().TextAlign(ui.End).Font("monospace").FontSize(12).Tooltip(text)
+		ui.Text(c, display).Grow(1).MinWidth(0).SingleLine().TruncateMiddle().TextAlign(ui.End).Font("monospace").FontSize(12).Tooltip(text)
 	})
 }
 

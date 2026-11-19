@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "goModSHA256": "070a13f5f1258d02ddc30b9604b4778e3ff91b263df2fe3602c9afbb8ab2b36e",
+  "goModSHA256": "ca0511bb841516f959f0dfcaa85d4746da17735ed8d34a6a21953d0bf8d0d391",
   "components": [
     {
       "name": "github.com/ebitengine/purego",

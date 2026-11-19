@@ -18,12 +18,9 @@ const Accent = "#2356d8"
 
 var plateColor = color.NRGBA{R: 243, G: 245, B: 248, A: 255}
 
-var accentColor = color.NRGBA{R: 0x23, G: 0x56, B: 0xd8, A: 255}
-
-// The macOS mark gradient brackets the accent: azure above, indigo below.
 var (
-	macAccentTop    = color.NRGBA{R: 66, G: 150, B: 246, A: 255}
-	macAccentBottom = color.NRGBA{R: 48, G: 52, B: 232, A: 255}
+	accentTop    = color.NRGBA{R: 0x42, G: 0x96, B: 0xf6, A: 255}
+	accentBottom = color.NRGBA{R: 0x30, G: 0x34, B: 0xe8, A: 255}
 )
 
 // macPlateBottom is the accent mixed 25% into white.
@@ -87,8 +84,18 @@ func artworkFor(size int) artwork {
 	}
 }
 
-// SVG returns a detached copy of the 32-unit master; compact grids are separate assets.
-func SVG() []byte { return []byte(markSVG) }
+// SVG exports the color mark on the 32-unit grid.
+func SVG() []byte {
+	var data bytes.Buffer
+	data.WriteString("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"512\" height=\"512\" viewBox=\"0 0 32 32\" shape-rendering=\"crispEdges\">\n")
+	data.WriteString("  <title>Remote ENET — RJ45 Car, 32-unit optical master</title>\n")
+	master.renderRects(false, func(r rectangle, fill color.NRGBA) {
+		fmt.Fprintf(&data, "  <rect x=\"%d\" y=\"%d\" width=\"%d\" height=\"%d\" fill=\"#%02x%02x%02x\"/>\n",
+			r.X, r.Y, r.Width, r.Height, fill.R, fill.G, fill.B)
+	})
+	data.WriteString("</svg>\n")
+	return data.Bytes()
+}
 
 // PNG accepts multiples of 16 up to 1024, plus 20.
 // Template uses black alpha with transparent cutouts and ignores plate.
@@ -103,8 +110,7 @@ func PNG(size int, plate, template bool) []byte {
 }
 
 // MacPNG is the macOS app icon: Apple's 824 body (inset 100 on a 1024 canvas)
-// as a light gradient plate, with the mark at 5/8 of the canvas and its accent
-// shaded row by row (see macAccent). The corners
+// as a light gradient plate, with the mark at 5/8 of the canvas. The corners
 // are superellipse arcs (extent 270, exponent 3.5) approximating Apple's
 // continuous 185 corner; a circular 185 arc reads visibly rounder in the Dock.
 // A bundled .icns gets no system mask, so the rounded body and its margin must
@@ -138,25 +144,15 @@ func MacPNG(size int) []byte {
 	}
 	origin, unit := image.Pt((size-mark)/2, (size-mark)/2), mark/art.grid
 	paint(im, origin, art, unit, false, false)
-	top, bottom := art.accentRows()
-	for y := origin.Y + top*unit; y < origin.Y+bottom*unit; y++ {
-		shade := macAccent(art, (y-origin.Y)/unit)
-		for x := origin.X; x < origin.X+mark; x++ {
-			if im.NRGBAAt(x, y) == accentColor {
-				im.SetNRGBA(x, y, shade)
-			}
-		}
-	}
 	return encode(im)
 }
 
-// macAccent shades one grid row of the mark from azure at the top to indigo at
+// accentForRow shades one grid row of the mark from azure at the top to indigo at
 // the bottom. Whole rows keep each cell flat.
-func macAccent(art artwork, row int) color.NRGBA {
-	top, bottom := art.accentRows()
-	t := float64(row-top) / float64(bottom-1-top)
+func accentForRow(row, top, bottom int) color.NRGBA {
+	t := float64(row-top) / float64(max(1, bottom-1-top))
 	mix := func(a, b uint8) uint8 { return uint8(math.Round(float64(a) + t*(float64(b)-float64(a)))) }
-	return color.NRGBA{R: mix(macAccentTop.R, macAccentBottom.R), G: mix(macAccentTop.G, macAccentBottom.G), B: mix(macAccentTop.B, macAccentBottom.B), A: 255}
+	return color.NRGBA{R: mix(accentTop.R, accentBottom.R), G: mix(accentTop.G, accentBottom.G), B: mix(accentTop.B, accentBottom.B), A: 255}
 }
 
 // accentRows returns the half-open grid row range covered by accent cells.
@@ -184,7 +180,24 @@ func paint(im *image.NRGBA, origin image.Point, art artwork, unit int, plate, te
 		body := image.Rect(0, 0, art.grid*unit, art.grid*unit).Add(origin)
 		draw.Draw(im, body, image.NewUniform(plateColor), image.Point{}, draw.Src)
 	}
-	for _, r := range art.boxes {
+	art.renderRects(template, func(r rectangle, fill color.NRGBA) {
+		box := image.Rect((r.X-art.start)*unit, (r.Y-art.start)*unit, (r.X+r.Width-art.start)*unit, (r.Y+r.Height-art.start)*unit).Add(origin)
+		draw.Draw(im, box, image.NewUniform(fill), image.Point{}, draw.Src)
+	})
+}
+
+func (a artwork) renderRects(template bool, emit func(rectangle, color.NRGBA)) {
+	top, bottom := a.accentRows()
+	for _, r := range a.boxes {
+		if !template && r.Fill == Accent {
+			band := r
+			band.Height = 1
+			for y := r.Y; y < r.Y+r.Height; y++ {
+				band.Y = y
+				emit(band, accentForRow(y-a.start, top, bottom))
+			}
+			continue
+		}
 		if len(r.Fill) != 7 || r.Fill[0] != '#' {
 			panic("brand: invalid source color")
 		}
@@ -200,8 +213,7 @@ func paint(im *image.NRGBA, origin image.Point, art artwork, unit int, plate, te
 				fill = color.NRGBA{A: 255}
 			}
 		}
-		box := image.Rect((r.X-art.start)*unit, (r.Y-art.start)*unit, (r.X+r.Width-art.start)*unit, (r.Y+r.Height-art.start)*unit).Add(origin)
-		draw.Draw(im, box, image.NewUniform(fill), image.Point{}, draw.Src)
+		emit(r, fill)
 	}
 }
 

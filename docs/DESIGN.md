@@ -269,11 +269,11 @@ func (a *App) RunConnTest(ctx context.Context) error
 | 车辆信息 | VIN、型号/车型代码、生产日期、I-level（出厂/当前）、里程 | 同左（来自车端推送） | VIN/网关/MAC M3；型号、I-level、里程需 UDS 读 DID，M3 后半 |
 | 连接详情 | 车侧网卡名、网卡 IP、ZGW IP、MAC、隧道公网地址 | 暴露地址、Exposer 类型、E-Sys Connect 面板（显示该填的 gateway URL） | M3 |
 | 实时车况 | 电压、延迟、诊断模式、PAD(编程/编码)状态 | 同左 + PAD 开关 + 电压/延迟历史曲线（13V 下限线） | 4.7 节，M3 后半 |
-| 操作 | 粘贴邀请码 / 连接 / 断开 / 停止中继 / 重新探测 | 生成邀请、结束会话、连接测试(safe/marginal/unsafe)、Relay exclusive(独占，拒绝第三方会话)、带宽上限 | M3；带宽上限 M4 |
+| 操作 | 会话首页手动选择车侧网卡（即时保存）/ 刷新网卡 / 粘贴邀请码 / 连接 / 断开 / 停止中继 / 重新探测 | 生成邀请、结束会话、连接测试(safe/marginal/unsafe)、Relay exclusive(独占，拒绝第三方会话)、带宽上限 | M3；带宽上限 M4 |
 | 防火墙状态 | 检测本机防火墙是否会拦 6811/6801（macOS/Windows 各自实现） | — | M3 |
 | 日志 | 事件日志 | 事件 + 隧道数据 + HSFZ 帧（verbose 开关、按 IP 分组视图）、帧数 ↑↓ 与丢包计数、保存日志 | 事件 M3；帧解析 M3 后半 |
 | 聊天 | 时间戳、已读、文件/图片、粘贴截图 | 同左 | 以后 |
-| 设置 | 网卡手动选择、开机自启 | 监听端口、DDNS 域名、暴露网卡、Direct-link 自检、HTTP 刷写模式切换（E-Sys HTTP / ISTA HTTP / 关） | M3；HTTP 刷写 M4 |
+| 设置 | 开机自启 | 监听端口、DDNS 域名、暴露网卡、Direct-link 自检、HTTP 刷写模式切换（E-Sys HTTP / ISTA HTTP / 关） | M3；HTTP 刷写 M4 |
 | Direct link 面板 | — | 当前隧道、已暴露的 ECU 地址（如 `0x63 HU_MGU`、`0x37 RAM`）、Test tunnel、Detect | M4 |
 | 其他 | 自动更新（含 Beta 通道）、内置帮助 | 同左 + 恢复工具(EnergyMode/HU/DTC)、K+DCAN 桥、SSH 使能、直发 UDS、发动机运转检测 | 自动更新 M5；恢复工具等看 mgu_kit 已有能力，另立项目 |
 

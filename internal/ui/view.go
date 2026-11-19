@@ -93,6 +93,7 @@ type View struct {
 	ports                               [3]string
 	invitation                          string
 	submitted                           *settings.Config
+	savingAdapter                       bool
 	refreshing                          bool
 	connecting                          bool
 	listening                           bool
@@ -137,6 +138,7 @@ func (v *View) SetConfig(cfg settings.Config) {
 			current, err := v.config()
 			clean = err == nil && current == cfg
 			v.submitted = nil
+			v.savingAdapter = false
 		}
 	}
 	v.saved = cfg
@@ -173,13 +175,19 @@ func (v *View) SetState(state State) {
 	v.state = state
 }
 
-// Complete releases only action's request latch after SetConfig and SetState.
+// Complete releases the action's request latch after SetConfig and SetState.
 // The integrator must reject stale completions using its per-action request IDs.
-// A save completion never changes the saved baseline or the editable form.
+// An unacknowledged home-page adapter save restores only the draft NIC fields
+// from the saved baseline. Settings saves preserve the form on failure.
 func (v *View) Complete(action Action) {
 	switch action {
 	case ActionSave:
+		if v.submitted != nil && v.savingAdapter {
+			v.draft.Client.NICName = v.saved.Client.NICName
+			v.draft.Client.NICAddr = v.saved.Client.NICAddr
+		}
 		v.submitted = nil
+		v.savingAdapter = false
 	case ActionRefresh:
 		v.refreshing = false
 	case ActionConnect:

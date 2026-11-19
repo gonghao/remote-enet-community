@@ -30,11 +30,15 @@ const (
 // Render builds native controls; the host owns window sizing and invalidation.
 func (v *View) Render(c *ui.Context) {
 	c.SetTheme(Theme())
-	ui.Column(c).Fill().Children(func() {
+	ui.Column(c).Fill().Border(1, line).Radius(0).Children(func() {
 		v.header(c)
 		v.captureMarkerBar(c)
 		ui.Scroll(c.Key(v.page)).Grow(1).FillWidth().MinHeight(0).Children(func() {
-			ui.Column(c).FillWidth().Padding(16).Gap(12).Children(func() {
+			vertical, horizontal, gap := float32(16), float32(16), float32(12)
+			if v.role == settings.RoleClient && v.page == sessionPage {
+				vertical, horizontal, gap = 8, 12, 4
+			}
+			ui.Column(c).FillWidth().Padding(vertical, horizontal).Gap(gap).Children(func() {
 				switch v.page {
 				case settingsPage:
 					v.settingsPage(c)
@@ -81,25 +85,37 @@ func (v *View) roleTitle() string {
 
 func (v *View) header(c *ui.Context) {
 	w, _ := c.Size()
-	ui.Row(c).FillWidth().Padding(8, 16).Gap(8).AlignItems(ui.Center).Background(panel).BorderWidth(0, 0, 1, 0).BorderColor(line).Children(func() {
+	padding, gap := float32(16), float32(8)
+	compact := w < 400
+	if compact {
+		padding, gap = 8, 4
+	}
+	button := func(key, label, access string) ui.Element {
+		b := ui.Button(c.Key(key), v.tr(label)).Label(v.tr(access)).Shrink(0)
+		if compact {
+			b.Padding(6, 8)
+		}
+		return b
+	}
+	ui.Row(c).FillWidth().Padding(8, padding).Gap(gap).AlignItems(ui.Center).Background(panel).BorderWidth(0, 0, 1, 0).BorderColor(line).DragWindow().Children(func() {
 		ui.Image(c.Key("brand-mark"), brandMark).Size(32, 32).Shrink(0)
 		title := "Remote ENET · " + v.tr(v.roleTitle())
 		if w < 600 {
 			title = v.roleTitle()
 		}
-		ui.Text(c, v.tr(title)).Grow(1).MinWidth(0).SingleLine().FontSize(16).Bold()
+		ui.Text(c, v.tr(title)).Grow(1).MinWidth(0).SingleLine().TruncateMiddle().FontSize(16).Bold()
 		if v.page != sessionPage {
-			if ui.Button(c.Key("back"), v.tr("Back")).Label(v.tr("Back to session")).Clicked() {
+			if button("back", "Back", "Back to session").Clicked() {
 				v.page = sessionPage
 			}
 		}
-		if ui.Button(c.Key("settings"), v.tr("Settings")).Label(v.tr("Settings")).Disabled(v.page == settingsPage).Clicked() {
+		if button("settings", "Settings", "Settings").Disabled(v.page == settingsPage).Clicked() {
 			v.page = settingsPage
 		}
-		if ui.Button(c.Key("log"), v.tr("Log")).Label(v.tr("Log")).Disabled(v.page == logPage).Clicked() {
+		if button("log", "Log", "Log").Disabled(v.page == logPage).Clicked() {
 			v.page = logPage
 		}
-		if ui.Button(c.Key("quit"), v.tr("Quit")).Label(v.tr("Quit Remote ENET")).Disabled(v.actions.Quit == nil).Clicked() {
+		if button("quit", "Quit", "Quit Remote ENET").Disabled(v.actions.Quit == nil).Clicked() {
 			v.actions.Quit()
 		}
 	})
@@ -146,13 +162,18 @@ func (v *View) banner(c *ui.Context, title, message string, text, fill ui.Color,
 }
 
 func (v *View) startControls(c *ui.Context) {
+	client := v.role == settings.RoleClient
+	height := float32(36)
+	if client {
+		height = 32
+	}
 	ui.Row(c).FillWidth().Gap(8).Children(func() {
-		if v.role == settings.RoleClient {
+		if client {
 			label := "Connect"
 			if v.connecting {
 				label = "Starting…"
 			}
-			if ui.PrimaryButton(c.Key("connect"), v.tr(label)).Label(v.tr("Connect client")).Grow(1).Height(36).Disabled(!v.canConnect()).Clicked() {
+			if ui.PrimaryButton(c.Key("connect"), v.tr(label)).Label(v.tr("Connect client")).Grow(1).Height(height).Disabled(!v.canConnect()).Clicked() {
 				v.connecting = true
 				v.actions.Connect(strings.TrimSpace(v.invitation))
 			}
@@ -173,7 +194,7 @@ func (v *View) startControls(c *ui.Context) {
 		if v.state.Stopping || v.stopping {
 			label = "Stopping…"
 		}
-		if ui.Button(c.Key("stop"), v.tr(label)).Label(v.tr("Stop runtime")).Grow(1).Height(36).TextColor(c.Theme().Danger).Disabled(!v.canStop()).Clicked() {
+		if ui.Button(c.Key("stop"), v.tr(label)).Label(v.tr("Stop runtime")).Grow(1).Height(height).TextColor(c.Theme().Danger).Disabled(!v.canStop()).Clicked() {
 			v.stopping = true
 			v.actions.Stop()
 		}
@@ -188,12 +209,19 @@ func (v *View) startControls(c *ui.Context) {
 		status = "Waiting for settings to be saved…"
 	case v.dirty():
 		status = "Unsaved changes · open Settings and save before starting."
-	case v.role == settings.RoleClient && strings.TrimSpace(v.invitation) == "" && v.saved.Client.Peer == "":
-		status = "Paste an invitation from your operator to connect."
+	case client && strings.TrimSpace(v.invitation) == "":
+		status = "Leave the invitation empty to use the remembered peer."
+		if v.saved.Client.Peer == "" {
+			status = "Paste an invitation from your operator to connect."
+		}
 	case v.role == settings.RoleOperator && (v.saved.Operator.Endpoint == "" || v.saved.Operator.Bind == ""):
 		status = "Open Settings to save a public endpoint and presentation IPv4."
 	}
-	ui.Text(c, v.tr(status)).FontSize(11).TextColor(muted).Role(ui.RoleStatus)
+	message := v.tr(status)
+	text := ui.Text(c, message).FontSize(11).TextColor(muted).Role(ui.RoleStatus)
+	if client {
+		text.FillWidth().MinWidth(0).SingleLine().Tooltip(message)
+	}
 }
 
 func (v *View) settingsPage(c *ui.Context) {
@@ -203,17 +231,15 @@ func (v *View) settingsPage(c *ui.Context) {
 	if v.locked() {
 		ui.Text(c, v.tr("Runtime active · stop before changing network settings.")).TextColor(amber).FontSize(11).Role(ui.RoleStatus)
 	}
-	if v.role == settings.RoleClient {
-		v.card(c.Key("client-settings"), "Vehicle network", "", func() {
-			v.nicSelect(c)
-			if v.saved.Client.Peer != "" {
-				v.value(c, "Remembered peer", v.saved.Client.Peer)
-			}
-		})
-	} else {
+	if v.role == settings.RoleOperator {
 		v.card(c.Key("operator-settings"), "Network & presentation", "", func() { v.operatorForm(c) })
 	}
-	v.card(c.Key("save-settings"), "Preferences", "", func() { v.saveControls(c) })
+	v.card(c.Key("save-settings"), "Preferences", "", func() {
+		if v.role == settings.RoleClient && v.saved.Client.Peer != "" {
+			v.value(c, "Remembered peer", v.saved.Client.Peer)
+		}
+		v.saveControls(c)
+	})
 	v.checksEntry(c)
 	if v.role == settings.RoleClient {
 		v.linkTest(c)

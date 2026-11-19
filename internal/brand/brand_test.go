@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"embed"
 	"encoding/binary"
+	"image"
 	"image/color"
 	"image/png"
 	"testing"
@@ -13,7 +14,7 @@ import (
 var exported embed.FS
 
 func TestPixelGridAndTemplateCutouts(t *testing.T) {
-	for _, size := range []int{16, 20, 32, 48, 128} {
+	for _, size := range []int{16, 20, 32, 48, 128, 256} {
 		plain, err := png.Decode(bytes.NewReader(PNG(size, false, false)))
 		if err != nil {
 			t.Fatal(err)
@@ -22,32 +23,67 @@ func TestPixelGridAndTemplateCutouts(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		plated, err := png.Decode(bytes.NewReader(PNG(size, true, false)))
+		if err != nil {
+			t.Fatal(err)
+		}
 		if plain.Bounds().Dx() != size || plain.Bounds().Dy() != size {
 			t.Fatal("invalid dimensions")
 		}
+		art := artworkFor(size)
+		unit := size / art.grid
+		top, bottom := art.accentRows()
+		var firstAccent, lastAccent color.NRGBA
 		for y := range size {
+			row := y / unit
 			for x := range size {
 				pixel := color.NRGBAModel.Convert(plain.At(x, y)).(color.NRGBA)
-				r, g, b, templateAlpha := mono.At(x, y).RGBA()
-				if pixel.A != 0 && pixel.A != 255 {
-					t.Fatal("pixel artwork has a semitransparent halo")
-				}
-				var expectedAlpha uint32
+				var expectedTemplate color.NRGBA
 				switch pixel {
-				case color.NRGBA{R: 35, G: 86, B: 216, A: 255}:
-					expectedAlpha = 65535
 				case color.NRGBA{R: 255, G: 255, B: 255, A: 255}, color.NRGBA{}:
 				default:
-					t.Fatalf("unexpected pixel at %dpx (%d,%d): %v", size, x, y, pixel)
+					if row < top || row >= bottom || pixel != accentForRow(row, top, bottom) {
+						t.Fatalf("unexpected accent at %dpx (%d,%d): %v", size, x, y, pixel)
+					}
+					expectedTemplate.A = 255
+					if row == top {
+						firstAccent = pixel
+					}
+					if row == bottom-1 {
+						lastAccent = pixel
+					}
 				}
-				if templateAlpha != expectedAlpha || r != 0 || g != 0 || b != 0 {
-					t.Fatalf("template lost a cutout at %dpx (%d,%d)", size, x, y)
+				if got := color.NRGBAModel.Convert(mono.At(x, y)).(color.NRGBA); got != expectedTemplate {
+					t.Fatalf("template lost a cutout or has color at %dpx (%d,%d): %v", size, x, y, got)
+				}
+				if pixel == (color.NRGBA{}) {
+					pixel = plateColor
+				}
+				if got := color.NRGBAModel.Convert(plated.At(x, y)).(color.NRGBA); got != pixel {
+					t.Fatalf("incorrect plate or foreground at %dpx (%d,%d): %v", size, x, y, got)
 				}
 			}
+		}
+		if firstAccent != (color.NRGBA{R: 0x42, G: 0x96, B: 0xf6, A: 255}) || lastAccent != (color.NRGBA{R: 0x30, G: 0x34, B: 0xe8, A: 255}) {
+			t.Fatalf("%dpx: accent endpoints are %v and %v", size, firstAccent, lastAccent)
 		}
 		if !bytes.Equal(PNG(size, true, true), PNG(size, false, true)) {
 			t.Fatal("template must not gain an opaque plate")
 		}
+	}
+}
+
+func TestSVGMatchesColorPNG(t *testing.T) {
+	art := parseSVG(string(SVG()))
+	for _, rect := range art.boxes {
+		if rect.Fill == Accent {
+			t.Fatal("exported SVG still uses the geometry source accent")
+		}
+	}
+	raster := image.NewNRGBA(image.Rect(0, 0, master.grid, master.grid))
+	paint(raster, image.Point{}, art, 1, false, false)
+	if !bytes.Equal(encode(raster), PNG(master.grid, false, false)) {
+		t.Fatal("SVG rectangles differ from the color PNG grid")
 	}
 }
 
@@ -150,13 +186,9 @@ func TestMacRoundedBody(t *testing.T) {
 		if top.B != 255 || !(bottom.R < top.R && bottom.G < top.G && bottom.B < top.B) {
 			t.Fatalf("%dpx: plate must fade from white at the top to a tint at the bottom: %v -> %v", size, top, bottom)
 		}
-		side, base, art := size*5/8, PNG(20, false, false), compact20
+		side, base := size*5/8, PNG(20, false, false)
 		if side%32 == 0 {
-			base, art = PNG(side, false, false), master
-		}
-		first, last := art.accentRows()
-		if high, low := macAccent(art, first), macAccent(art, last-1); high != macAccentTop || low != macAccentBottom {
-			t.Fatalf("%dpx: mark gradient %v -> %v does not span its endpoints", size, high, low)
+			base = PNG(side, false, false)
 		}
 		mark, err := png.Decode(bytes.NewReader(base))
 		if err != nil {
@@ -166,11 +198,8 @@ func TestMacRoundedBody(t *testing.T) {
 		for y := range side {
 			for x := range side {
 				want := color.NRGBAModel.Convert(mark.At(x/unit, y/unit)).(color.NRGBA)
-				switch want {
-				case color.NRGBA{}:
+				if want == (color.NRGBA{}) {
 					want = macPlate(size, y+offset)
-				case accentColor:
-					want = macAccent(art, y*art.grid/side)
 				}
 				if got := at(x+offset, y+offset); got != want {
 					t.Fatalf("%dpx: centred mark differs at (%d,%d)", size, x, y)

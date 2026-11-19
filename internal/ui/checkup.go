@@ -6,6 +6,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"remote-enet/internal/checkup"
+	"remote-enet/internal/settings"
 )
 
 func (v *View) checksEntry(c *ui.Context) {
@@ -71,7 +72,7 @@ func (v *View) checksPage(c *ui.Context) {
 		}
 		v.card(c.Key(i), title, "", func() {
 			ui.Text(c, v.tr("%s · %d ms", v.tr(checkStatus(f.Status)), max(0, f.Duration.Milliseconds()))).FontSize(11).Bold().TextColor(color)
-			ui.Text(c, v.tr(checkHint(f.Code))).FontSize(11)
+			ui.Text(c, v.tr(checkHint(f.Code, v.role))).FontSize(11)
 		})
 	}
 }
@@ -130,7 +131,7 @@ func checkTitle(id string) string {
 	}
 }
 
-func checkHint(code string) string {
+func checkHint(code, role string) string {
 	switch code {
 	case "settings_valid":
 		return "Saved settings are valid."
@@ -143,9 +144,12 @@ func checkHint(code string) string {
 	case "adapter_selected":
 		return "The saved adapter selection is currently available."
 	case "adapter_ambiguous":
-		return "Several link-local adapters match. Select an explicit adapter and IPv4 in Settings."
+		return "Several link-local adapters match. Choose a specific adapter and IPv4 on the session page."
 	case "adapter_unavailable":
-		return "The saved adapter or IPv4 is missing. Reconnect it, or select and save another adapter."
+		if role == settings.RoleOperator {
+			return "The presentation IPv4 is unavailable. Reconnect its adapter or update the address in Settings."
+		}
+		return "The saved adapter or IPv4 is missing. Reconnect the adapter, or choose another on the session page."
 	case "peer_available":
 		return "A pinned peer endpoint is available for reachability checks."
 	case "pairing_missing":
@@ -215,7 +219,10 @@ func checkHint(code string) string {
 	case "port_in_use":
 		return "Another listener is using the port. Stop it or save a different port."
 	case "address_unavailable":
-		return "The configured address is no longer available. Refresh and save the adapter selection."
+		if role == settings.RoleOperator {
+			return "The configured address is no longer available. Review the listen address and presentation IPv4 in Settings."
+		}
+		return "The configured address is no longer available. Refresh adapters and choose an available IPv4 on the session page."
 	case "connection_refused":
 		return "The endpoint refused TCP. Check the remote listener and port forwarding."
 	case "network_failed":

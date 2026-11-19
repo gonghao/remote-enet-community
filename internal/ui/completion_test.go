@@ -108,13 +108,11 @@ func TestRefreshCompletionDoesNotUnlockStop(t *testing.T) {
 	refreshes, stops := 0, 0
 	v := New(settings.Default(), Actions{Refresh: func() { refreshes++ }, Stop: func() { stops++ }})
 	tt := ui.NewTester(v.Render, 1080, 1500)
-	openSettings(t, tt)
 	click(t, tt, "Refresh adapters")
 	click(t, tt, "Refresh adapters")
 	if refreshes != 1 {
 		t.Fatal("refresh admitted duplicate requests")
 	}
-	openSession(t, tt)
 	v.SetState(State{Running: true, Runtime: app.Snapshot{Phase: app.PhaseConnected}})
 	tt.Frame()
 	click(t, tt, "Stop runtime")

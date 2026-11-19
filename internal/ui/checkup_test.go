@@ -83,7 +83,7 @@ func TestChecksLocalizedResultsAndPrivateCopy(t *testing.T) {
 				v.SetState(State{Running: true, Checkup: report})
 				report.Findings[0].Code = "mutated"
 				tt := ui.NewTester(v.Render, 900, 1300)
-				if !tt.HasText(v.tr(checkHint("tcp_reachable"))) || !tt.HasText(v.tr(checkHint("runtime_active"))) {
+				if !tt.HasText(v.tr(checkHint("tcp_reachable", role))) || !tt.HasText(v.tr(checkHint("runtime_active", role))) {
 					t.Fatal("result/hint missing")
 				}
 				for _, text := range tt.Texts() {
@@ -134,10 +134,25 @@ func TestChecksDirtySettingsAndSmallWindow(t *testing.T) {
 
 func TestCheckFindingVocabularyIsLocalized(t *testing.T) {
 	for _, tag := range []string{"zh-Hans", "zh-Hant"} {
-		for _, source := range []string{checkHint("target_conflict"), checkTitle("mgu_permission"), checkStatus(checkup.Skipped), "Connection checks canceled: connection settings changed."} {
+		for _, source := range []string{
+			checkHint("target_conflict", settings.RoleOperator), checkTitle("mgu_permission"),
+			checkStatus(checkup.Skipped), "Connection checks canceled: connection settings changed.",
+		} {
 			if locales.Text(tag, source) == source {
 				t.Errorf("untranslated %s: %s", tag, source)
 			}
 		}
+	}
+}
+
+func TestAdapterCheckHintsDirectEachRoleToItsControls(t *testing.T) {
+	for _, code := range []string{"adapter_unavailable", "address_unavailable"} {
+		t.Run(code, func(t *testing.T) {
+			client := checkHint(code, settings.RoleClient)
+			operator := checkHint(code, settings.RoleOperator)
+			if !strings.Contains(client, "on the session page") || !strings.Contains(operator, "in Settings") {
+				t.Fatalf("adapter hints refer to the wrong pages: %q / %q", client, operator)
+			}
+		})
 	}
 }

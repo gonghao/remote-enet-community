@@ -34,7 +34,11 @@ func (v *View) Render(c *ui.Context) {
 		v.header(c)
 		v.captureMarkerBar(c)
 		ui.Scroll(c.Key(v.page)).Grow(1).FillWidth().MinHeight(0).Children(func() {
-			ui.Column(c).FillWidth().Padding(16).Gap(12).Children(func() {
+			vertical, horizontal, gap := float32(16), float32(16), float32(12)
+			if v.role == settings.RoleClient && v.page == sessionPage {
+				vertical, horizontal, gap = 8, 12, 4
+			}
+			ui.Column(c).FillWidth().Padding(vertical, horizontal).Gap(gap).Children(func() {
 				switch v.page {
 				case settingsPage:
 					v.settingsPage(c)
@@ -158,13 +162,18 @@ func (v *View) banner(c *ui.Context, title, message string, text, fill ui.Color,
 }
 
 func (v *View) startControls(c *ui.Context) {
+	client := v.role == settings.RoleClient
+	height := float32(36)
+	if client {
+		height = 32
+	}
 	ui.Row(c).FillWidth().Gap(8).Children(func() {
-		if v.role == settings.RoleClient {
+		if client {
 			label := "Connect"
 			if v.connecting {
 				label = "Starting…"
 			}
-			if ui.PrimaryButton(c.Key("connect"), v.tr(label)).Label(v.tr("Connect client")).Grow(1).Height(36).Disabled(!v.canConnect()).Clicked() {
+			if ui.PrimaryButton(c.Key("connect"), v.tr(label)).Label(v.tr("Connect client")).Grow(1).Height(height).Disabled(!v.canConnect()).Clicked() {
 				v.connecting = true
 				v.actions.Connect(strings.TrimSpace(v.invitation))
 			}
@@ -185,7 +194,7 @@ func (v *View) startControls(c *ui.Context) {
 		if v.state.Stopping || v.stopping {
 			label = "Stopping…"
 		}
-		if ui.Button(c.Key("stop"), v.tr(label)).Label(v.tr("Stop runtime")).Grow(1).Height(36).TextColor(c.Theme().Danger).Disabled(!v.canStop()).Clicked() {
+		if ui.Button(c.Key("stop"), v.tr(label)).Label(v.tr("Stop runtime")).Grow(1).Height(height).TextColor(c.Theme().Danger).Disabled(!v.canStop()).Clicked() {
 			v.stopping = true
 			v.actions.Stop()
 		}
@@ -200,12 +209,19 @@ func (v *View) startControls(c *ui.Context) {
 		status = "Waiting for settings to be saved…"
 	case v.dirty():
 		status = "Unsaved changes · open Settings and save before starting."
-	case v.role == settings.RoleClient && strings.TrimSpace(v.invitation) == "" && v.saved.Client.Peer == "":
-		status = "Paste an invitation from your operator to connect."
+	case client && strings.TrimSpace(v.invitation) == "":
+		status = "Leave the invitation empty to use the remembered peer."
+		if v.saved.Client.Peer == "" {
+			status = "Paste an invitation from your operator to connect."
+		}
 	case v.role == settings.RoleOperator && (v.saved.Operator.Endpoint == "" || v.saved.Operator.Bind == ""):
 		status = "Open Settings to save a public endpoint and presentation IPv4."
 	}
-	ui.Text(c, v.tr(status)).FontSize(11).TextColor(muted).Role(ui.RoleStatus)
+	message := v.tr(status)
+	text := ui.Text(c, message).FontSize(11).TextColor(muted).Role(ui.RoleStatus)
+	if client {
+		text.FillWidth().MinWidth(0).SingleLine().Tooltip(message)
+	}
 }
 
 func (v *View) settingsPage(c *ui.Context) {

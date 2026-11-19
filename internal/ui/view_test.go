@@ -283,7 +283,7 @@ func TestClientAdapterSavePreservesSettingsDraft(t *testing.T) {
 				{Name: "USB LAN", Address: netip.MustParseAddr("169.254.20.1")},
 			}}
 			v.SetState(state)
-			tt := ui.NewTester(v.Render, 820, 640)
+			tt := ui.NewTester(v.Render, clientWidth, clientHeight)
 			input(t, tt, "Invitation code", "test-only-code")
 			if editPreference {
 				openSettings(t, tt)
@@ -350,7 +350,7 @@ func TestClientAdapterSaveFailureRestoresSelection(t *testing.T) {
 				{Name: "USB LAN", Address: netip.MustParseAddr("169.254.20.1")},
 			}}
 			v.SetState(state)
-			tt := ui.NewTester(v.Render, 820, 640)
+			tt := ui.NewTester(v.Render, clientWidth, clientHeight)
 			input(t, tt, "Invitation code", "test-only-code")
 			wantDraft := cfg
 			if editPreference {
@@ -391,7 +391,7 @@ func TestClientAdapterSaveFailureRestoresSelection(t *testing.T) {
 func TestClientAdapterSelectionRequiresSaveAction(t *testing.T) {
 	v := New(settings.Default(), Actions{})
 	v.SetState(State{NICs: []carside.NIC{{Name: "Ethernet", Address: netip.MustParseAddr("169.254.10.1")}}})
-	tt := ui.NewTester(v.Render, 820, 640)
+	tt := ui.NewTester(v.Render, clientWidth, clientHeight)
 	click(t, tt, "Adapter selection")
 	if _, found := tt.Find("Ethernet · 169.254.10.1"); found {
 		t.Fatal("adapter dropdown opened without a Save action")
@@ -561,16 +561,41 @@ func TestAccessibleStatusAndError(t *testing.T) {
 	}
 }
 
+func TestEmptyDetailsDoNotShowTooltips(t *testing.T) {
+	v := New(settings.Default(), Actions{})
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(Theme())
+		ui.Column(c).Fill().Padding(40).Gap(32).Children(func() {
+			v.value(c, "Gateway IPv4", "")
+			v.value(c, "Source IPv4", "169.254.10.1")
+		})
+	}, 420, 240)
+	for _, sample := range []struct {
+		display string
+		wantTip bool
+	}{{"—", false}, {"169.254.10.1", true}} {
+		bounds, ok := tt.Find(sample.display)
+		if !ok {
+			t.Fatalf("detail %q is missing", sample.display)
+		}
+		tt.Move(bounds.X+bounds.W-4, bounds.Y+bounds.H/2)
+		tt.Advance(time.Second)
+		if _, shown := tt.AccessByRole(ui.RoleTooltip, ""); shown != sample.wantTip {
+			t.Errorf("detail %q showed tooltip = %t, want %t", sample.display, shown, sample.wantTip)
+		}
+	}
+}
+
 func TestClientPasteAtMinimumSize(t *testing.T) {
 	for _, zoom := range []float32{1, 1.5} {
 		t.Run(fmt.Sprint(zoom), func(t *testing.T) {
 			connected := ""
 			v := New(settings.Default(), Actions{Connect: func(code string) { connected = code }})
-			tt := ui.NewTester(v.Render, 680, 560)
+			tt := ui.NewTester(v.Render, clientMinWidth, clientMinHeight)
 			tt.SetZoom(zoom)
 			for _, label := range []string{"Adapter selection", "Refresh adapters", "Invitation code", "Connect client", "Stop runtime"} {
 				r, ok := tt.Find(label)
-				if !ok || r.X < 0 || r.Y < 0 || r.W <= 0 || r.H <= 0 || r.X+r.W > 680 || r.Y+r.H > 560 {
+				if !ok || r.X < 0 || r.Y < 0 || r.W <= 0 || r.H <= 0 || r.X+r.W > clientMinWidth || r.Y+r.H > clientMinHeight {
 					t.Errorf("primary control %q is outside the minimum window: %+v", label, r)
 				}
 			}
@@ -579,7 +604,7 @@ func TestClientPasteAtMinimumSize(t *testing.T) {
 			tt.SetClipboard(code)
 			tt.Command("paste")
 			r, ok := tt.Find("Invitation code")
-			if !ok || r.X < 0 || r.X+r.W > 680 {
+			if !ok || r.X < 0 || r.X+r.W > clientMinWidth {
 				t.Fatalf("invitation input overflowed: %+v", r)
 			}
 			click(t, tt, "Connect client")

@@ -86,7 +86,7 @@ func TestLocalizedPrimaryControlsRemainVisible(t *testing.T) {
 				label := "Stop runtime"
 				if role == settings.RoleClient {
 					cfg = settings.Default()
-					width, height = 680, 560
+					width, height = clientMinWidth, clientMinHeight
 				}
 				v := New(cfg, Actions{Stop: func() {}, Quit: func() {}, SetLanguage: func(string) {}})
 				v.SetLanguage(tag)
@@ -109,14 +109,14 @@ func TestLocalizedPrimaryControlsRemainVisible(t *testing.T) {
 }
 
 func TestClientTitleBarKeepsLocalizedButtonsClickable(t *testing.T) {
-	const width = 420
+	const width = clientMinWidth
 	for _, tag := range []string{"en", "zh-Hans", "zh-Hant"} {
 		for _, zoom := range []float32{1, 1.5} {
 			t.Run(fmt.Sprintf("%s/%g", tag, zoom), func(t *testing.T) {
 				quits := 0
 				v := New(settings.Default(), Actions{Quit: func() { quits++ }})
 				v.SetLanguage(tag)
-				tt := ui.NewTester(v.Render, width, 560)
+				tt := ui.NewTester(v.Render, width, clientMinHeight)
 				tt.SetZoom(zoom)
 				for _, page := range []page{sessionPage, settingsPage, logPage, checksPage} {
 					v.page = page
@@ -148,6 +148,27 @@ func TestClientTitleBarKeepsLocalizedButtonsClickable(t *testing.T) {
 				click(t, tt, v.tr("Log"))
 				if v.page != logPage || quits != 4 {
 					t.Fatal("Log or Quit did not respond to clicks")
+				}
+			})
+		}
+	}
+}
+
+func TestClientFormControlsAlignAcrossLanguages(t *testing.T) {
+	for _, tag := range []string{"en", "zh-Hans", "zh-Hant"} {
+		for _, zoom := range []float32{1, 1.5} {
+			t.Run(fmt.Sprintf("%s/%g", tag, zoom), func(t *testing.T) {
+				v := New(settings.Default(), Actions{Save: func(settings.Config) {}})
+				v.SetLanguage(tag)
+				tt := ui.NewTester(v.Render, clientMinWidth, clientMinHeight)
+				tt.SetZoom(zoom)
+				adapter, hasAdapter := tt.Access(v.tr("Adapter selection"))
+				invitation, hasInvitation := tt.AccessByRole(ui.RoleTextField, v.tr("Invitation code"))
+				if !hasAdapter || !hasInvitation || adapter.Bounds.W <= 0 || invitation.Bounds.W <= 0 {
+					t.Fatal("adapter selection or invitation field is missing")
+				}
+				if adapter.Bounds.X != invitation.Bounds.X {
+					t.Fatalf("adapter starts at %g, invitation starts at %g", adapter.Bounds.X, invitation.Bounds.X)
 				}
 			})
 		}

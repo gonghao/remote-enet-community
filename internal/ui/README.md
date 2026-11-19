@@ -6,9 +6,9 @@
 
 `New(initial, actions)` 将 `initial.Role` 固定为视图的应用角色，整个生命周期内不提供角色选择入口。`SetConfig` 收到角色不匹配的配置时整份忽略，不替换表单、保存基线或待确认提交。
 
-- Client：宿主初始窗口 820×640，最小 680×560。会话首页先显示阶段与操作区（车侧网卡选择和刷新、邀请码输入、Connect / Stop relay），下方显示 RTT/流量/速率/活动隧道及 Vehicle / Connection / Session 三组信息。记住的 Peer、测试偏好与连接测试放在 Settings。
+- Client：宿主窗口固定为 440×700 DIP，不可调整大小或最大化；工作区不足时收紧，不低于 420×480 DIP。首页将网卡选择和刷新放在同一行，邀请码和连接按钮各占一行。下方是两列指标，以及一张含 Vehicle / Connection / Session 三节的详情卡片。记住的 Peer、测试偏好与连接测试放在 Settings。
 - Operator：宿主初始窗口 1080×760，最小 900×620。主页面呈现一个当前 Client，包含同组指标与车辆/链路信息、实际呈现端口与独占状态、Start listening / End session、邀请生成/复制、连接测试与结果。监听、公开端点、呈现 IP/端口和独占偏好放在 Settings。初始配置缺少公开端点或呈现 IP 时直接打开 Settings。
-- Settings 与 Log 是独立页面。两端主窗口均无系统框，固定页眉可拖动窗口，`Settings`、`Log` 与 `Back to session` 的访问名称唯一；可从已滚到底部的日志直接返回会话。两端窗口可调整大小，首次打开时按主屏工作区收紧初始尺寸，保留最小尺寸。主操作在默认窗口、100% 缩放下无需滚动即可操作。150% 缩放及最小窗口下纵向滚动，窄布局将指标改为两列、信息组改为单列。
+- Settings 与 Log 是独立页面。两端主窗口均无系统框，固定页眉可拖动窗口，`Settings`、`Log` 与 `Back to session` 的访问名称唯一；可从已滚到底部的日志直接返回会话。首次打开时，两端的初始尺寸按主屏工作区收紧，保留最小尺寸。Client 在 440×700 DIP、100% 缩放下可完整显示空闲和已连接状态的首页及一条网卡刷新提示，headless 回归测试要求内容底部留出至少 24 DIP。小窗口或放大界面时可纵向滚动，Client 的逻辑宽度低于 360 DIP 时指标排列为一列。
 - Log 按输入 Events 数组由旧到新的约定倒序呈现，最多 200 条；不放在日常操作页面。
 
 ## 接线与线程
@@ -80,7 +80,7 @@ headless 测试真实导航、点击、粘贴、输入和首页网卡选择，�
 RENET_UI_PREVIEW_DIR=/tmp/wave6-ui-preview CGO_ENABLED=0 go test ./internal/ui -run TestWorkspacePreview -v
 ```
 
-输出 `client-100.png` / `client-150.png`（820×640）、`client-min-100.png` / `client-min-150.png`（680×560）、`operator-100.png` / `operator-150.png`（1080×760），另有各端 `-settings.png`、`-log.png`。
+输出 `client-100.png` / `client-150.png`（440×700）、`client-min-100.png` / `client-min-150.png`（420×480）、`operator-100.png` / `operator-150.png`（1080×760），另有各端 `-settings.png`、`-log.png` 和 Client 简繁中文首页预览。
 
 ## 浅色主题
 

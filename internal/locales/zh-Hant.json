@@ -265,7 +265,6 @@
   "Record HSFZ to a new JSONL file": "將 HSFZ 記錄到新的 JSONL 檔案",
   "Recording": "錄製中",
   "Records diagnostic payloads, possibly including VIN, only to your selected local file. Reconnect diagnostic tools: only new TCP connections are captured.": "診斷承載資料可能包含 VIN，僅儲存至所選本機檔案。請重新連接診斷工具：僅擷取新的 TCP 連線。",
-  "Refresh": "重新整理",
   "Refresh adapters": "重新整理網路介面卡",
   "Remembered peer": "已記住的對端",
   "Remote ENET Client": "Remote ENET 車端",

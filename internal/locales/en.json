@@ -265,7 +265,6 @@
   "Record HSFZ to a new JSONL file": "Record HSFZ to a new JSONL file",
   "Recording": "Recording",
   "Records diagnostic payloads, possibly including VIN, only to your selected local file. Reconnect diagnostic tools: only new TCP connections are captured.": "Records diagnostic payloads, possibly including VIN, only to your selected local file. Reconnect diagnostic tools: only new TCP connections are captured.",
-  "Refresh": "Refresh",
   "Refresh adapters": "Refresh adapters",
   "Remembered peer": "Remembered peer",
   "Remote ENET Client": "Remote ENET Client",

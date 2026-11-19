@@ -10,6 +10,9 @@ import (
 type product struct {
 	role, name, command                string
 	width, height, minWidth, minHeight int
+	// fixedSize disables resizing and maximizing. The minimum still bounds
+	// the initial size on a small work area, where the content scrolls.
+	fixedSize bool
 }
 
 func (p product) initialSize(workWidth, workHeight int) (width, height int) {
@@ -24,7 +27,7 @@ func (p product) initialSize(workWidth, workHeight int) (width, height int) {
 func productForRole(role string) (product, error) {
 	switch role {
 	case settings.RoleClient:
-		return product{role: role, name: "Remote ENET Client", command: "renet-client", width: 820, height: 640, minWidth: 680, minHeight: 560}, nil
+		return product{role: role, name: "Remote ENET Client", command: "renet-client", width: 440, height: 700, minWidth: 420, minHeight: 480, fixedSize: true}, nil
 	case settings.RoleOperator:
 		return product{role: role, name: "Remote ENET Operator", command: "renet-operator", width: 1080, height: 760, minWidth: 900, minHeight: 620}, nil
 	default:

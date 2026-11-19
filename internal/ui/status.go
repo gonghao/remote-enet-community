@@ -71,51 +71,77 @@ func (v *View) phase(c *ui.Context) {
 }
 
 func (v *View) information(c *ui.Context) {
-	s := v.state.Runtime
 	w, _ := c.Size()
+	if w < 620 && v.role == settings.RoleClient {
+		ui.Column(c.Key("client-information")).FillWidth().MinWidth(0).Padding(4, 12).Gap(4).Background(panel).Border(1, line).Radius(0).Children(func() {
+			v.informationSections(c, true)
+		})
+		return
+	}
 	columns := 3
 	if w < 620 {
 		columns = 1
 	}
 	ui.Grid(c).Columns(columns).FillWidth().Gap(12).Children(func() {
-		v.card(c.Key("vehicle"), "VEHICLE", "", func() {
-			v.value(c, "VIN", s.VIN)
-			v.value(c, "Gateway IPv4", address(s.Gateway))
-			v.value(c, "Adapter", s.NIC.Name)
-			v.value(c, "Source IPv4", address(s.NIC.Address))
+		v.informationSections(c, false)
+	})
+}
+
+func (v *View) informationSections(c *ui.Context, compact bool) {
+	section := func(key, title string, rows func()) {
+		if !compact {
+			v.card(c.Key(key), title, "", rows)
+			return
+		}
+		ui.Column(c.Key(key)).FillWidth().MinWidth(0).Children(func() {
+			ui.Text(c, v.tr(title)).FontSize(11).Bold()
+			rows()
 		})
-		v.card(c.Key("connection"), "CONNECTION", "", func() {
-			peer := ""
-			if !s.Peer.IsZero() {
-				peer = s.Peer.String()
+	}
+	value := func(label, text string) {
+		row := v.value(c, label, text)
+		if compact {
+			row.MinHeight(16)
+		}
+	}
+	s := v.state.Runtime
+	section("vehicle", "VEHICLE", func() {
+		value("VIN", s.VIN)
+		value("Gateway IPv4", address(s.Gateway))
+		value("Adapter", s.NIC.Name)
+		value("Source IPv4", address(s.NIC.Address))
+	})
+	section("connection", "CONNECTION", func() {
+		peer := ""
+		if !s.Peer.IsZero() {
+			peer = s.Peer.String()
+		}
+		value("Peer", peer)
+		value("Peer address", s.Path.RemoteAddr)
+		value("Path", v.tr(string(s.Path.Kind)))
+		value("Via", s.Path.Via)
+	})
+	section("session", "SESSION", func() {
+		if v.role == settings.RoleOperator {
+			value("Diagnostic", addrPort(s.Diagnostic))
+			value("Control", addrPort(s.Control))
+			value("Discovery", addrPort(s.Discovery))
+			value("Exclusive", v.exclusiveText())
+		} else {
+			phase, _, _ := v.stage()
+			value("State", v.tr(phase))
+			generation := ""
+			if s.Generation > 0 {
+				generation = strconv.FormatUint(s.Generation, 10)
 			}
-			v.value(c, "Peer", peer)
-			v.value(c, "Peer address", s.Path.RemoteAddr)
-			v.value(c, "Path", v.tr(string(s.Path.Kind)))
-			v.value(c, "Via", s.Path.Via)
-		})
-		v.card(c.Key("session"), "SESSION", "", func() {
-			if v.role == settings.RoleOperator {
-				v.value(c, "Diagnostic", addrPort(s.Diagnostic))
-				v.value(c, "Control", addrPort(s.Control))
-				v.value(c, "Discovery", addrPort(s.Discovery))
-				v.value(c, "Exclusive", v.exclusiveText())
-			} else {
-				phase, _, _ := v.stage()
-				v.value(c, "State", v.tr(phase))
-				generation := ""
-				if s.Generation > 0 {
-					generation = strconv.FormatUint(s.Generation, 10)
-				}
-				v.value(c, "Generation", generation)
-				v.value(c, "Local address", s.Path.LocalAddr)
-				retry := ""
-				if !s.NextRetry.IsZero() && s.Phase == app.PhaseBackoff && v.state.Running {
-					retry = s.NextRetry.Local().Format("15:04:05 MST")
-				}
-				v.value(c, "Next retry", retry)
+			value("Generation", generation)
+			value("Local address", s.Path.LocalAddr)
+			retry := ""
+			if !s.NextRetry.IsZero() && s.Phase == app.PhaseBackoff && v.state.Running {
+				retry = s.NextRetry.Local().Format("15:04:05 MST")
 			}
-		})
+			value("Next retry", retry)
+		}
 	})
 }
 
@@ -151,19 +177,31 @@ func (v *View) traffic(c *ui.Context) {
 	if w < 840 {
 		columns = 2
 	}
-	ui.Grid(c).Columns(columns).FillWidth().Gap(8).Children(func() {
-		v.metric(c, "Peer RTT", rtt, "Latest measurement")
-		v.metric(c, "Received total", received, rateIn)
-		v.metric(c, "Sent total", sent, rateOut)
-		v.metric(c, "Active tunnels", connections, "Local observations")
+	compact := v.role == settings.RoleClient && columns == 2
+	gap := float32(8)
+	if compact {
+		gap = 4
+		if w < 360 {
+			columns = 1
+		}
+	}
+	ui.Grid(c).Columns(columns).FillWidth().Gap(gap).Children(func() {
+		v.metric(c, "Peer RTT", rtt, "Latest measurement", compact)
+		v.metric(c, "Received total", received, rateIn, compact)
+		v.metric(c, "Sent total", sent, rateOut, compact)
+		v.metric(c, "Active tunnels", connections, "Local observations", compact)
 	})
 	if s.MetricsIncomplete {
 		ui.Text(c, v.tr("Traffic observations are incomplete; totals may be partial.")).FontSize(11).TextColor(amber)
 	}
 }
 
-func (v *View) metric(c *ui.Context, label, text, detail string) {
-	ui.Column(c).FillWidth().MinWidth(0).Padding(8, 12).Gap(4).Background(panel).Border(1, line).Radius(0).Children(func() {
+func (v *View) metric(c *ui.Context, label, text, detail string, compact bool) {
+	vertical, horizontal, gap := float32(8), float32(12), float32(4)
+	if compact {
+		vertical, horizontal, gap = 4, 8, 0
+	}
+	ui.Column(c).FillWidth().MinWidth(0).Padding(vertical, horizontal).Gap(gap).Background(panel).Border(1, line).Radius(0).Children(func() {
 		ui.Text(c, v.tr(label)).FontSize(11).TextColor(muted)
 		ui.Text(c, text).Font(metricFontFamily).FontSize(24).FontWeight(700).FontFeatures("calt=0", "liga=0").TextColor(blue).SingleLine()
 		ui.Text(c, v.tr(detail)).FontSize(10).TextColor(muted).SingleLine()

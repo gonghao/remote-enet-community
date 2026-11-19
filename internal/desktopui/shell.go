@@ -101,6 +101,7 @@ func (s *shell) ready() {
 	s.window = mygo.NewWindow(mygo.WindowOptions{
 		Title: s.tr(s.product.name), Width: width, Height: height,
 		MinWidth: s.product.minWidth, MinHeight: s.product.minHeight,
+		DisableResize: s.product.fixedSize, DisableMaximize: s.product.fixedSize,
 		Frameless: true, Hidden: mainWindowStartsHidden,
 		BackgroundColor: renetui.BackgroundColor,
 		Content:         ui.View(s.view.Render),

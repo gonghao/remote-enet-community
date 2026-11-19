@@ -43,13 +43,16 @@ func TestMetricValuesStayCanonicalAcrossLanguages(t *testing.T) {
 					v := New(cfg, Actions{})
 					v.SetLanguage(tag)
 					v.SetState(previewState())
-					width := 1080
+					width, height := 1080, 760
 					if role == settings.RoleClient {
-						width = 820
+						width, height = clientWidth, clientHeight
 					}
-					tt := ui.NewTester(v.Render, width, 760)
+					tt := ui.NewTester(v.Render, width, height)
 					tt.SetZoom(zoom)
 					for _, value := range []string{"18.0 ms", "517.6 KiB", "263.7 KiB", "2"} {
+						if role == settings.RoleClient && zoom > 1 {
+							scrollTo(t, tt, value, float32(width), float32(height))
+						}
 						r, ok := tt.Find(value)
 						if !ok || r.W <= 0 || r.H <= 0 || r.X < 0 || r.X+r.W > float32(width)+1 {
 							t.Fatalf("metric value is translated or clipped: %q %+v", value, r)
@@ -70,6 +73,43 @@ func TestMetricValuesStayCanonicalAcrossLanguages(t *testing.T) {
 				})
 			}
 		}
+	}
+}
+
+func TestClientLongMetricsFitAtMinimumWidth(t *testing.T) {
+	for _, language := range []string{"en", "zh-Hans", "zh-Hant"} {
+		t.Run(language, func(t *testing.T) {
+			v := New(settings.Default(), Actions{})
+			v.SetLanguage(language)
+			v.SetState(clientPreviewState())
+			metrics := []ui.Span{
+				{Text: "999.9 ms", Size: 24}, {Text: "1023.9 MiB", Size: 24},
+				{Text: "1023.8 MiB", Size: 24}, {Text: "1023.9 MiB/s", Size: 10}, {Text: "1023.8 MiB/s", Size: 10},
+				{Text: v.tr("Latest measurement"), Size: 10}, {Text: v.tr("Local observations"), Size: 10},
+				{Text: v.tr("Received total"), Size: 11}, {Text: v.tr("Active tunnels"), Size: 11},
+			}
+			widths := make([]float32, len(metrics))
+			tt := ui.NewTester(func(c *ui.Context) {
+				v.Render(c)
+				for i, span := range metrics {
+					if span.Size == 24 {
+						span.Font, span.Weight, span.Features = metricFontFamily, 700, "calt=0,liga=0"
+					}
+					widths[i], _ = c.MeasureText(0, span)
+				}
+			}, clientMinWidth, clientMinHeight)
+			for i, span := range metrics {
+				r, ok := tt.Find(span.Text)
+				if !ok || widths[i] <= 0 || widths[i] > r.W+1 || r.X < 0 || r.X+r.W > clientMinWidth || r.H <= 0 {
+					t.Errorf("%q needs %.1f DIP but its box is %+v", span.Text, widths[i], r)
+				}
+			}
+			left, _ := tt.Find("999.9 ms")
+			right, _ := tt.Find("1023.9 MiB")
+			if left.Y != right.Y || left.X+left.W > right.X {
+				t.Fatalf("metric values are not side by side: %+v, %+v", left, right)
+			}
+		})
 	}
 }
 

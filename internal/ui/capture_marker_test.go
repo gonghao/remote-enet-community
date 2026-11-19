@@ -98,7 +98,7 @@ func TestMarkersFilterFrameStartTimesAndOwnTheirSnapshot(t *testing.T) {
 func TestClientCannotInsertCaptureMarkers(t *testing.T) {
 	v := New(settings.Default(), Actions{MarkCapture: func(string) bool { t.Fatal("client marker action"); return true }})
 	v.SetState(State{Running: true, Capture: hsfzcapture.Snapshot{Active: true}})
-	tt := ui.NewTester(v.Render, 820, 640)
+	tt := ui.NewTester(v.Render, clientWidth, clientHeight)
 	if _, ok := tt.Find("Insert HSFZ marker"); ok || v.InsertCaptureMarker() {
 		t.Fatal("client exposed Operator marker controls")
 	}

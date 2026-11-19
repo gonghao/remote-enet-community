@@ -30,7 +30,7 @@ const (
 // Render builds native controls; the host owns window sizing and invalidation.
 func (v *View) Render(c *ui.Context) {
 	c.SetTheme(Theme())
-	ui.Column(c).Fill().Children(func() {
+	ui.Column(c).Fill().Border(1, line).Radius(0).Children(func() {
 		v.header(c)
 		v.captureMarkerBar(c)
 		ui.Scroll(c.Key(v.page)).Grow(1).FillWidth().MinHeight(0).Children(func() {
@@ -81,25 +81,37 @@ func (v *View) roleTitle() string {
 
 func (v *View) header(c *ui.Context) {
 	w, _ := c.Size()
-	ui.Row(c).FillWidth().Padding(8, 16).Gap(8).AlignItems(ui.Center).Background(panel).BorderWidth(0, 0, 1, 0).BorderColor(line).Children(func() {
+	padding, gap := float32(16), float32(8)
+	compact := w < 400
+	if compact {
+		padding, gap = 8, 4
+	}
+	button := func(key, label, access string) ui.Element {
+		b := ui.Button(c.Key(key), v.tr(label)).Label(v.tr(access)).Shrink(0)
+		if compact {
+			b.Padding(6, 8)
+		}
+		return b
+	}
+	ui.Row(c).FillWidth().Padding(8, padding).Gap(gap).AlignItems(ui.Center).Background(panel).BorderWidth(0, 0, 1, 0).BorderColor(line).DragWindow().Children(func() {
 		ui.Image(c.Key("brand-mark"), brandMark).Size(32, 32).Shrink(0)
 		title := "Remote ENET · " + v.tr(v.roleTitle())
 		if w < 600 {
 			title = v.roleTitle()
 		}
-		ui.Text(c, v.tr(title)).Grow(1).MinWidth(0).SingleLine().FontSize(16).Bold()
+		ui.Text(c, v.tr(title)).Grow(1).MinWidth(0).SingleLine().TruncateMiddle().FontSize(16).Bold()
 		if v.page != sessionPage {
-			if ui.Button(c.Key("back"), v.tr("Back")).Label(v.tr("Back to session")).Clicked() {
+			if button("back", "Back", "Back to session").Clicked() {
 				v.page = sessionPage
 			}
 		}
-		if ui.Button(c.Key("settings"), v.tr("Settings")).Label(v.tr("Settings")).Disabled(v.page == settingsPage).Clicked() {
+		if button("settings", "Settings", "Settings").Disabled(v.page == settingsPage).Clicked() {
 			v.page = settingsPage
 		}
-		if ui.Button(c.Key("log"), v.tr("Log")).Label(v.tr("Log")).Disabled(v.page == logPage).Clicked() {
+		if button("log", "Log", "Log").Disabled(v.page == logPage).Clicked() {
 			v.page = logPage
 		}
-		if ui.Button(c.Key("quit"), v.tr("Quit")).Label(v.tr("Quit Remote ENET")).Disabled(v.actions.Quit == nil).Clicked() {
+		if button("quit", "Quit", "Quit Remote ENET").Disabled(v.actions.Quit == nil).Clicked() {
 			v.actions.Quit()
 		}
 	})

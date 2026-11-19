@@ -107,3 +107,49 @@ func TestLocalizedPrimaryControlsRemainVisible(t *testing.T) {
 		}
 	}
 }
+
+func TestClientTitleBarKeepsLocalizedButtonsClickable(t *testing.T) {
+	const width = 420
+	for _, tag := range []string{"en", "zh-Hans", "zh-Hant"} {
+		for _, zoom := range []float32{1, 1.5} {
+			t.Run(fmt.Sprintf("%s/%g", tag, zoom), func(t *testing.T) {
+				quits := 0
+				v := New(settings.Default(), Actions{Quit: func() { quits++ }})
+				v.SetLanguage(tag)
+				tt := ui.NewTester(v.Render, width, 560)
+				tt.SetZoom(zoom)
+				for _, page := range []page{sessionPage, settingsPage, logPage, checksPage} {
+					v.page = page
+					tt.Frame()
+					labels := []string{"Settings", "Log", "Quit Remote ENET"}
+					if page != sessionPage {
+						labels = append([]string{"Back to session"}, labels...)
+					}
+					var right float32
+					for _, label := range labels {
+						r, ok := tt.Find(v.tr(label))
+						if !ok || r.W <= 0 || r.H <= 0 || r.X < right || r.X+r.W > width || r.Y < 0 || r.Y+r.H > 80 {
+							t.Fatalf("page %d button %q clipped or overlapping: %+v", page, label, r)
+						}
+						right = r.X + r.W
+					}
+					click(t, tt, v.tr("Quit Remote ENET"))
+					if page != sessionPage {
+						click(t, tt, v.tr("Back to session"))
+						if v.page != sessionPage {
+							t.Fatal("Back did not return to the session")
+						}
+					}
+				}
+				click(t, tt, v.tr("Settings"))
+				if v.page != settingsPage {
+					t.Fatal("Settings did not open")
+				}
+				click(t, tt, v.tr("Log"))
+				if v.page != logPage || quits != 4 {
+					t.Fatal("Log or Quit did not respond to clicks")
+				}
+			})
+		}
+	}
+}

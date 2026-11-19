@@ -12,6 +12,15 @@ type product struct {
 	width, height, minWidth, minHeight int
 }
 
+func (p product) initialSize(workWidth, workHeight int) (width, height int) {
+	if workWidth <= 0 || workHeight <= 0 {
+		return p.width, p.height
+	}
+	const margin = 8
+	return max(p.minWidth, min(p.width, workWidth-2*margin)),
+		max(p.minHeight, min(p.height, workHeight-2*margin))
+}
+
 func productForRole(role string) (product, error) {
 	switch role {
 	case settings.RoleClient:

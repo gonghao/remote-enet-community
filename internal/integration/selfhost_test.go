@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -447,6 +449,72 @@ func TestSelfhostHubFingerprintBinding(t *testing.T) {
 	ok, err := store.Trusted(f.ctx, c.Snapshot().Device)
 	if err != nil || ok {
 		t.Fatal("unexpected operator trust", err)
+	}
+	if st := m.Status(); st.AttemptsLeft != d.AttemptsLeft-1 || st.Redeemed {
+		t.Fatalf("unexpected failure budget: remaining=%d redeemed=%v", st.AttemptsLeft, st.Redeemed)
+	}
+	// Both identity creation and read-only peer lookups leave a new trust store
+	// unwritten. A file here would also catch a peer saved under the wrong ID.
+	if _, err := os.Stat(filepath.Join(f.client.StateDir, "trust.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("failed pairing did not leave client store unwritten", err)
+	}
+}
+
+func TestSelfhostTransparentForwarding(t *testing.T) {
+	f := newSelfhost(t)
+	op := f.operatorReady(t)
+	code := f.issue(t, op)
+	f.waiting(t, op)
+	ln, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	deadline, _ := f.ctx.Deadline()
+	if err := ln.SetDeadline(deadline); err != nil {
+		t.Fatal(err)
+	}
+	f.client.DirectPair.Address = ln.Addr().String()
+	client, stop := f.clientRun(t, f.client)
+	front, err := ln.AcceptTCP()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer front.Close()
+	back, err := (&net.Dialer{}).DialContext(f.ctx, "tcp4", f.cfg.Listen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer back.Close()
+	// This single TCP hop has no TLS identity. The outer TLS session spans
+	// the hop, so the Client must authenticate the real Hub at a new address.
+	var copies sync.WaitGroup
+	copies.Go(func() { _, _ = io.Copy(back, front) })
+	copies.Go(func() { _, _ = io.Copy(front, back) })
+	defer func() {
+		stop()
+		front.Close()
+		back.Close()
+		copies.Wait()
+	}()
+	waitPhase(t, f.ctx, client, app.PhaseConnected)
+	waitPhase(t, f.ctx, op, app.PhaseConnected)
+	st := op.NumericCodeStatus()
+	if st.Generation != code.Generation || !st.Redeemed {
+		t.Fatal("pairing generation was not redeemed")
+	}
+	cs, osnap := client.Snapshot(), op.Snapshot()
+	ep := f.saved(t, osnap.Device)
+	if ep.Addr != ln.Addr().String() || ep.Hub != f.host.Fingerprint() || cs.Path.Hub != ep.Hub {
+		t.Fatal("incorrect observed or persisted outer endpoint")
+	}
+	_, claims, err := ticket.Inspect([]byte(ep.Ticket))
+	if err != nil || claims.Bearer || claims.Hub != ep.Hub || claims.Device != cs.Device || claims.Peer != osnap.Device {
+		t.Fatal("incorrect saved device ticket", err)
+	}
+	trusted, err := numericStore(t, f.operator.StateDir).Trusted(f.ctx, cs.Device)
+	if err != nil || !trusted {
+		t.Fatal("missing operator trust", err)
 	}
 }
 

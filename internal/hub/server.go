@@ -275,7 +275,7 @@ func (s *Server) handle(ctx context.Context, conn *connection, timeout time.Dura
 		close(wait.ready)
 		s.wait(wait)
 	default:
-		s.dial(conn, wait)
+		s.dial(conn, wait, timeout)
 	}
 	return false
 }
@@ -377,10 +377,19 @@ func (s *Server) wait(wait *waiter) {
 	}
 }
 
-func (s *Server) dial(conn *connection, wait *waiter) {
+func (s *Server) dial(conn *connection, wait *waiter, timeout time.Duration) {
 	done := make(chan struct{})
 	go func() {
-		_, _ = io.Copy(wait.conn, conn)
+		// Only the first dial byte is timed. Clear the deadline before
+		// forwarding it so wait-side backpressure cannot expire the relay.
+		var first [1]byte
+		if err := conn.SetReadDeadline(time.Now().Add(timeout)); err == nil {
+			if _, err := io.ReadFull(conn, first[:]); err == nil && conn.SetReadDeadline(time.Time{}) == nil {
+				if err := writeAll(wait.conn, first[:]); err == nil {
+					_, _ = io.Copy(wait.conn, conn)
+				}
+			}
+		}
 		s.removeWait(wait)
 		close(done)
 	}()

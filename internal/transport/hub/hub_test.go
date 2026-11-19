@@ -596,3 +596,46 @@ func TestEmbeddedListenerIsNotARelay(t *testing.T) {
 	}
 	_ = conn.Close()
 }
+
+func TestAcceptAfterSilentPair(t *testing.T) {
+	h, a, b := id(t), id(t), id(t)
+	ep := startTestHub(t, router.Options{Local: h, Policy: relayPolicy{}, SetupLimits: router.SetupLimits{Timeout: 150 * time.Millisecond}})
+	registered := make(chan error, 2)
+	_, acceptor := build(t, Options{Local: b, Endpoints: []transport.Endpoint{ep}, Wrap: stubWrap(b.Fingerprint()), OnRegister: func(_ identity.Fingerprint, _ []byte, err error) { registered <- err }})
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	register := func() <-chan acceptedResult {
+		pending := asyncAccept(t, ctx, acceptor)
+		select {
+		case err := <-registered:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		return pending
+	}
+	pending := register()
+	conn, err := router.Connect(ctx, ep.Addr, a, ep.Hub, router.Request{Role: router.RoleDial, Target: b.Fingerprint()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	select {
+	case result := <-pending:
+		if result.err == nil || ctx.Err() != nil {
+			t.Fatalf("silent pair: %v", result.err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	pending = register()
+	dialer, _ := build(t, Options{Local: a, Wrap: stubWrap(a.Fingerprint())})
+	s, err := dialer.Dial(ctx, transport.PeerInfo{ID: b.Fingerprint(), Endpoints: []transport.Endpoint{ep}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeSession(t, s)
+	transfer(t, s, receive(t, pending))
+}

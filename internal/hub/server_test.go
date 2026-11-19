@@ -344,3 +344,23 @@ func TestNoGoroutineLeak(t *testing.T) {
 	}
 	eventually(t, func() bool { return runtime.NumGoroutine() <= before })
 }
+
+func TestPairedDialFirstByteDeadline(t *testing.T) {
+	const timeout = 150 * time.Millisecond
+	h, a, b := local(t), local(t), local(t)
+	_, addr, _ := start(t, Options{Local: h, Policy: testPolicy{}, SetupLimits: SetupLimits{Timeout: timeout}})
+	wait := connect(t, addr, h, b, Request{Role: RoleWait})
+	dial := connect(t, addr, h, a, Request{Role: RoleDial, Target: b.Fingerprint()})
+	for _, c := range []net.Conn{wait, dial} {
+		var networkErr net.Error
+		if _, err := c.Read(make([]byte, 1)); err == nil || errors.As(err, &networkErr) && networkErr.Timeout() {
+			t.Fatalf("expected remote close, got %v", err)
+		}
+	}
+	wait = connect(t, addr, h, b, Request{Role: RoleWait})
+	dial = connect(t, addr, h, a, Request{Role: RoleDial, Target: b.Fingerprint()})
+	exchange(t, dial, wait)
+	time.Sleep(2 * timeout)
+	exchange(t, dial, wait)
+	exchange(t, wait, dial)
+}

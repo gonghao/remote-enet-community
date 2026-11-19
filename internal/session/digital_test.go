@@ -392,7 +392,8 @@ func TestDigitalOperatorDisconnectAfterClientConfirmation(t *testing.T) {
 		t.Fatal(err)
 	}
 	a, ya, err := cpace.Start(display.Code, cpace.Binding{
-		Exporter: exp, ClientFP: cfp, OperatorFP: ofp,
+		Capability: proto.PairDirectCapability,
+		Exporter:   exp, ClientFP: cfp, OperatorFP: ofp,
 		HelloClientHash: sha256.Sum256(hello), HelloOperatorHash: sha256.Sum256(operatorHello.Bytes()),
 	})
 	if err != nil {
@@ -502,7 +503,7 @@ func TestOperatorRejectsUnexpectedPairFrames(t *testing.T) {
 }
 
 // testBinding is non-zero because cpace rejects zero exporters and fingerprints.
-var testBinding = cpace.Binding{Exporter: [32]byte{2}, ClientFP: [32]byte{3}, OperatorFP: [32]byte{4}}
+var testBinding = cpace.Binding{Capability: proto.PairDirectCapability, Exporter: [32]byte{2}, ClientFP: [32]byte{3}, OperatorFP: [32]byte{4}}
 
 func TestDirectAdmissionBudget(t *testing.T) {
 	for _, reason := range []cpace.Reason{cpace.ReasonUnavailable, cpace.ReasonExpired, cpace.ReasonBusy, cpace.ReasonBudgetExhausted, cpace.ReasonRateLimited, ""} {

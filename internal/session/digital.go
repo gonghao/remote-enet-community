@@ -61,7 +61,7 @@ func (s *Session) digital(ctx context.Context, local, peer [32]byte) error {
 	if !ok || s.opts.LocalFP == (identity.Fingerprint{}) || s.Peer() == (identity.Fingerprint{}) {
 		return pairingFailure(ReasonInterrupted)
 	}
-	b := cpace.Binding{Exporter: exp.PairingExporter(), ClientFP: s.opts.LocalFP, OperatorFP: s.Peer(), HelloClientHash: local, HelloOperatorHash: peer}
+	b := cpace.Binding{Capability: proto.PairDirectCapability, Exporter: exp.PairingExporter(), ClientFP: s.opts.LocalFP, OperatorFP: s.Peer(), HelloClientHash: local, HelloOperatorHash: peer}
 	if s.opts.Role == RoleClient {
 		return s.digitalClient(ctx, b)
 	}

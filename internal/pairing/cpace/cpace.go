@@ -1,4 +1,4 @@
-// Package cpace implements the direct pairing suite pinned to CPace draft -21.
+// Package cpace implements the numeric pairing suite pinned to CPace draft -21.
 package cpace
 
 import (

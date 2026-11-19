@@ -351,7 +351,7 @@ func scriptBinding(t *testing.T, ts transport.Session, client, operator identity
 		}
 		return [32]byte(w.Sum(nil))
 	}
-	return cpace.Binding{Exporter: ts.(interface{ PairingExporter() [32]byte }).PairingExporter(), ClientFP: client, OperatorFP: operator, HelloClientHash: hash(hc), HelloOperatorHash: hash(ho)}
+	return cpace.Binding{Capability: proto.PairDirectCapability, Exporter: ts.(interface{ PairingExporter() [32]byte }).PairingExporter(), ClientFP: client, OperatorFP: operator, HelloClientHash: hash(hc), HelloOperatorHash: hash(ho)}
 }
 
 func TestNumericStopDuringHandshake(t *testing.T) {

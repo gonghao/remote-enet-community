@@ -1,11 +1,16 @@
 package cpace
 
-import "testing"
+import (
+	"testing"
+
+	"remote-enet/internal/proto"
+)
 
 const exampleCode = "00001234"
 
 func testBinding() Binding {
 	return Binding{
+		Capability:        proto.PairDirectCapability,
 		Exporter:          [32]byte{2},
 		ClientFP:          [32]byte{3},
 		OperatorFP:        [32]byte{4},
@@ -158,5 +163,49 @@ func TestOutOfOrderAndReflectedConfirmation(t *testing.T) {
 	}
 	if _, err = r.Verify(ta); err != errState {
 		t.Fatal("retried failed verification")
+	}
+}
+
+func TestInvalidCapabilityBinding(t *testing.T) {
+	for _, capability := range []string{"", "pair-center/1", proto.PairDirectCapability, proto.PairHubCapability} {
+		for _, fp := range [][32]byte{{}, {1}} {
+			b := testBinding()
+			b.Capability, b.HubFP = capability, fp
+			if capability == proto.PairDirectCapability && fp == [32]byte{} || capability == proto.PairHubCapability && fp != [32]byte{} {
+				continue
+			}
+			if _, _, err := Start(exampleCode, b); err != errBinding {
+				t.Errorf("Start(%q, %x): %v", capability, fp, err)
+			}
+			if _, _, err := Respond(exampleCode, b, [64]byte{}); err != errBinding {
+				t.Errorf("Respond(%q, %x): %v", capability, fp, err)
+			}
+		}
+	}
+}
+
+func TestHubFingerprintMismatch(t *testing.T) {
+	b := testBinding()
+	b.Capability, b.HubFP = proto.PairHubCapability, [32]byte{1}
+	i, c := startTest(t, b)
+	b.HubFP[0] = 2
+	r, y, err := Respond(exampleCode, b, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := i.Reveal(y)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tb, err := r.Open(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ta := i.s.pending.client
+	if _, _, err := i.Finish(tb); err != ReasonConfirmation {
+		t.Fatalf("Finish: %v", err)
+	}
+	if _, err := r.Verify(ta); err != ReasonConfirmation {
+		t.Fatalf("Verify: %v", err)
 	}
 }

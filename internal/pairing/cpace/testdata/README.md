@@ -10,3 +10,9 @@ generator.json、exchange.json、points.json 分别解码自 [CPace -21 附录 B
 cd internal/pairing/cpace/testdata
 python3 gen/application.py > application.json
 ```
+
+同目录的 `application-hub.json` 使用相同的生成器与字段格式。两个 Hello 声明 `pair-hub/1`，CI 的末字段是完整的 `hub_fp`。从 testdata 目录运行即可复现：
+
+```sh
+python3 gen/application.py --hub > application-hub.json
+```

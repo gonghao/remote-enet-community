@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "goModSHA256": "a708f2224e75ecd9eadfebb6ccf87da8ce149f55ec802393299a29b028f87c33",
+  "goModSHA256": "5f1658cdd5f22f5f21fe94e88993919b73405cfb5e365573b1fa5e4a36410ef6",
   "components": [
     {
       "name": "filippo.io/edwards25519",
-      "version": "v1.1.0",
-      "source": "https://pkg.go.dev/filippo.io/edwards25519@v1.1.0",
+      "version": "v1.2.0",
+      "source": "https://pkg.go.dev/filippo.io/edwards25519@v1.2.0",
       "files": [
         {
           "path": "licenses/go/filippo.io/edwards25519/LICENSE",

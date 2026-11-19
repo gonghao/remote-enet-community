@@ -4,6 +4,7 @@
 package proto
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -14,6 +15,9 @@ import (
 
 const Version uint16 = 1
 const MaxFrameLen = 1 << 20
+
+// PairDirectCapability opts a client into a single numeric redemption.
+const PairDirectCapability = "pair-direct/1"
 
 type MsgType uint16
 
@@ -28,6 +32,10 @@ const (
 	TypeExposeResult  MsgType = 8
 	TypeLog           MsgType = 9
 	TypeOpenTunnel    MsgType = 10
+	TypePairShareA    MsgType = 11
+	TypePairShareB    MsgType = 12
+	TypePairConfirmA  MsgType = 13
+	TypePairConfirmB  MsgType = 14
 )
 
 type Hello struct {
@@ -36,6 +44,13 @@ type Hello struct {
 	AppVersion   string   `cbor:"3,keyasint"`
 	Capabilities []string `cbor:"4,keyasint"`
 }
+type pairValue struct {
+	Value [32]byte `cbor:"1,keyasint"`
+}
+type PairShareA pairValue
+type PairShareB pairValue
+type PairConfirmA pairValue
+type PairConfirmB pairValue
 type PairToken struct {
 	Token [16]byte `cbor:"1,keyasint"`
 }
@@ -105,6 +120,14 @@ func Write(w io.Writer, msg any) error {
 	switch msg.(type) {
 	case Hello:
 		typ = TypeHello
+	case PairShareA:
+		typ = TypePairShareA
+	case PairShareB:
+		typ = TypePairShareB
+	case PairConfirmA:
+		typ = TypePairConfirmA
+	case PairConfirmB:
+		typ = TypePairConfirmB
 	case PairToken:
 		typ = TypePairToken
 	case PairResult:
@@ -159,6 +182,13 @@ func writeEnvelope(w io.Writer, e Envelope) error {
 
 // Read bounds allocation before decoding and consumes exactly one frame.
 func Read(r io.Reader, maxLen int) (any, error) {
+	return read(r, maxLen, false)
+}
+
+// ReadPair bounds allocation and accepts only digital frames or a PairResult.
+func ReadPair(r io.Reader) (any, error) { return read(r, 256, true) }
+
+func read(r io.Reader, maxLen int, pairOnly bool) (any, error) {
 	var prefix [4]byte
 	if _, err := io.ReadFull(r, prefix[:]); err != nil {
 		return nil, fmt.Errorf("proto: read length: %w", err)
@@ -178,10 +208,22 @@ func Read(r io.Reader, maxLen int) (any, error) {
 	if e.Type == 0 || len(e.Body) == 0 {
 		return nil, fmt.Errorf("proto: missing envelope type or body")
 	}
+	digital := e.Type >= TypePairShareA && e.Type <= TypePairConfirmB
+	if pairOnly && !digital && e.Type != TypePairResult {
+		return nil, fmt.Errorf("proto: unexpected pairing type %d", e.Type)
+	}
 	var msg any
 	switch e.Type {
 	case TypeHello:
 		msg = new(Hello)
+	case TypePairShareA:
+		msg = new(PairShareA)
+	case TypePairShareB:
+		msg = new(PairShareB)
+	case TypePairConfirmA:
+		msg = new(PairConfirmA)
+	case TypePairConfirmB:
+		msg = new(PairConfirmB)
 	case TypePairToken:
 		msg = new(PairToken)
 	case TypePairResult:
@@ -205,6 +247,15 @@ func Read(r io.Reader, maxLen int) (any, error) {
 	}
 	if err := dec.Unmarshal(e.Body, msg); err != nil {
 		return nil, fmt.Errorf("proto: decode type %d: %w", e.Type, err)
+	}
+	if digital {
+		var canonical bytes.Buffer
+		if err := Write(&canonical, msg); err != nil {
+			return nil, err
+		}
+		if !bytes.Equal(raw, canonical.Bytes()[4:]) {
+			return nil, fmt.Errorf("proto: noncanonical pairing frame")
+		}
 	}
 	return reflect.ValueOf(msg).Elem().Interface(), nil
 }

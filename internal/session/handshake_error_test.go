@@ -44,10 +44,16 @@ type handshakeStream struct {
 	dropAfterRead  bool
 	dropAfterWrite int
 	cause          error
+	afterRead      func()
 }
 
 func (s *handshakeStream) Read(p []byte) (int, error) {
 	n, err := s.input.Read(p)
+	if s.afterRead != nil && s.input.Len() == 0 {
+		afterRead := s.afterRead
+		s.afterRead = nil
+		afterRead()
+	}
 	if s.dropAfterRead && s.input.Len() == 0 {
 		s.dropAfterRead = false
 		s.owner.drop(s.cause)

@@ -6,7 +6,7 @@
 
 > 部署模式与中心协议更新（2026-11-19）：Client、Operator 各只有一个通用版本，直连、自建 Hub、中心协调三种模式由运行配置和输入格式区分；8 位数字码作为 PAKE 口令；中心地址可配置，官方中心实现不在本仓库。见 [DEPLOYMENT-MODES](DEPLOYMENT-MODES.md) 与 [CENTER-PROTOCOL](CENTER-PROTOCOL.md)。第 9.5、9.9 节与之冲突的旧设想（同仓 `renet-coord`、商业构建裁剪自托管能力、具体云平台选型）以这两份文档为准，均不代表已经实现或部署。
 
-> 状态：Wave 1–7 核心、固定双端 Native GUI、跨平台CI修复及Mac→Windows原生LAN假车链路已验收；用户确认开始Wave 8 TUN呈现基础。真实WAN及M1实车验收尚未完成。标注「⚠ 待验证」的地方要按 `docs/enet-protocol-research.md` 的置信度处理，不能把未知项当已知实现。
+> 历史状态（v0.10 时的记录，已被文首 2026-11-19 说明取代）：Wave 1–7 核心、固定双端 Native GUI、跨平台CI修复及Mac→Windows原生LAN假车链路已验收；用户确认开始Wave 8 TUN呈现基础。真实WAN及M1实车验收尚未完成。标注「⚠ 待验证」的地方要按 `docs/enet-protocol-research.md` 的置信度处理，不能把未知项当已知实现。
 > v0.10 变更（2026-11-17）：确定TUN＋用户态协议栈为长期呈现主路线，按TCP最小验证→MGU发现/SSH→UDP/DoIP/自动发现→HTTP回连分阶段验收。Windows用Wintun、macOS用utun；mgu_kit兼容需保留本地发现Presenter，不把TUN等同以太网广播。短码暂不做；关闭按钮统一完整退出。首阶段契约见 `docs/WAVE8.md`。
 > 配色补充（2026-11-16）：按最新偏好采用冷中性浅色，语义 token 与原生窗口外观统一，保留 Wave 6 的紧凑分组和固定双端边界；见 `docs/research/ui-light-theme.md`。
 > v0.9 变更：参考 remote-enet 的紧凑分组布局，拆分 Client／Operator 独立入口；固定角色、配置、窗口/托盘与单实例标识分开，Native 宿主共用，不改变协议。

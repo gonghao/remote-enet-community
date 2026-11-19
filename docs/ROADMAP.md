@@ -68,11 +68,24 @@
 | macOS / Windows 原生休眠唤醒、切换网络、USB 网卡断电 | 进程暂停与重连已在 Linux 模拟；真实系统休眠尚未验收 |
 | 实车经公网的对照验收 | 按 [VALIDATION](VALIDATION.md) B 节，假车公网验收通过后再进行 |
 | 更多车型与工具版本 | 目前只验证了 F20 的 E-Sys 与 ISTA 只读项目 |
+| Tool32 / EDIABAS 的 LAN `Autodetect` | 初始化报 `NET-0012`，显式 IP 可读 VIN；需继续对照发现路径或隔离的 link-local 环境（见 [Wave 4](WAVE4.md)） |
+| macOS 上的 Operator 功能 | HSFZ 抓取、全局快捷键 Cmd+Shift+M（可能需要“辅助功能”权限）、三语言切换、像素风界面只做过交叉构建，未在 Mac 实机验证 |
 | MGU 直连与 L3 呈现的实车验证 | 隔离 fixture 已验证，实车尚未验证 |
 | 编码与刷写经隧道的透明转发 | 未验收；只验证转发，由用户使用真实工具操作 |
 | 实车或公网下的长时运行 | 现有八小时结果只限 loopback / 内存设备 |
 
+## 小修与加固（来自代码审查遗留）
+
+| 项目 | 说明 |
+|---|---|
+| Client 会话结束原因 | `internal/app` 的 `clientConnection` 在网卡变化断开时，两个 `select` 分支可能同时就绪；`session.Run` 结束时用的是 `ctx.Err()` 而非 `context.Cause`，结束原因有时记成 `context canceled`，影响 Log 与诊断导出的排障。重试与 LastError 不受影响 |
+| 车端发现的部分发送失败 | `carside.Discover` 向多个目的地发送时，只要有一个成功，其他目的地的失败既不返回也不记日志。应补 warn 日志；2026-11-18 实车排查广播走错网卡时正需要这类信息 |
+| `renet-tuncheck` 报告写入 | `writeReport` 直接 `os.WriteFile`，覆盖已有文件时保留原权限，README 的 0600 说法不准确；改为与 `renet-labprobe` 相同的原子写 |
+| settings 可选加固（Wave 5 审查，当时有意未做） | 路径以分隔符结尾时留下空目录；rename 后未 fsync 父目录；监听地址接受 `[]:47000`；`NICName` 未拒绝 U+202E 等 Cf 类控制字符；缺字段报错不指明字段 |
+
 ## 研究项（未排期）
+
+- 用 F20 实车 HSFZ 抓包核对 [协议调研](enet-protocol-research.md) 中标注“仍需实测 F20”的项目：原始发现响应、alive 使用 `0x0012` 还是 `0x0013`、抓到的 `0x0043` 响应含义等。原始抓包含 VIN，只在私有环境分析，结论脱敏后写回调研文档。
 
 - HTTP 回连：需要先取得 URL 通告方式与本地源地址选择的证据，再设计反向通道（见 [DESIGN 9.4](DESIGN.md#94-mgu-http-刷写与-ssh为什么要-l3)）。
 - DoIP 及其他接口的兼容性。

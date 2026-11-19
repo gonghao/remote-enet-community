@@ -229,6 +229,8 @@ rawenet 的文档 `R/docs/hsfz-protocol.md:59–77` 把 `0012` 解释为 tester 
 
 **仍需实测：**目标 E-Sys/E-SysX 版本 + 假 ZGW，在本机 VM LAN 地址与 link-local alias 上分别发现和建立连接。先记录实际 UI 选项名称。若非 link-local 自动发现失败，M1 的手工 URL 仍有独立验证价值，不能把 M1 成功当作 M2 成功。
 
+**实测更新（2026-11-16，M0b）：**在 Windows 11 VM 的普通 LAN 地址上（未添加 `169.254/16` 别名），E-Sys 3.36.2 的 `Open Connection` 与 ISTA 4.39.20 均自动发现了模拟车辆，非 link-local 自动发现对这两个版本成立；Tool32 的 LAN `Autodetect` 初始化失败（`NET-0012`），显式 IP 可读取 VIN。详见 [M0b 记录](research/m0b-win11-2026-11-16.md)。2026-11-18 F20 实车上，E-Sys 与 ISTA 经隧道完成只读识别，见 [F20 只读验收](research/f20-readonly-2026-11-18.md)。上表“未知”一格保留调研时的原始结论；其他版本仍需各自实测。
+
 ### Q4.2 E-Sys 自身的发现包
 
 **结论：**手册确认刷新连接列表时广播搜 VIN；HSFZ 生态普遍使用 Q1 的 `0011` 请求。**目标 E-Sys 实际请求字节、完整广播目的地址集合、接收 socket 端口：未知，尚无其发现阶段原始 PCAP。**其他开源客户端使用临时端口，不足以证明 E-Sys 也固定如此。
@@ -498,7 +500,7 @@ alive 的发送周期、等待超时、最大连接数、重复 tester 地址时
 | `3` 总体“全部待验证” | 全文、实测表 | 部分解决 | 以本报告逐项置信度管理；公开实现已解决的格式与目标工具/硬件的未知分开，不要求把全部未知伪装成已确定 |
 | `183` 发现 payload 无 IP，原样回放 | Q1、Q4.2 | 已知布局已解决；E-Sys 行为待验 | 已知 HSFZ `0011` 正文无 IP；缓存原始字节无需 IP 改写；Responder 须从预期暴露 IP 回请求源端口。目标 E-Sys 仍用软件环境确认 |
 | `186` ECU→tester:8888 | Q4.4、Q8.2 | 部分解决 | HTTP 下载回连 tester；E-Sys 默认 8888 可配置，ISTA 可能动态选端口；监听/转发按实际 endpoint，方向与 URL 承载仍须目标验证 |
-| `188` WiFi ENET / ISTA、Tool32 非 link-local | Q4.1、Q5.1、Q6 | 未解决工具兼容性 | rawenet 为未具名软件的经验线索；公开 ISTA/EdiabasLib 发现解析未见该硬限制，但目标 E-Sys/ISTA/原版 EDIABAS 的同机 LAN/alias 成功矩阵仍待软件实测 |
+| `188` WiFi ENET / ISTA、Tool32 非 link-local | Q4.1、Q5.1、Q6 | 未解决工具兼容性 | rawenet 为未具名软件的经验线索；公开 ISTA/EdiabasLib 发现解析未见该硬限制，但目标 E-Sys/ISTA/原版 EDIABAS 的同机 LAN/alias 成功矩阵仍待软件实测。M0b 已实测：E-Sys 3.36.2、ISTA 4.39.20 的 LAN 发现成立，Tool32 LAN Autodetect 失败（见 Q4.1 实测更新） |
 | `208` HTTP 诊断端源 IP | Q4.4 | 未知 | URL/IP 通告机制及地址选择算法未知；IP 镜像为条件性方案，不得从 TCP 源 IP 直接推定成功 |
 | `221` ISTA LAN vs alias 与持续轮询 | Q5 | 部分解决 | 公开代码直接周期发现 HSFZ/DoIP，不必经 XEthernet；每 2s 的发现不等于 UDS 占用。目标版本完整连接与 TCP 后台流量用 VM 验证 |
 | `228` ZGW 并发、F5 轮询隔离 | Q3 | 未知 | 当前代理侧抓包不能证实实车连接上限/地址隔离；外部工具活动时默认暂停自主轮询，待 F20 只读并发验证 |

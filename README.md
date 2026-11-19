@@ -165,7 +165,7 @@ Tool32 本轮在 `Interface=ENET`、`[XEthernet] RemoteHost=<Operator bind IP>` 
 
 架构见 [docs/DESIGN.md](docs/DESIGN.md)，协议证据见 [docs/enet-protocol-research.md](docs/enet-protocol-research.md)，应用接口见 [Wave 2](docs/WAVE2.md)，广播和 CI 稳定性改动见 [Wave 3](docs/WAVE3.md)，运行时与观测验收见 [Wave 4](docs/WAVE4.md)，Native GUI 与配置契约见 [Wave 5](docs/WAVE5.md)，双端拆分与布局见 [Wave 6](docs/WAVE6.md)。
 
-直连、自建 Hub、中心协调三种部署模式，以及 8 位数字码（PAKE）配对入口见 [部署模式与配对入口](docs/DEPLOYMENT-MODES.md)；中心的职责、票据、授权期限与威胁模型见 [中心协议](docs/CENTER-PROTOCOL.md)。两份文档记录设计基线与待定条件，不表示现有程序已经支持这些能力。
+直连、自建 Hub、中心协调三种部署模式，以及 8 位数字码（PAKE）配对入口见 [部署模式与配对入口](docs/DEPLOYMENT-MODES.md)；中心的职责、票据、授权期限与威胁模型见 [中心协议](docs/CENTER-PROTOCOL.md)。两份文档记录设计基线与待定条件，不表示现有程序已经支持这些能力。后续工作顺序见 [路线图](docs/ROADMAP.md)。
 
 ## 许可证与官方服务
 

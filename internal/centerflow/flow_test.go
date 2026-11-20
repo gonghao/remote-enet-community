@@ -90,6 +90,7 @@ func fixtureFor(t *testing.T, opHook, clHook intercept) *fixture {
 	done := make(chan struct{})
 	go func() { defer close(done); _ = server.Serve(ctx, ln) }()
 	t.Cleanup(func() { cancel(); <-done })
+	reported := make(chan string, 1)
 	deps := func(role string, hook intercept) Dependencies {
 		local := must(identity.Generate())
 		hc := *f.fc.HTTPClient()
@@ -104,7 +105,22 @@ func fixtureFor(t *testing.T, opHook, clHook intercept) *fixture {
 		f.check(err)
 		t.Cleanup(func() { conn.Close() })
 		store := must(centerstate.Open(t.TempDir(), cfg.ID))
-		return Dependencies{API: api, LocalFP: local.Fingerprint(), Store: store, Connector: conn, CenterID: cfg.ID, RetryMin: 10 * time.Millisecond, RetryMax: 50 * time.Millisecond, Confirm: func(context.Context, SASPrompt) (bool, error) { return true, nil }}
+		return Dependencies{API: api, LocalFP: local.Fingerprint(), Store: store, Connector: conn, CenterID: cfg.ID, RetryMin: 10 * time.Millisecond, RetryMax: 50 * time.Millisecond, Confirm: func(ctx context.Context, p SASPrompt) (bool, error) {
+			if role == "operator" {
+				select {
+				case digits := <-reported:
+					return digits == p.Code, nil
+				case <-ctx.Done():
+					return false, ctx.Err()
+				}
+			}
+			select {
+			case reported <- p.Code:
+				return true, nil
+			case <-ctx.Done():
+				return false, ctx.Err()
+			}
+		}}
 	}
 	f.op = NewOperator(deps("operator", opHook))
 	f.cl = NewClient(ClientDeps{deps("client", clHook), func(context.Context) error { return nil }})
@@ -350,7 +366,8 @@ func TestLostDecision(t *testing.T) {
 	f.op.Connector = &dropAccepted{TicketConnector: f.op.Connector}
 
 	var prompts atomic.Int64
-	f.op.Confirm = func(context.Context, SASPrompt) (bool, error) { prompts.Add(1); return true, nil }
+	confirm := f.op.Confirm
+	f.op.Confirm = func(ctx context.Context, p SASPrompt) (bool, error) { prompts.Add(1); return confirm(ctx, p) }
 	op := launch(f.ctx, f.op, session.Options{}, hold)
 	cl := launch(f.ctx, f.cl, session.Options{}, hold)
 	until(t, func() bool { return f.cl.Snapshot().Phase == "retry" })

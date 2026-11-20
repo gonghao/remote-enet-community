@@ -31,7 +31,6 @@ import (
 )
 
 type running struct {
-	matchedSAS     uint64
 	center         bool
 	runtime        appRuntime
 	ctx            context.Context

@@ -68,6 +68,7 @@ type State struct {
 }
 
 type appRuntime interface {
+	VerifySAS(uint64, string) bool
 	AnswerSAS(context.Context, uint64, bool) error
 	EndReception(context.Context) error
 	RetryPairing(context.Context) error

@@ -124,7 +124,13 @@ func TestCenterReception(t *testing.T) {
 			if err := op.AnswerSAS(ctx, pb.ID, true); !errors.Is(err, ErrSASExpired) {
 				t.Fatal(err)
 			}
+			if cl.VerifySAS(pb.ID, pb.Code) || op.VerifySAS(pa.ID, "wrong") || !errors.Is(op.AnswerSAS(ctx, pa.ID, true), ErrSASNotVerified) {
+				t.Fatal("unverified prompt accepted")
+			}
 			if !reject {
+				if !op.VerifySAS(pa.ID, pb.Code) {
+					t.Fatal("matching prompt rejected")
+				}
 				server.CloseAll()
 				snapshotWhere(t, clStates, func(s Snapshot) bool { return s.Center.Phase == "retry" })
 				if err := cl.AnswerSAS(ctx, pb.ID, true); !errors.Is(err, ErrSASExpired) {
@@ -139,6 +145,12 @@ func TestCenterReception(t *testing.T) {
 				})
 				_, pa = op.CenterDisplay()
 				_, pb = cl.CenterDisplay()
+				if !errors.Is(op.AnswerSAS(ctx, pa.ID, true), ErrSASNotVerified) {
+					t.Fatal("replacement inherited verification")
+				}
+				if !op.VerifySAS(pa.ID, pb.Code[:3]+"　"+pb.Code[3:]) {
+					t.Fatal("matching input rejected")
+				}
 				if pa.Code != pb.Code {
 					t.Fatal("retried SAS differs")
 				}

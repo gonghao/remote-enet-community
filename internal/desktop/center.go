@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"slices"
-	"strings"
 
 	"remote-enet/internal/app"
 	"remote-enet/internal/center"
@@ -45,7 +44,7 @@ type CenterView struct {
 }
 
 // ErrSASInputRequired means the live operator prompt still needs matching input.
-var ErrSASInputRequired = errors.New("desktop: matching operator input required")
+var ErrSASInputRequired = app.ErrSASNotVerified
 
 // ErrCenterOperation hides unrecognized server errors from desktop callers.
 var ErrCenterOperation = errors.New("desktop: center operation failed")
@@ -73,23 +72,7 @@ func (c *Controller) MatchSAS(id uint64, input string) bool {
 	if g == nil || g.stopping || !g.center || c.state.Config.Role != settings.RoleOperator {
 		return false
 	}
-	_, prompt := g.runtime.CenterDisplay()
-	digits := strings.Map(func(r rune) rune {
-		switch {
-		case r == ' ' || r == '　':
-			return -1
-		case r >= '０' && r <= '９':
-			return '0' + r - '０'
-		default:
-			return r
-		}
-	}, input)
-	g.matchedSAS = 0
-	if id != 0 && id == prompt.ID && len(digits) == 6 && digits == prompt.Code {
-		g.matchedSAS = id
-		return true
-	}
-	return false
+	return g.runtime.VerifySAS(id, input)
 }
 
 // StartReception creates a reception on an available node in the refreshed list.
@@ -103,16 +86,6 @@ func (c *Controller) StartReception(ctx context.Context, nodeID string) error {
 // AnswerSAS consumes a single live prompt. A stale dialog cannot confirm a replacement.
 func (c *Controller) AnswerSAS(ctx context.Context, id uint64, match bool) error {
 	return c.receptionAction(ctx, func(ctx context.Context, g *running) error {
-		c.mu.Lock()
-		needsInput := match && c.state.Config.Role == settings.RoleOperator && (id == 0 || g.matchedSAS != id)
-		c.mu.Unlock()
-		if needsInput {
-			_, p := g.runtime.CenterDisplay()
-			if id != 0 && id == p.ID {
-				return ErrSASInputRequired
-			}
-			return app.ErrSASExpired
-		}
 		return g.runtime.AnswerSAS(ctx, id, match)
 	})
 }

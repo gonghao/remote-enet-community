@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -50,9 +51,10 @@ type centerReception interface {
 }
 
 type sasAnswer struct {
-	ctx    context.Context
-	prompt centerflow.SASPrompt
-	answer chan bool
+	ctx      context.Context
+	prompt   centerflow.SASPrompt
+	answer   chan bool
+	verified bool
 }
 
 func (r *Runtime) centerSnapshotLocked() CenterSnapshot {
@@ -83,7 +85,7 @@ func (r *Runtime) CenterDisplay() (invitation string, prompt centerflow.SASPromp
 }
 
 func (r *Runtime) confirm(ctx context.Context, prompt centerflow.SASPrompt) (bool, error) {
-	p := &sasAnswer{ctx, prompt, make(chan bool, 1)}
+	p := &sasAnswer{ctx: ctx, prompt: prompt, answer: make(chan bool, 1)}
 	r.mu.Lock()
 	r.pending = p
 	r.publishLocked()
@@ -107,7 +109,36 @@ func (r *Runtime) confirm(ctx context.Context, prompt centerflow.SASPrompt) (boo
 // ErrSASExpired includes prompts that have already been answered.
 var ErrSASExpired = errors.New("app: SAS prompt expired or no longer pending")
 
-// AnswerSAS consumes one live prompt. The operator UI checks the customer's digits before passing match.
+// ErrSASNotVerified leaves the operator prompt pending for another comparison.
+var ErrSASNotVerified = errors.New("app: matching operator SAS input required")
+
+func (p *sasAnswer) live(id uint64) bool {
+	return p != nil && p.prompt.ID == id && p.ctx.Err() == nil && (p.prompt.Deadline.IsZero() || time.Now().Before(p.prompt.Deadline))
+}
+
+// VerifySAS binds the most recent comparison to this live operator prompt.
+func (r *Runtime) VerifySAS(id uint64, input string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p := r.pending
+	if r.state.Role != session.RoleOperator || !p.live(id) {
+		return false
+	}
+	digits := strings.Map(func(r rune) rune {
+		switch {
+		case r == ' ' || r == '　':
+			return -1
+		case r >= '０' && r <= '９':
+			return '0' + r - '０'
+		default:
+			return r
+		}
+	}, input)
+	p.verified = len(digits) == 6 && digits == p.prompt.Code
+	return p.verified
+}
+
+// AnswerSAS consumes one live prompt. A failed verification leaves it pending.
 func (r *Runtime) AnswerSAS(ctx context.Context, id uint64, match bool) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -115,8 +146,11 @@ func (r *Runtime) AnswerSAS(ctx context.Context, id uint64, match bool) error {
 		return err
 	}
 	p := r.pending
-	if p == nil || id != p.prompt.ID || p.ctx.Err() != nil || !p.prompt.Deadline.IsZero() && !time.Now().Before(p.prompt.Deadline) {
+	if !p.live(id) {
 		return ErrSASExpired
+	}
+	if match && r.state.Role == session.RoleOperator && !p.verified {
+		return ErrSASNotVerified
 	}
 	r.pending = nil
 	p.answer <- match

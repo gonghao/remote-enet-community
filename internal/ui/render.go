@@ -38,6 +38,9 @@ func (v *View) Render(c *ui.Context) {
 		v.captureMarkerBar(c)
 		ui.Scroll(c.Key(v.page)).Grow(1).FillWidth().MinHeight(0).Children(func() {
 			vertical, horizontal, gap := float32(16), float32(16), float32(12)
+			if v.page == sessionPage || v.page == settingsPage {
+				vertical, gap = 12, 8
+			}
 			if v.role == settings.RoleClient && v.page == sessionPage {
 				vertical, horizontal, gap = 8, 12, 4
 			}
@@ -136,8 +139,23 @@ func (v *View) header(c *ui.Context) {
 	})
 }
 
+// Two columns leave room for the three translated numeric-code actions at 1000 logical DIP.
+const twoColumnWidth = 1000
+
+func pageColumns(c *ui.Context) int {
+	w, _ := c.Size()
+	if w >= twoColumnWidth {
+		return 2
+	}
+	return 1
+}
+
 func (v *View) card(c *ui.Context, title, subtitle string, fn func()) {
-	ui.Column(c).FillWidth().MinWidth(0).Padding(12).Gap(12).Background(panel).Border(1, line).Radius(0).Children(func() {
+	gap := float32(12)
+	if v.page == sessionPage || v.page == settingsPage {
+		gap = 8
+	}
+	ui.Column(c).FillWidth().MinWidth(0).Padding(12).Gap(gap).Background(panel).Border(1, line).Radius(0).Children(func() {
 		if title != "" {
 			ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
 				ui.Text(c, v.tr(title)).FontSize(12).Bold()
@@ -278,22 +296,25 @@ func (v *View) startControls(c *ui.Context) {
 
 func (v *View) settingsPage(c *ui.Context) {
 	v.pageTitle(c, v.roleTitle()+" settings", "Save explicitly · changes apply on the next start")
-	v.languageSelect(c)
 	v.messages(c)
 	if v.locked() {
 		ui.Text(c, v.tr("Runtime active · stop before changing network settings.")).TextColor(amber).FontSize(11).Role(ui.RoleStatus)
 	}
-	if v.role == settings.RoleOperator {
-		v.card(c.Key("operator-settings"), "Network & presentation", "", func() { v.operatorForm(c) })
-	}
-	v.card(c.Key("save-settings"), "Preferences", "", func() {
-		if v.role == settings.RoleClient && v.saved.Client.Peer != "" {
-			peer, _ := identity.ParseFingerprint(v.saved.Client.Peer)
-			v.peerValue(c.Key("remembered-peer"), "Remembered peer", peer)
+	ui.Grid(c).Columns(pageColumns(c)).FillWidth().Gap(12).Children(func() {
+		if v.role == settings.RoleOperator {
+			v.card(c.Key("connection-settings"), "", "", func() { v.operatorForm(c) })
+			v.card(c.Key("operator-settings"), "Network & presentation", "", func() { v.presentationForm(c) })
 		}
-		v.saveControls(c)
+		v.card(c.Key("save-settings"), "Preferences", "", func() {
+			v.languageSelect(c)
+			if v.role == settings.RoleClient && v.saved.Client.Peer != "" {
+				peer, _ := identity.ParseFingerprint(v.saved.Client.Peer)
+				v.peerValue(c.Key("remembered-peer"), "Remembered peer", peer)
+			}
+			v.saveControls(c)
+		})
+		v.card(c.Key("center-settings"), "Center", "", func() { v.centerForm(c) })
 	})
-	v.card(c.Key("center-settings"), "Center", "", func() { v.centerForm(c) })
 	v.checksEntry(c)
 	if v.role == settings.RoleClient {
 		v.linkTest(c)

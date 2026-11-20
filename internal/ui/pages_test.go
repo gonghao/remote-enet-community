@@ -273,3 +273,55 @@ func TestClientSettingsPreserveInvitationAndEdits(t *testing.T) {
 		t.Fatal("navigation or state update lost edits or persisted an invitation")
 	}
 }
+
+func TestResponsiveSessionAndSettings(t *testing.T) {
+	for _, language := range []string{"en", "zh-Hans", "zh-Hant"} {
+		for _, role := range []string{settings.RoleOperator, settings.RoleClient} {
+			for _, p := range []page{sessionPage, settingsPage} {
+				widths := []int{1080, operatorMinWidth}
+				if role == settings.RoleClient {
+					widths = []int{clientWidth}
+				}
+				for _, width := range widths {
+					t.Run(fmt.Sprintf("%s/%s/%d/%d", language, role, p, width), func(t *testing.T) {
+						cfg := operatorConfig()
+						cfg.Role = role
+						v := New(cfg, Actions{})
+						v.SetLanguage(language)
+						v.page = p
+						height := 760
+						if role == settings.RoleClient {
+							height = clientHeight
+						}
+						tt := ui.NewTester(v.Render, width, height)
+						left, right := "Generate numeric code", "Generate invitation"
+						if p == settingsPage {
+							left, right = "Preferences", "Center"
+						}
+						if role == settings.RoleClient && p == sessionPage {
+							left, right = "Adapter selection", "Connect client"
+						}
+						a, okA := tt.Find(v.tr(left))
+						b, okB := tt.Find(v.tr(right))
+						if !okA || !okB {
+							t.Fatalf("missing %q or %q", left, right)
+						}
+						if width >= twoColumnWidth {
+							if a.Y+a.H/2 != b.Y+b.H/2 || a.X+a.W > b.X {
+								t.Fatalf("expected separate columns: %+v, %+v", a, b)
+							}
+						} else if b.Y < a.Y+a.H {
+							t.Fatalf("expected stacked groups: %+v, %+v", a, b)
+						}
+						if width != operatorMinWidth {
+							tt.Scroll(float32(width/2), float32(height/2), 0, 900)
+							if after, _ := tt.Find(v.tr(left)); after != a {
+								t.Fatalf("default page scrolled: %+v -> %+v", a, after)
+							}
+						}
+					})
+				}
+			}
+		}
+	}
+}

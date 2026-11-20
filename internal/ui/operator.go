@@ -19,12 +19,13 @@ func (v *View) operatorPage(c *ui.Context) {
 		if v.hubWaitDenied() {
 			v.issuerControls(c)
 		}
-		v.numericCodeControls(c)
-		v.invitationControls(c)
+		ui.Grid(c).Columns(pageColumns(c)).FillWidth().Gap(12).Children(func() {
+			ui.Column(c).FillWidth().MinWidth(0).Gap(8).Children(func() { v.numericCodeControls(c) })
+			ui.Column(c).FillWidth().MinWidth(0).Gap(8).Children(func() { v.invitationControls(c) })
+		})
 	})
 	v.information(c)
-	w, _ := c.Size()
-	if w >= 1000 {
+	if pageColumns(c) == 2 {
 		ui.Grid(c).Columns(2).FillWidth().Gap(12).Children(func() {
 			v.linkTest(c, true)
 			v.directLink(c)

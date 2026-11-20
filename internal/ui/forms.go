@@ -111,9 +111,11 @@ func (v *View) operatorForm(c *ui.Context) {
 	}).FillWidth()
 	if hubMode {
 		v.draft.Operator.Mode = "hub"
-		v.field(c, "Hub address", "host.example:47000", &v.draft.Operator.Hub.Addr, v.locked())
+		ui.Grid(c).Columns(2).FillWidth().Gap(12).Children(func() {
+			v.field(c, "Hub address", "host.example:47000", &v.draft.Operator.Hub.Addr, v.locked())
+			v.field(c, "Share address", "host.example:47000", &v.draft.Operator.Hub.Share, v.locked())
+		})
 		v.field(c, "Hub fingerprint", "", &v.draft.Operator.Hub.FP, v.locked())
-		v.field(c, "Share address", "host.example:47000", &v.draft.Operator.Hub.Share, v.locked())
 		v.issuerControls(c)
 	} else {
 		v.draft.Operator.Mode = "direct"
@@ -122,7 +124,6 @@ func (v *View) operatorForm(c *ui.Context) {
 			v.field(c, "Public endpoint", "host.example:47000", &v.draft.Operator.Endpoint, v.locked())
 		})
 	}
-	v.presentationForm(c)
 }
 
 func (v *View) issuerControls(c *ui.Context) {
@@ -131,12 +132,14 @@ func (v *View) issuerControls(c *ui.Context) {
 		v.actions.LoadIssuerEntry()
 	}
 	v.value(c, "Hub authorization entry", v.issuerEntry)
-	if v.issuerEntry == "" && v.issuerRequested && ui.Button(c.Key("reload-entry"), v.tr("Reload entry")).Disabled(v.actions.LoadIssuerEntry == nil).Clicked() {
-		v.actions.LoadIssuerEntry()
-	}
-	if ui.Button(c.Key("copy-entry"), v.tr("Copy entry")).Disabled(v.issuerEntry == "" || v.actions.Copy == nil).Clicked() {
-		v.actions.Copy(v.issuerEntry)
-	}
+	ui.Row(c).FillWidth().Gap(8).Children(func() {
+		if v.issuerEntry == "" && v.issuerRequested && ui.Button(c.Key("reload-entry"), v.tr("Reload entry")).Disabled(v.actions.LoadIssuerEntry == nil).Clicked() {
+			v.actions.LoadIssuerEntry()
+		}
+		if ui.Button(c.Key("copy-entry"), v.tr("Copy entry")).Disabled(v.issuerEntry == "" || v.actions.Copy == nil).Clicked() {
+			v.actions.Copy(v.issuerEntry)
+		}
+	})
 }
 
 func (v *View) presentationForm(c *ui.Context) {
@@ -154,22 +157,31 @@ func (v *View) presentationForm(c *ui.Context) {
 func (v *View) SetIssuerEntry(entry string) { v.issuerEntry = entry }
 
 func (v *View) centerForm(c *ui.Context) {
-	v.field(c, "Center ID", "", &v.centerID, v.locked())
-	v.field(c, "Center API URLs", "https://…", &v.centerAPI, v.locked())
+	w, _ := c.Size()
+	columns := 2
+	if w < 400 {
+		columns = 1
+	}
+	ui.Grid(c).Columns(columns).FillWidth().Gap(12).Children(func() {
+		v.field(c, "Center ID", "", &v.centerID, v.locked())
+		v.field(c, "Center API URLs", "https://…", &v.centerAPI, v.locked())
+	})
 	cfg := v.saved
 	cfg.Center = settings.Center{ID: v.centerID, API: strings.Fields(v.centerAPI)}
 	err := cfg.Validate()
 	if err != nil {
 		ui.Text(c, v.tr("Check the center ID and HTTPS addresses.")).FontSize(11).TextColor(c.Theme().Danger)
 	}
-	if ui.Button(c.Key("change-center"), v.tr("Change center…")).Disabled(v.locked() || err != nil || cfg.Equal(v.saved) || v.actions.SetCenter == nil).Clicked() {
-		v.actions.SetCenter(cfg.Center)
-	}
-	if ui.Button(c.Key("check-center"), v.tr("Check center")).Disabled(v.saved.Center.ID == "" || v.checkingCenter || v.actions.CheckCenter == nil).Clicked() {
-		v.checkingCenter = true
-		v.centerResults = nil
-		v.actions.CheckCenter()
-	}
+	ui.Row(c).FillWidth().Gap(8).Children(func() {
+		if ui.Button(c.Key("change-center"), v.tr("Change center…")).Disabled(v.locked() || err != nil || cfg.Equal(v.saved) || v.actions.SetCenter == nil).Clicked() {
+			v.actions.SetCenter(cfg.Center)
+		}
+		if ui.Button(c.Key("check-center"), v.tr("Check center")).Disabled(v.saved.Center.ID == "" || v.checkingCenter || v.actions.CheckCenter == nil).Clicked() {
+			v.checkingCenter = true
+			v.centerResults = nil
+			v.actions.CheckCenter()
+		}
+	})
 	if v.checkingCenter {
 		ui.Text(c, v.tr("Checking center…")).FontSize(11).TextColor(muted).Role(ui.RoleStatus)
 	}

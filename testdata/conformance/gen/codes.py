@@ -19,15 +19,19 @@ FULL_WIDTH_DIGITS = str.maketrans("０１２３４５６７８９", string.digit
 
 def normalize_account_code(value: str) -> str:
     code = value.translate(REMOVE_SEPARATORS).translate(ASCII_UPPER).translate(ACCOUNT_ALIASES)
-    if len(code) != 8 or any(c not in ACCOUNT_ALPHABET for c in code):
-        raise ValueError("invalid account code")
+    if any(c not in ACCOUNT_ALPHABET for c in code):
+        raise ValueError("character")
+    if len(code) != 8:
+        raise ValueError("length")
     return code
 
 
 def normalize_numeric_code(value: str) -> str:
     code = value.translate(REMOVE_SEPARATORS).translate(FULL_WIDTH_DIGITS)
-    if len(code) != 8 or any(c not in string.digits for c in code):
-        raise ValueError("invalid numeric code")
+    if any(c not in string.digits for c in code):
+        raise ValueError("character")
+    if len(code) != 8:
+        raise ValueError("length")
     return code
 
 
@@ -37,8 +41,8 @@ def make_cases(examples: dict[str, str], normalize: Callable[[str], str],
     for name, value in examples.items():
         try:
             code = normalize(value)
-        except ValueError:
-            expect = dict(result="reject", reason=section)
+        except ValueError as err:
+            expect = dict(result="reject", reason=f"{section}/{err}")
         else:
             expect = dict(result="accept", normalized=code)
         cases.append(dict(name=name, input=value, expect=expect))
@@ -59,6 +63,7 @@ def generate(check: bool) -> list[Path]:
         "lowercase-u": "ABCuefgh",
         "seven-symbols": "ABC-DEFG",
         "nine-symbols": "ABCD-EFGH1",
+        "invalid-after-nine-symbols": "123456789*",
         "punctuation": "ABC*EFGH",
         "full-width-letter": "ＡBCDEFGH",
         "non-ascii-case-fold": "ABCDſFGH",
@@ -78,6 +83,7 @@ def generate(check: bool) -> list[Path]:
         "unicode-whitespace": "\u2003０0\u202f12\u300034\t5\u00856\u00a0",
         "seven-digits": "1234 567",
         "nine-digits": "1234-56789",
+        "invalid-after-nine-digits": "123456789A",
         "mixed-letter": "0123A567",
         "other-decimal-digits": "٠١٢٣٤٥٦٧",
         "zero-width-space": "0123\u200b4567",

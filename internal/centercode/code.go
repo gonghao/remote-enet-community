@@ -35,10 +35,9 @@ func NormalizeAccountCode(s string) (string, error) {
 		if !strings.ContainsRune(accountAlphabet, r) {
 			return "", ErrCodeCharacter
 		}
-		if n == len(code) {
-			return "", ErrCodeLength
+		if n < len(code) {
+			code[n] = byte(r)
 		}
-		code[n] = byte(r)
 		n++
 	}
 	if n != len(code) {
@@ -71,10 +70,9 @@ func NormalizeNumericCode(s string) (string, error) {
 		if r < '0' || r > '9' {
 			return "", ErrCodeCharacter
 		}
-		if n == len(code) {
-			return "", ErrCodeLength
+		if n < len(code) {
+			code[n] = byte(r)
 		}
-		code[n] = byte(r)
 		n++
 	}
 	if n != len(code) {

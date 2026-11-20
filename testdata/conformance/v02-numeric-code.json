@@ -59,7 +59,7 @@
       "input": "1234 567",
       "expect": {
         "result": "reject",
-        "reason": "4.2"
+        "reason": "4.2/length"
       }
     },
     {
@@ -67,7 +67,15 @@
       "input": "1234-56789",
       "expect": {
         "result": "reject",
-        "reason": "4.2"
+        "reason": "4.2/length"
+      }
+    },
+    {
+      "name": "invalid-after-nine-digits",
+      "input": "123456789A",
+      "expect": {
+        "result": "reject",
+        "reason": "4.2/character"
       }
     },
     {
@@ -75,7 +83,7 @@
       "input": "0123A567",
       "expect": {
         "result": "reject",
-        "reason": "4.2"
+        "reason": "4.2/character"
       }
     },
     {
@@ -83,7 +91,7 @@
       "input": "٠١٢٣٤٥٦٧",
       "expect": {
         "result": "reject",
-        "reason": "4.2"
+        "reason": "4.2/character"
       }
     },
     {
@@ -91,7 +99,7 @@
       "input": "0123​4567",
       "expect": {
         "result": "reject",
-        "reason": "4.2"
+        "reason": "4.2/character"
       }
     },
     {
@@ -99,7 +107,7 @@
       "input": "0123\u001c4567",
       "expect": {
         "result": "reject",
-        "reason": "4.2"
+        "reason": "4.2/character"
       }
     },
     {
@@ -107,7 +115,7 @@
       "input": "﻿01234567",
       "expect": {
         "result": "reject",
-        "reason": "4.2"
+        "reason": "4.2/character"
       }
     }
   ]

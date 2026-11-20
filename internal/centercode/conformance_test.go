@@ -50,11 +50,12 @@ func TestCodeConformance(t *testing.T) {
 							t.Fatalf("normalize = %q, %v; want %q", got, err, tc.Expect.Normalized)
 						}
 					case "reject":
-						if tc.Expect.Reason != vector.section {
-							t.Fatalf("unexpected reject reason %q", tc.Expect.Reason)
-						}
-						if got != "" || (!errors.Is(err, ErrCodeLength) && !errors.Is(err, ErrCodeCharacter)) {
-							t.Fatalf("normalize = %q, %v; want a format error", got, err)
+						want := map[string]error{
+							vector.section + "/length":    ErrCodeLength,
+							vector.section + "/character": ErrCodeCharacter,
+						}[tc.Expect.Reason]
+						if want == nil || got != "" || !errors.Is(err, want) {
+							t.Fatalf("normalize = %q, %v; want %s", got, err, tc.Expect.Reason)
 						}
 					default:
 						t.Fatalf("unknown result %q", tc.Expect.Result)

@@ -502,7 +502,7 @@
   "Copy hub address": "Copy hub address",
   "Via hub %s": "Via hub %s",
   "Connecting to hub": "Connecting to hub",
-  "Hub has not authorized this device": "Hub has not authorized this device",
+  "Not authorized by hub": "Not authorized by hub",
   "Waiting on hub": "Waiting on hub",
   "Hub address must include a host and port.": "Hub address must include a host and port.",
   "Enter the full Hub fingerprint.": "Enter the full Hub fingerprint.",

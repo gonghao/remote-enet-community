@@ -41,7 +41,7 @@ func (v *View) stage() (string, string, ui.Color) {
 		}
 		if v.role == settings.RoleOperator && v.saved.Operator.Mode == "hub" {
 			if v.hubWaitDenied() {
-				return "Hub has not authorized this device", "", amber
+				return "Not authorized by hub", "", amber
 			}
 			return "Connecting to hub", "", blue
 		}

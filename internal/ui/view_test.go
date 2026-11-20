@@ -783,7 +783,7 @@ func TestOperatorHubSettingsAndPath(t *testing.T) {
 	}
 	for _, tc := range []struct{ message, title string }{
 		{"", "Connecting to hub"},
-		{"Hub has not authorized this device. Check the entry and the system time.", "Hub has not authorized this device"},
+		{"Hub has not authorized this device. Check the entry and the system time.", "Not authorized by hub"},
 	} {
 		v.SetState(State{Running: true, Runtime: app.Snapshot{Phase: app.PhaseListening, LastError: tc.message}})
 		if title, _, _ := v.stage(); title != tc.title {

@@ -73,7 +73,7 @@ func (s *shell) ready() {
 			s.submit(renetui.ActionSave, func(ctx context.Context) error { return s.controller.Save(ctx, cfg) })
 		},
 		SetCenter: func(center settings.Center) {
-			detail := center.ID + " " + strings.Join(center.API, " ")
+			detail := s.tr("Center ID") + ": " + center.ID + "\n" + s.tr("Center API URLs") + ":\n" + strings.Join(center.API, "\n")
 			if center.ID == "" {
 				detail = s.tr("Not configured")
 			}

@@ -239,8 +239,12 @@ func run(ctx context.Context, in Input, b backend) Report {
 			}
 			add("public_endpoint", 0, func() (Status, string) {
 				addr := in.Config.Operator.Endpoint
-				if addr == "" && in.Config.Operator.Mode == "hub" {
-					addr = in.Config.Operator.Hub.Addr
+				if in.Config.Operator.Mode == "hub" {
+					// Hub invitations carry the share address; the direct endpoint is ignored.
+					addr = in.Config.Operator.Hub.Share
+					if addr == "" {
+						addr = in.Config.Operator.Hub.Addr
+					}
 				}
 				if addr == "" {
 					return Warning, "endpoint_missing"

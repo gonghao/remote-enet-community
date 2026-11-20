@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -387,6 +388,30 @@ func TestStandaloneHubProbeSendsNoApplicationData(t *testing.T) {
 		data, err := JSON(r)
 		if err != nil || strings.Contains(string(data), ep.Ticket) || strings.Contains(string(data), "12345678") {
 			t.Fatal("credential in checkup export")
+		}
+	}
+}
+
+func TestOperatorHubModeChecksShareAddress(t *testing.T) {
+	// Hub.Addr is a closed loopback port so the hub_tls probe stays local.
+	for _, tc := range []struct{ share, want string }{
+		{"hub-share.example:47100", "hub-share.example"},
+		{"", ""},
+	} {
+		b, in := fakeBackend(t), operatorInput()
+		in.Config.Operator.Mode = "hub"
+		in.Config.Operator.Endpoint = "old-direct.example:47000"
+		in.Config.Operator.Hub.Addr = "127.0.0.1:9"
+		in.Config.Operator.Hub.Share = tc.share
+		in.Config.Operator.Hub.FP = identity.Fingerprint{1}.String()
+		var hosts []string
+		b.lookup = func(_ context.Context, host string) ([]netip.Addr, error) {
+			hosts = append(hosts, host)
+			return []netip.Addr{netip.MustParseAddr("192.0.2.10")}, nil
+		}
+		run(t.Context(), in, b)
+		if slices.Contains(hosts, "old-direct.example") || tc.want != "" && !slices.Contains(hosts, tc.want) || tc.want == "" && len(hosts) != 0 {
+			t.Fatalf("share %q resolved %v", tc.share, hosts)
 		}
 	}
 }

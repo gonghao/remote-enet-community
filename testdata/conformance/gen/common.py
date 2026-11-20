@@ -9,7 +9,7 @@ from tempfile import TemporaryDirectory
 
 NOW = 1795000000
 DIRECTORY = Path(__file__).resolve().parents[1]
-CONTRACT = "CENTER-CONTRACT v1 第八版（2026-11-20）"
+CONTRACT = "CENTER-CONTRACT v1 第九版（2026-11-20）"
 PKCS8 = bytes.fromhex("302e020100300506032b657004220420")
 SPKI = bytes.fromhex("302a300506032b6570032100")
 

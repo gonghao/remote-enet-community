@@ -49,7 +49,7 @@ def generate(check: bool) -> list[Path]:
         claims = {NAMES[k-1]: v.hex() if isinstance(v, bytes) else v for k, v in fields.items()}
         expected = issue(encode(fields), protected) | hex_fields(kid=kid)
         assert expected["length"] <= 512
-        valid.append(dict(name=name, input=dict(signing_key=ISSUER, public_key=pub.hex(), claims=claims,
+        valid.append(dict(name=name, input=dict(key=ISSUER, public_key=pub.hex(), claims=claims,
                           ticket_ttl=ttl, hard_deadline=deadline, clock_skew=config["clock_skew"],
                           ticket_max_ttl=config["ticket_max_ttl"], now=NOW), expect=expected))
     assert valid[-1]["expect"]["length"] == 326

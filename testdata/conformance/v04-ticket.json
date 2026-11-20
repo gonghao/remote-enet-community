@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "contract": "CENTER-CONTRACT v1 第八版（2026-11-20）",
+  "contract": "CENTER-CONTRACT v1 第九版（2026-11-20）",
   "contract_version": "v1.9",
   "vector": "V4/V5",
   "title": "合法中心票据与 kid 推导",
@@ -9,7 +9,7 @@
     {
       "name": "v4-v5-dial",
       "input": {
-        "signing_key": "center-signing-1",
+        "key": "center-signing-1",
         "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e",
         "claims": {
           "v": 1,
@@ -47,7 +47,7 @@
     {
       "name": "v4-hard-deadline",
       "input": {
-        "signing_key": "center-signing-1",
+        "key": "center-signing-1",
         "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e",
         "claims": {
           "v": 1,
@@ -85,7 +85,7 @@
     {
       "name": "v4-max-ttl",
       "input": {
-        "signing_key": "center-signing-1",
+        "key": "center-signing-1",
         "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e",
         "claims": {
           "v": 1,
@@ -123,7 +123,7 @@
     {
       "name": "v4-max-size-wait",
       "input": {
-        "signing_key": "center-signing-1",
+        "key": "center-signing-1",
         "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e",
         "claims": {
           "v": 1,

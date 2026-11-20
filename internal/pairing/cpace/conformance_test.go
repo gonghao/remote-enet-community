@@ -31,7 +31,7 @@ func conformanceCases(t *testing.T, file, vectorID string, count int) []conforma
 	if err := json.Unmarshal(data, &doc); err != nil {
 		t.Fatal(err)
 	}
-	if doc.ContractVersion != "v1.9" || doc.Format != 1 || doc.Vector != vectorID || doc.Contract != "CENTER-CONTRACT v1 第八版（2026-11-20）" {
+	if doc.ContractVersion != "v1.9" || doc.Format != 1 || doc.Vector != vectorID || doc.Contract != "CENTER-CONTRACT v1 第九版（2026-11-20）" {
 		t.Fatalf("%s: unexpected header format=%d contract=%q version=%q vector=%q", file, doc.Format, doc.Contract, doc.ContractVersion, doc.Vector)
 	}
 	if len(doc.Cases) != count {

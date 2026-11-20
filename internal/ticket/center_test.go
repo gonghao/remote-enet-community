@@ -37,7 +37,7 @@ type centerVectorHeader struct {
 }
 
 func (doc centerVectorHeader) valid(vector string) bool {
-	return doc.ContractVersion == "v1.9" && doc.Format == 1 && doc.Vector == vector && doc.Contract == "CENTER-CONTRACT v1 第八版（2026-11-20）"
+	return doc.ContractVersion == "v1.9" && doc.Format == 1 && doc.Vector == vector && doc.Contract == "CENTER-CONTRACT v1 第九版（2026-11-20）"
 }
 
 func TestCenterVectorHeader(t *testing.T) {
@@ -47,7 +47,7 @@ func TestCenterVectorHeader(t *testing.T) {
 		func(h *centerVectorHeader) { h.Vector = "V6" },
 		func(h *centerVectorHeader) { h.Contract = "" },
 	} {
-		h := centerVectorHeader{ContractVersion: "v1.9", Format: 1, Vector: "V4/V5", Contract: "CENTER-CONTRACT v1 第八版（2026-11-20）"}
+		h := centerVectorHeader{ContractVersion: "v1.9", Format: 1, Vector: "V4/V5", Contract: "CENTER-CONTRACT v1 第九版（2026-11-20）"}
 		change(&h)
 		if h.valid("V4/V5") {
 			t.Errorf("accepted invalid vector header %+v", h)
@@ -82,7 +82,7 @@ type issuanceInput struct {
 	ClockSkew    int64  `json:"clock_skew"`
 	HardDeadline int64  `json:"hard_deadline"`
 	PublicKey    string `json:"public_key"`
-	SigningKey   string `json:"signing_key"`
+	SigningKey   string `json:"key"`
 	TicketMaxTTL int64  `json:"ticket_max_ttl"`
 	Now          int64
 	Claims       struct {

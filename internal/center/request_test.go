@@ -110,6 +110,20 @@ func TestRequestSignatureVectors(t *testing.T) {
 					t.Fatalf("headers %v, want %v", headers, want.Headers)
 				}
 			}
+			if want.Result == "reject" {
+				sig, err := wire64.DecodeString(headers.Get("Renet-Signature"))
+				pub := key.Public().(ed25519.PublicKey)
+				if err != nil || !ed25519.Verify(pub, SigningInput(r, a, in.Kind, principal), sig) {
+					t.Fatal("reject vector signature must verify against the original signed fields")
+				}
+				if canonical, err := CanonicalTarget(r.Target); err == nil && canonical != r.Target {
+					normalized := r
+					normalized.Target = canonical
+					if ed25519.Verify(pub, SigningInput(normalized, a, in.Kind, principal), sig) {
+						t.Fatal("raw-target signature verified against the normalized target")
+					}
+				}
+			}
 			target, err := CanonicalTarget(r.Target)
 			if err != nil || target != r.Target {
 				if _, err := SignDevice(r, a, key); !errors.Is(err, ErrBadRequest) {

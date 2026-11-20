@@ -18,6 +18,7 @@ import (
 	"remote-enet/internal/hubauth"
 	"remote-enet/internal/hubcenter"
 	"remote-enet/internal/identity"
+	"remote-enet/internal/session"
 	"remote-enet/internal/settings"
 	"remote-enet/internal/testutil/fakecenter"
 	"remote-enet/internal/testutil/fakezgw"
@@ -148,7 +149,8 @@ func TestCenterReception(t *testing.T) {
 				if !errors.Is(op.AnswerSAS(ctx, pa.ID, true), ErrSASNotVerified) {
 					t.Fatal("replacement inherited verification")
 				}
-				if !op.VerifySAS(pa.ID, pb.Code[:3]+"　"+pb.Code[3:]) {
+				fullwidth := strings.Map(func(r rune) rune { return r - '0' + '０' }, pb.Code[:3])
+				if !op.VerifySAS(pa.ID, fullwidth+"　"+pb.Code[3:]) {
 					t.Fatal("matching input rejected")
 				}
 				if pa.Code != pb.Code {
@@ -278,5 +280,70 @@ func TestCenterModesExclusive(t *testing.T) {
 	err := r.RunClient(t.Context(), ClientConfig{StateDir: t.TempDir(), CenterCode: "12345678", Logger: quietLogger()})
 	if !errors.Is(err, PairingErrorKind("center_unconfigured")) || r.Snapshot().Center.Reason != centerflow.CenterUnconfigured {
 		t.Fatal(err)
+	}
+}
+
+func TestUnverifiedOperatorTimesOut(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
+	defer cancel()
+	fc, cfg, node, _ := startCenterHub(t, ctx)
+	setup := func(role session.Role) (*Runtime, centerflow.Dependencies) {
+		r := NewWithCenterHTTP(fc.HTTPClient())
+		if err := r.begin(role); err != nil {
+			t.Fatal(err)
+		}
+		id, err := identity.Generate()
+		if err != nil {
+			t.Fatal(err)
+		}
+		deps, tr, err := r.centerDeps(cfg, "1.0.0", string(role), t.TempDir(), id, quietLogger())
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { tr.Close() })
+		tr.beforeDial = func(context.Context) error { return nil }
+		return r, deps
+	}
+	r, operatorDeps := setup(session.RoleOperator)
+	op := centerflow.NewOperator(operatorDeps)
+	_, account := fc.CreateAccount("test", 1, time.Time{})
+	if err := op.Login(ctx, account, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := op.Start(ctx, node); err != nil {
+		t.Fatal(err)
+	}
+	clientRuntime, clientDeps := setup(session.RoleClient)
+	cl := centerflow.NewClient(centerflow.ClientDeps{Dependencies: clientDeps, CheckNIC: func(context.Context) error { return nil }})
+	if err := cl.Redeem(ctx, op.Invitation()); err != nil {
+		t.Fatal(err)
+	}
+	results := make(chan error, 2)
+	serve := func(context.Context, *session.Session) error { return errors.New("unexpected data connection") }
+	states, clientStates := r.Subscribe(ctx), clientRuntime.Subscribe(ctx)
+	go func() { results <- op.Run(ctx, session.Options{ConfirmTimeout: time.Second}, serve) }()
+	go func() { results <- cl.Run(ctx, session.Options{}, serve) }()
+	prompt := snapshotWhere(t, states, func(s Snapshot) bool { return s.Center.SASID != 0 }).Center.SASID
+	clientPrompt := snapshotWhere(t, clientStates, func(s Snapshot) bool { return s.Center.SASID != 0 }).Center.SASID
+	if err := clientRuntime.AnswerSAS(ctx, clientPrompt, true); err != nil {
+		t.Fatal(err)
+	}
+	if r.VerifySAS(prompt, "mismatch") || !errors.Is(r.AnswerSAS(ctx, prompt, true), ErrSASNotVerified) {
+		t.Fatal("accepted unverified input")
+	}
+	for range 2 {
+		select {
+		case err := <-results:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	}
+	for _, s := range []centerflow.State{op.Snapshot(), cl.Snapshot()} {
+		if s.Phase != "ended" || s.Reason != centerflow.ConfirmTimeout {
+			t.Fatal(s)
+		}
 	}
 }

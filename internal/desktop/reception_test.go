@@ -171,7 +171,7 @@ func TestControllerCenterReception(t *testing.T) {
 	a := stateWhere(t, op, func(s State) bool { return s.Center.SASID != 0 })
 	b := stateWhere(t, cl, func(s State) bool { return s.Center.SASID != 0 })
 	_, prompt := cl.CenterDisplay()
-	if code, p := op.CenterDisplay(); code != "" || p.Code != "" || len(prompt.Code) != 6 {
+	if code, p := op.CenterDisplay(); code != "" || p.Code != prompt.Code || len(prompt.Code) != 6 {
 		t.Fatal("incorrect local secret display")
 	}
 	if !errors.Is(op.AnswerSAS(ctx, a.Center.SASID, true), ErrSASInputRequired) {

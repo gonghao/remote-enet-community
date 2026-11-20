@@ -57,17 +57,12 @@ var ErrSASInputRequired = app.ErrSASNotVerified
 // ErrCenterOperation hides unrecognized server errors from desktop callers.
 var ErrCenterOperation = errors.New("desktop: center operation failed")
 
-// CenterDisplay returns secrets exclusively for live local controls. On the
-// operator side MatchSAS checks the input without disclosing the expected digits.
+// CenterDisplay returns local secrets exclusively for the live invitation and SAS controls.
 func (c *Controller) CenterDisplay() (string, centerflow.SASPrompt) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.run != nil && c.run.center && !c.run.stopping {
-		invitation, prompt := c.run.runtime.CenterDisplay()
-		if c.state.Config.Role == settings.RoleOperator {
-			prompt.Code = ""
-		}
-		return invitation, prompt
+		return c.run.runtime.CenterDisplay()
 	}
 	return "", centerflow.SASPrompt{}
 }

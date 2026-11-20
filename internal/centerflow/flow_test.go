@@ -774,3 +774,30 @@ func TestProtocolReasons(t *testing.T) {
 		}
 	}
 }
+
+func TestEndAlreadyTerminal(t *testing.T) {
+	for _, code := range []string{"not_found", "session_ended", "forbidden"} {
+		t.Run(code, func(t *testing.T) {
+			f := fixtureFor(t, func(r *http.Request, rt http.RoundTripper) (*http.Response, error) {
+				if strings.HasSuffix(r.URL.Path, "/end") {
+					body := `{"error":{"code":"` + code + `","details":{"end_reason":"client_ended"}}}`
+					return &http.Response{StatusCode: map[string]int{"session_ended": 410, "not_found": 404, "forbidden": 403}[code], Body: io.NopCloser(strings.NewReader(body))}, nil
+				}
+				return rt.RoundTrip(r)
+			}, nil)
+			f.start()
+			err := f.op.End(f.ctx)
+			s := f.op.Snapshot()
+			if code == "forbidden" {
+				if ReasonOf(err) != Forbidden || s.Phase == "ended" {
+					t.Fatal(err, s)
+				}
+				return
+			}
+			if err != nil || s.Phase != "ended" || code == "not_found" && s.Reason != NotFound || code == "session_ended" && s.Reason != ClientEnded {
+				t.Fatal(err, s)
+			}
+			f.check(f.op.End(f.ctx))
+		})
+	}
+}

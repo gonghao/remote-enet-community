@@ -269,6 +269,10 @@ func (f *flow) end(ctx context.Context, r *reception, why Reason) error {
 	key := r.endKey
 	s, err := retryAPI(ctx, f, func() (center.Session, error) { return f.API.End(ctx, key, r.remote.SessionID, string(r.pendingEnd)) })
 	if err != nil {
+		var api *center.Error
+		if errors.As(err, &api) && (api.Code == "not_found" || api.Code == "session_ended") {
+			return f.cleanup(ctx, r, ReasonOf(err))
+		}
 		return f.handle(ctx, r, err)
 	}
 	if s.EndReason == nil {

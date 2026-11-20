@@ -101,7 +101,7 @@ func TestDashboardPrimaryControlsAreVisible(t *testing.T) {
 				labels := []string{"Connect client", "Stop runtime", "Invite or address:port and code", "Adapter selection", "Refresh adapters", "Settings", "Log"}
 				if role == settings.RoleOperator {
 					width, height = 1080, 760
-					labels = []string{"Start operator", "Stop runtime", "Generate invitation", "Copy invitation", "Test connection", "Settings", "Log"}
+					labels = []string{"Start operator", "Stop runtime", "Invitation · easy to copy and paste", "Numeric code · easy to dictate", "Test connection", "Settings", "Log"}
 				}
 				tt := ui.NewTester(v.Render, width, height)
 				for _, label := range labels {
@@ -135,7 +135,7 @@ func TestSessionControlsStayInPlaceWhenMessagesChange(t *testing.T) {
 					width, height = operatorMinWidth, operatorMinHeight
 					labels = []string{"Start operator"}
 					if zoom == 1 {
-						labels = append(labels, "Generate numeric code", "Generate invitation")
+						labels = append(labels, "Numeric code · easy to dictate", "Invitation · easy to copy and paste")
 					}
 				}
 				v := New(cfg, Actions{})
@@ -294,7 +294,7 @@ func TestResponsiveSessionAndSettings(t *testing.T) {
 							height = clientHeight
 						}
 						tt := ui.NewTester(v.Render, width, height)
-						left, right := "Generate numeric code", "Generate invitation"
+						left, right := "Numeric code · easy to dictate", "Invitation · easy to copy and paste"
 						if p == settingsPage {
 							left, right = "Preferences", "Center"
 						}

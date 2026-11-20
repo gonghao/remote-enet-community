@@ -1,4 +1,12 @@
 {
+  "Connect to hub and wait": "連線 Hub 並等候",
+  "Complete these settings: %s": "請在設定中補全：%s",
+  "Invite Client": "邀請 Client",
+  "Numeric code · easy to dictate": "數字碼 · 適合口述",
+  "Invitation · easy to copy and paste": "邀請碼 · 適合複製貼上",
+  "Client enters %s + an 8-digit code.": "Client 輸入：%s + 8 位數字碼",
+  "Client pastes the full invitation.": "Client 貼上整段邀請碼",
+  "Connection settings": "連線設定",
   "#%d · %s · gen %d · %s": "#%d · %s · 世代 %d · %s",
   "%s could not start": "%s 無法啟動",
   "%s port must be between 1 and 65535.": "%s 連接埠必須介於 1 至 65535。",

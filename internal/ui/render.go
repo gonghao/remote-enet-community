@@ -139,7 +139,7 @@ func (v *View) header(c *ui.Context) {
 	})
 }
 
-// Two columns leave room for the three translated numeric-code actions at 1000 logical DIP.
+// Split settings and diagnostic cards only when each can use nearly 480 logical DIP.
 const twoColumnWidth = 1000
 
 func pageColumns(c *ui.Context) int {
@@ -155,7 +155,11 @@ func (v *View) card(c *ui.Context, title, subtitle string, fn func()) {
 	if v.page == sessionPage || v.page == settingsPage {
 		gap = 8
 	}
-	ui.Column(c).FillWidth().MinWidth(0).Padding(12).Gap(gap).Background(panel).Border(1, line).Radius(0).Children(func() {
+	vertical := float32(12)
+	if v.page == sessionPage && v.role == settings.RoleOperator {
+		vertical, gap = 8, 4
+	}
+	ui.Column(c).FillWidth().MinWidth(0).Padding(vertical, 12).Gap(gap).Background(panel).Border(1, line).Radius(0).Children(func() {
 		if title != "" {
 			ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
 				ui.Text(c, v.tr(title)).FontSize(12).Bold()
@@ -248,6 +252,9 @@ func (v *View) startControls(c *ui.Context) {
 			}
 		} else {
 			label := "Start listening"
+			if v.saved.Operator.Mode == "hub" {
+				label = "Connect to hub and wait"
+			}
 			if v.listening {
 				label = "Starting…"
 			}
@@ -269,29 +276,53 @@ func (v *View) startControls(c *ui.Context) {
 			v.actions.Stop()
 		}
 	})
-	status := "Ready to start with saved settings."
+	message := v.tr("Ready to start with saved settings.")
 	switch {
 	case v.state.Stopping || v.stopping:
-		status = "Stopping the session and releasing listeners…"
+		message = v.tr("Stopping the session and releasing listeners…")
 	case v.locked():
-		status = "Runtime active · stop before changing network settings."
+		message = v.tr("Runtime active · stop before changing network settings.")
 	case v.submitted != nil:
-		status = "Waiting for settings to be saved…"
+		message = v.tr("Waiting for settings to be saved…")
+	case !client:
+		message = v.operatorStartHint()
 	case v.dirty():
-		status = "Unsaved changes · open Settings and save before starting."
-	case client && strings.TrimSpace(v.invitation) == "":
-		status = "Leave the pairing input empty to use the remembered peer."
+		message = v.tr("Unsaved changes · open Settings and save before starting.")
+	case strings.TrimSpace(v.invitation) == "":
+		message = v.tr("Leave the pairing input empty to use the remembered peer.")
 		if v.saved.Client.Peer == "" {
 			return
 		}
-	case v.role == settings.RoleOperator && (v.saved.Operator.Mode != "hub" && v.saved.Operator.Endpoint == "" || v.saved.Operator.Bind == ""):
-		status = "Open Settings to save a public endpoint and presentation IPv4."
 	}
-	message := v.tr(status)
 	text := ui.Text(c, message).FontSize(11).TextColor(muted).Role(ui.RoleStatus)
 	if client {
 		text.FillWidth().MinWidth(0).SingleLine().Tooltip(message)
 	}
+}
+
+func (v *View) operatorStartHint() string {
+	op := v.saved.Operator
+	var missing []string
+	addMissing := func(value, label string) {
+		if value == "" {
+			missing = append(missing, v.tr(label))
+		}
+	}
+	if op.Mode == "hub" {
+		addMissing(op.Hub.Addr, "Hub address")
+		addMissing(op.Hub.FP, "Hub fingerprint")
+	} else {
+		addMissing(op.Listen, "Listen address")
+		addMissing(op.Endpoint, "Public endpoint")
+	}
+	addMissing(op.Bind, "Presentation IPv4")
+	if len(missing) > 0 {
+		return v.tr("Complete these settings: %s", strings.Join(missing, " · "))
+	}
+	if v.dirty() {
+		return v.tr("Unsaved changes · open Settings and save before starting.")
+	}
+	return v.tr("Ready to start with saved settings.")
 }
 
 func (v *View) settingsPage(c *ui.Context) {
@@ -302,7 +333,7 @@ func (v *View) settingsPage(c *ui.Context) {
 	}
 	ui.Grid(c).Columns(pageColumns(c)).FillWidth().Gap(12).Children(func() {
 		if v.role == settings.RoleOperator {
-			v.card(c.Key("connection-settings"), "", "", func() { v.operatorForm(c) })
+			v.card(c.Key("connection-settings"), "Connection settings", "", func() { v.operatorForm(c) })
 			v.card(c.Key("operator-settings"), "Network & presentation", "", func() { v.presentationForm(c) })
 		}
 		v.card(c.Key("save-settings"), "Preferences", "", func() {
@@ -311,23 +342,23 @@ func (v *View) settingsPage(c *ui.Context) {
 				peer, _ := identity.ParseFingerprint(v.saved.Client.Peer)
 				v.peerValue(c.Key("remembered-peer"), "Remembered peer", peer)
 			}
-			v.saveControls(c)
+			ui.Checkbox(c.Key("allow-test"), &v.draft.AllowLinkTest, v.tr("Allow peer connection tests")).Label(v.tr("Allow peer connection tests")).Disabled(v.locked())
 		})
 		v.card(c.Key("center-settings"), "Center", "", func() { v.centerForm(c) })
 	})
-	v.checksEntry(c)
 	if v.role == settings.RoleClient {
 		v.linkTest(c)
 	}
+	v.saveControls(c)
 }
 
 func (v *View) saveControls(c *ui.Context) {
-	ui.Checkbox(c.Key("allow-test"), &v.draft.AllowLinkTest, v.tr("Allow peer connection tests")).Label(v.tr("Allow peer connection tests")).Disabled(v.locked())
 	cfg, err := v.config()
 	if err != nil {
 		ui.Text(c, v.validationMessage(err)).FontSize(11).TextColor(c.Theme().Danger).Role(ui.RoleAlert)
 	}
-	ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
+	width, _ := c.Size()
+	renderStatus := func() {
 		message, color := "Saved settings", muted
 		if v.dirty() {
 			message, color = "Unsaved changes", amber
@@ -336,7 +367,20 @@ func (v *View) saveControls(c *ui.Context) {
 			message, color = "Saving settings…", blue
 		}
 		ui.Text(c, v.tr(message)).Grow(1).FontSize(11).TextColor(color).Role(ui.RoleStatus)
-		if ui.PrimaryButton(c.Key("save"), v.tr("Save settings")).Label(v.tr("Save settings")).Disabled(v.locked() || v.submitted != nil || !v.dirty() || err != nil || v.actions.Save == nil).Clicked() {
+	}
+	if width < 400 {
+		renderStatus()
+	}
+	ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+		if width >= 400 {
+			renderStatus()
+		}
+		v.checksEntry(c)
+		save := ui.PrimaryButton(c.Key("save"), v.tr("Save settings"))
+		if width < 400 {
+			save.Padding(4, 8)
+		}
+		if save.Label(v.tr("Save settings")).Disabled(v.locked() || v.submitted != nil || !v.dirty() || err != nil || v.actions.Save == nil).Clicked() {
 			submitted := cfg
 			v.submitted = &submitted
 			v.actions.Save(cfg)

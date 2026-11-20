@@ -193,7 +193,8 @@ func (v *View) SetState(state State) {
 	if state.Testing || state.TestResult != v.state.TestResult || !state.Running {
 		v.testing = false
 	}
-	if state.Invitation != "" && state.Invitation != v.state.Invitation || state.Stopping {
+	newInvitation := state.Invitation != "" && state.Invitation != v.state.Invitation
+	if newInvitation || state.Stopping {
 		v.issuing = false
 	}
 	if state.Running && !v.state.Running {

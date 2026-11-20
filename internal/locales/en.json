@@ -1,4 +1,12 @@
 {
+  "Connect to hub and wait": "Connect to hub and wait",
+  "Complete these settings: %s": "Complete these settings: %s",
+  "Invite Client": "Invite Client",
+  "Numeric code · easy to dictate": "Numeric code · easy to dictate",
+  "Invitation · easy to copy and paste": "Invitation · easy to copy and paste",
+  "Client enters %s + an 8-digit code.": "Client enters %s + an 8-digit code.",
+  "Client pastes the full invitation.": "Client pastes the full invitation.",
+  "Connection settings": "Connection settings",
   "#%d · %s · gen %d · %s": "#%d · %s · gen %d · %s",
   "%s could not start": "%s could not start",
   "%s port must be between 1 and 65535.": "%s port must be between 1 and 65535.",

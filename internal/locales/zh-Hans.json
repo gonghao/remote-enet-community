@@ -1,4 +1,12 @@
 {
+  "Connect to hub and wait": "连接 Hub 并等待",
+  "Complete these settings: %s": "请在设置中补全：%s",
+  "Invite Client": "邀请 Client",
+  "Numeric code · easy to dictate": "数字码 · 适合口述",
+  "Invitation · easy to copy and paste": "邀请码 · 适合复制粘贴",
+  "Client enters %s + an 8-digit code.": "Client 输入：%s + 8 位数字码",
+  "Client pastes the full invitation.": "Client 粘贴整段邀请码",
+  "Connection settings": "连接设置",
   "#%d · %s · gen %d · %s": "#%d · %s · 代次 %d · %s",
   "%s could not start": "%s 无法启动",
   "%s port must be between 1 and 65535.": "%s 端口必须在 1 至 65535 之间。",

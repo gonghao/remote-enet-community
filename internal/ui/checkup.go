@@ -10,7 +10,11 @@ import (
 )
 
 func (v *View) checksEntry(c *ui.Context) {
-	if ui.Button(c.Key("open-checks"), v.tr("Connection checks")).Label(v.tr("Open connection checks")).Clicked() {
+	button := ui.Button(c.Key("open-checks"), v.tr("Connection checks"))
+	if width, _ := c.Size(); v.page == settingsPage && width < 400 {
+		button.Padding(4, 8)
+	}
+	if button.Label(v.tr("Open connection checks")).Clicked() {
 		v.page = checksPage
 	}
 }

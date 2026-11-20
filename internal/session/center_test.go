@@ -201,9 +201,13 @@ func TestCenterFailedAttempts(t *testing.T) {
 	}
 
 	c.BeginClientAttempt = func() bool { return false }
+	left := r.AttemptsLeft()
 	cr, or := runCenter(t, c, o, nil)
-	if !errors.Is(cr.err, cpace.ReasonBudgetExhausted) || !errors.Is(or.err, ReasonInterrupted) {
-		t.Fatalf("client budget: %v %v", cr.err, or.err)
+	// The client abandons right after Hello. Depending on timing the operator
+	// fails while still writing Hello or while waiting for message 11; either
+	// way it must not succeed or consume an attempt.
+	if !errors.Is(cr.err, cpace.ReasonBudgetExhausted) || or.err == nil || r.AttemptsLeft() != left {
+		t.Fatalf("client budget: %v %v left %d", cr.err, or.err, r.AttemptsLeft())
 	}
 	c.BeginClientAttempt = func() bool { charges++; return true }
 	o.Center = nil

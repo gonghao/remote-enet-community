@@ -59,6 +59,12 @@ func TestRequestSignatureVectors(t *testing.T) {
 			in, want := c.Input, c.Expect
 			if in.RawURL != "" {
 				got, err := CanonicalTarget(in.RawURL)
+				if want.Result == "reject" {
+					if err == nil || want.Reason != "bad_request" {
+						t.Fatalf("target %q, error %v, want bad_request", got, err)
+					}
+					return
+				}
 				if err != nil || got != want.CanonicalTarget || want.Result != "accept" {
 					t.Fatalf("target %q, error %v", got, err)
 				}
@@ -103,10 +109,7 @@ func TestRequestSignatureVectors(t *testing.T) {
 				}
 			}
 			target, err := CanonicalTarget(r.Target)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if target != r.Target {
+			if err != nil || target != r.Target {
 				if _, err := SignDevice(r, a, key); !errors.Is(err, ErrBadRequest) {
 					t.Fatalf("signed noncanonical target: %v", err)
 				}

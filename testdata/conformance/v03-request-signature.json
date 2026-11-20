@@ -123,6 +123,100 @@
       }
     },
     {
+      "name": "target-incomplete-escape",
+      "input": {
+        "raw_url": "/v1/nodes?q=100%"
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "bad_request"
+      }
+    },
+    {
+      "name": "target-query-space",
+      "input": {
+        "raw_url": "/v1/nodes?q=a b"
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "bad_request"
+      }
+    },
+    {
+      "name": "target-non-ascii-path",
+      "input": {
+        "raw_url": "/v1/节点"
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "bad_request"
+      }
+    },
+    {
+      "name": "target-escaped-segment-data",
+      "input": {
+        "raw_url": "/v1/%2F/%2efile"
+      },
+      "expect": {
+        "result": "accept",
+        "canonical_target": "/v1/%2F/%2efile"
+      }
+    },
+    {
+      "name": "target-empty-segments",
+      "input": {
+        "raw_url": "/v1//nodes//"
+      },
+      "expect": {
+        "result": "accept",
+        "canonical_target": "/v1//nodes//"
+      }
+    },
+    {
+      "name": "target-escaped-parent",
+      "input": {
+        "raw_url": "/v1/node/%2e%2e/nodes"
+      },
+      "expect": {
+        "result": "accept",
+        "canonical_target": "/v1/nodes"
+      }
+    },
+    {
+      "name": "malformed-target",
+      "input": {
+        "key": "device-operator",
+        "center_id": "center.example",
+        "kind": "device",
+        "principal": "b01a6d5bcafb46f5499121df645baa5b375bce3b96bcc867ce85cbc42ad2043d",
+        "method": "GET",
+        "target": "/v1/nodes?q=100%",
+        "timestamp": 1795000000,
+        "renet_client": "operator/1.2.0",
+        "nonce": "",
+        "idempotency_key": "",
+        "body": "",
+        "headers": {
+          "Renet-Device-Key": [
+            "sBptW8r7RvVJkSHfZFuqWzdbzjuWvMhnzoXLxCrSBD0"
+          ],
+          "Renet-Timestamp": [
+            "1795000000"
+          ],
+          "Renet-Client": [
+            "operator/1.2.0"
+          ],
+          "Renet-Signature": [
+            "uRg9fMnH3ir3wDQ5IavNf5s79Va09j7B8E3cKEwJUPbXrp4Ezft7_75KdkzNHKIUKmx2DCNKEtUdOE-2FiV6BQ"
+          ]
+        }
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "bad_request"
+      }
+    },
+    {
       "name": "changed-client",
       "input": {
         "key": "device-operator",

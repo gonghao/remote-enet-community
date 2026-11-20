@@ -4,6 +4,8 @@ from base64 import urlsafe_b64encode
 from hashlib import sha256
 from pathlib import Path
 import json
+import re
+from urllib.parse import urlsplit
 
 import common
 
@@ -41,6 +43,30 @@ def signed(kind: str, target: str) -> tuple[dict, dict]:
     return inputs, dict(result="accept", signing_input=message.hex(), signature=sig.hex(), headers=headers)
 
 
+def canonical_target(raw: str) -> str:
+    target = raw.partition("#")[0]
+    if not target.startswith("/"):
+        url = urlsplit(target)
+        if url.scheme not in {"https", "http"} or not url.hostname or url.username is not None:
+            raise ValueError("unsupported URL")
+        target = (url.path or "/") + ("?" + url.query if url.query else "")
+    if not re.fullmatch(r"(?:[a-zA-Z0-9._~!$&()*+,/:;=?@-]|%[a-fA-F0-9]{2})+", target):
+        raise ValueError("target requires encoding")
+    path, _, query = target.partition("?")
+    output = []
+    segments = path[1:].split("/")
+    for i, segment in enumerate(segments):
+        dot = re.sub("%2e", ".", segment, flags=re.I)
+        if dot not in {".", ".."}:
+            output.append(segment)
+            continue
+        if dot == ".." and output:
+            output.pop()
+        if i + 1 == len(segments):
+            output.append("")
+    return "/" + "/".join(output) + ("?" + query if query else "")
+
+
 def generate(check: bool) -> list[Path]:
     cases = []
     get = "/v1/sessions/AAECAwQFBgcICQoLDA0ODw?since_version=1&wait_s=3"
@@ -48,17 +74,29 @@ def generate(check: bool) -> list[Path]:
         inputs, expected = signed(kind, target)
         cases.append(dict(name=f"{kind}-request", input=inputs, expect=expected))
 
-    targets = [
-        ("escaped", "/v1/a%2fb/%41?q=%2F&q=%2f", "/v1/a%2fb/%41?q=%2F&q=%2f"),
-        ("bare-query", "/v1/nodes?", "/v1/nodes"),
-        ("fragment", "https://center.example/v1/nodes?a=1#local", "/v1/nodes?a=1"),
-        ("dot-segments", "/v1/./node/../nodes", "/v1/nodes"),
-    ]
-    for name, raw, canonical in targets:
-        cases.append(dict(name=f"target-{name}", input=dict(raw_url=raw),
-                          expect=dict(result="accept", canonical_target=canonical)))
+    targets = {
+        "escaped": "/v1/a%2fb/%41?q=%2F&q=%2f",
+        "bare-query": "/v1/nodes?",
+        "fragment": "https://center.example/v1/nodes?a=1#local",
+        "dot-segments": "/v1/./node/../nodes",
+        "incomplete-escape": "/v1/nodes?q=100%",
+        "query-space": "/v1/nodes?q=a b",
+        "non-ascii-path": "/v1/节点",
+        "escaped-segment-data": "/v1/%2F/%2efile",
+        "empty-segments": "/v1//nodes//",
+        "escaped-parent": "/v1/node/%2e%2e/nodes",
+    }
+    for name, raw in targets.items():
+        try:
+            canonical = canonical_target(raw)
+        except ValueError:
+            expected = dict(result="reject", reason="bad_request")
+        else:
+            expected = dict(result="accept", canonical_target=canonical)
+        cases.append(dict(name=f"target-{name}", input=dict(raw_url=raw), expect=expected))
 
     for name, target, reason in [
+        ("malformed-target", targets["incomplete-escape"], "bad_request"),
         ("changed-client", get, "unauthenticated"),
         ("signed-dot-segments", "/v1/./node/../nodes", "unauthenticated"),
         ("signed-bare-query", "/v1/nodes?", "unauthenticated"),

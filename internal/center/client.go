@@ -121,6 +121,9 @@ func NewClient(o ClientOptions) (*Client, error) {
 	return c, nil
 }
 
+// Now uses the same center-time correction as device signatures. Hub time is local.
+func (c *Client) Now() time.Time { return c.o.Now().Add(time.Duration(c.offset.Load())) }
+
 // NewIdempotencyKey supplies 128 bits of randomness for one logical operation.
 func NewIdempotencyKey() string { return wire64.EncodeToString(random16()) }
 
@@ -314,7 +317,7 @@ func (c *Client) attempt(ctx context.Context, e *entry, call Call, body []byte, 
 		return Response{}, fmt.Errorf("%w: %w", ErrUnreachable, err)
 	}
 	r := Request{CenterID: c.o.Center.ID, Method: call.Method, Target: target, Body: body}
-	auth := RequestAuth{Timestamp: c.o.Now().Add(time.Duration(c.offset.Load())).Unix(), Client: c.o.Role + "/" + c.o.AppVersion, IdempotencyKey: call.Key}
+	auth := RequestAuth{Timestamp: c.Now().Unix(), Client: c.o.Role + "/" + c.o.AppVersion, IdempotencyKey: call.Key}
 	if call.Nonce {
 		auth.Nonce = random16()
 	}

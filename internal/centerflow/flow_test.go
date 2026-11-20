@@ -560,8 +560,17 @@ func TestTwoDevicesRedeemConcurrently(t *testing.T) {
 	}
 }
 
+type waitingConnector struct{ TicketConnector }
+
+func (waitingConnector) DialTicket(context.Context, transport.Endpoint, identity.Fingerprint, []byte) (transport.Session, error) {
+	return nil, relay.ErrUnknownPeer
+}
+
 func TestUnknownPeerKeepsTicketAndBudget(t *testing.T) {
 	f := fixtureFor(t, nil, nil)
+	// The center's deadline would already be past on the machine's wall clock.
+	f.offset.Store(int64(-5 * time.Minute))
+	f.cl.Connector = waitingConnector{f.cl.Connector}
 	f.start()
 	f.redeem()
 	ctx, cancel := context.WithCancel(f.ctx)

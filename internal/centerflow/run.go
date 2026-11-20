@@ -243,7 +243,7 @@ func (f *flow) connect(ctx context.Context, r *reception, s center.Session) (tra
 		if err := sleep(ctx, delay); err != nil {
 			return nil, err
 		}
-		if f.role == session.RoleOperator || time.Until(time.Unix(t.TicketExpiresAt, 0)) < 10*time.Second {
+		if f.role == session.RoleOperator || time.Unix(t.TicketExpiresAt, 0).Sub(f.API.Now()) < 10*time.Second {
 			t = center.Ticket{}
 		}
 	}

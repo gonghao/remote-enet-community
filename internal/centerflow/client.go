@@ -4,11 +4,39 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"slices"
+	"time"
 
 	"remote-enet/internal/center"
 	"remote-enet/internal/centercode"
 	"remote-enet/internal/session"
 )
+
+// ErrChooseSession requires an explicit choice before recovery can continue.
+const ErrChooseSession Reason = "choose_session"
+
+// SessionCandidate carries the ID for Resume. Only ShortID belongs in displays.
+type SessionCandidate struct {
+	ID      center.SessionID
+	ShortID string
+	// The client session object provides redemption time, not creation time.
+	RedeemedAt time.Time
+}
+
+// ChooseSessionError is immutable and its message omits session identifiers.
+type ChooseSessionError struct{ candidates []SessionCandidate }
+
+func (e *ChooseSessionError) Error() string                  { return ErrChooseSession.Error() }
+func (e *ChooseSessionError) Unwrap() error                  { return ErrChooseSession }
+func (e *ChooseSessionError) Candidates() []SessionCandidate { return slices.Clone(e.candidates) }
+
+func sessionChoice(live []center.Session) *ChooseSessionError {
+	e := &ChooseSessionError{}
+	for _, s := range live {
+		e.candidates = append(e.candidates, SessionCandidate{ID: s.SessionID, ShortID: s.SessionID.String()[:6], RedeemedAt: timestamp(s.RedeemedAt)})
+	}
+	return e
+}
 
 // Client owns at most one in-memory PAKE budget.
 type Client struct {
@@ -47,14 +75,20 @@ func (c *Client) Redeem(ctx context.Context, code string) error {
 	c.phase("redeeming", "")
 	s, err := c.API.Redeem(ctx, center.NewIdempotencyKey(), code)
 	digest := sha256.Sum256([]byte(code))
-	if ReasonOf(err) == CodeInvalid && c.ambiguous == digest {
+	retryingLostReply := ReasonOf(err) == CodeInvalid && c.ambiguous == digest
+	if retryingLostReply || (errors.Is(err, center.ErrUnreachable) && ctx.Err() == nil) {
 		// There is no code or redemption operation ID in the recovery list.
 		// A unique live session permits retrying the user's code through PAKE.
 		live, listErr := c.API.ClientSessions(ctx)
-		if listErr != nil {
+		if listErr != nil && retryingLostReply {
 			return c.fail(ctx, listErr)
 		}
-		if len(live) == 1 {
+		if len(live) > 1 {
+			c.ambiguous = digest
+			c.phase("idle", ErrChooseSession)
+			return sessionChoice(live)
+		}
+		if retryingLostReply && len(live) == 1 {
 			if live[0].State == "active" {
 				c.ambiguous = [32]byte{}
 				return c.recover(ctx, live[0])
@@ -87,9 +121,6 @@ func (c *Client) Resume(ctx context.Context, ids ...center.SessionID) error {
 	return c.resume(ctx, ids...)
 }
 func (c *Client) resume(ctx context.Context, ids ...center.SessionID) error {
-	if len(ids) > 1 {
-		return errors.New("centerflow: select one session")
-	}
 	if err := c.prune(ctx); err != nil {
 		return c.fail(ctx, err)
 	}
@@ -107,13 +138,16 @@ func (c *Client) resume(ctx context.Context, ids ...center.SessionID) error {
 	if err != nil {
 		return c.fail(ctx, err)
 	}
+	if len(ids) > 1 {
+		return c.fail(ctx, sessionChoice(live))
+	}
 	switch len(live) {
 	case 0:
 		return nil
 	case 1:
 		return c.recover(ctx, live[0])
 	default:
-		return errors.New("centerflow: select a client session")
+		return c.fail(ctx, sessionChoice(live))
 	}
 }
 

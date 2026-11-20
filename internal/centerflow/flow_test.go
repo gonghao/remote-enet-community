@@ -801,3 +801,43 @@ func TestEndAlreadyTerminal(t *testing.T) {
 		})
 	}
 }
+
+func TestRecoveryOffersMultipleSessions(t *testing.T) {
+	var lose atomic.Bool
+	f := fixtureFor(t, nil, func(r *http.Request, rt http.RoundTripper) (*http.Response, error) {
+		resp, err := rt.RoundTrip(r)
+		if err == nil && lose.Load() && r.URL.Path == "/v1/redeem" {
+			resp.Body.Close()
+			return nil, io.ErrUnexpectedEOF
+		}
+		return resp, err
+	})
+	f.start()
+	f.redeem()
+	other := must(identity.Generate())
+	api := must(center.NewClient(center.ClientOptions{Center: settings.Center{ID: f.op.CenterID, API: f.fc.Entries()}, Role: "operator", Device: other.Key, HTTP: f.fc.HTTPClient()}))
+	_, acct := f.fc.CreateAccount("second", 2, time.Time{})
+	_, _, err := api.Login(f.ctx, center.NewIdempotencyKey(), acct, "")
+	f.check(err)
+	s := must(api.CreateSession(f.ctx, center.NewIdempotencyKey(), f.node))
+	client := NewClient(ClientDeps{f.cl.Dependencies, f.cl.checkNIC})
+	lose.Store(true)
+	first := client.Redeem(f.ctx, *s.Code)
+	lose.Store(false)
+	for _, err := range []error{first, client.Redeem(f.ctx, *s.Code), client.Resume(f.ctx)} {
+		var choice *ChooseSessionError
+		if !errors.Is(err, ErrChooseSession) || !errors.As(err, &choice) {
+			t.Fatal(err)
+		}
+		ids := map[center.SessionID]bool{}
+		for _, item := range choice.Candidates() {
+			ids[item.ID] = true
+			if item.ShortID != item.ID.String()[:6] || item.RedeemedAt.IsZero() {
+				t.Fatal("invalid candidate metadata")
+			}
+		}
+		if len(ids) != 2 || !ids[f.id] || !ids[s.SessionID] || client.current != nil {
+			t.Fatal("ambiguous selection")
+		}
+	}
+}

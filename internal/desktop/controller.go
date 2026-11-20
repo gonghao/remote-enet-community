@@ -137,6 +137,7 @@ type subscription struct {
 // A run remains reserved until its runtime, subscription and borrowed workers
 // have all exited, including when a Stop caller abandons its wait.
 type Controller struct {
+	sessionChoice  *centerflow.ChooseSessionError
 	mu             sync.Mutex
 	ctx            context.Context
 	cancel         context.CancelFunc
@@ -344,6 +345,7 @@ func (c *Controller) saveConfig(ctx context.Context, cfg settings.Config, center
 	// even if cancellation raced with it; it must not report a fictitious rollback.
 	if cfg.Center.ID != c.state.Config.Center.ID || !slices.Equal(cfg.Center.API, c.state.Config.Center.API) || cfg.Role != c.state.Config.Role || cfg.Operator.Mode != c.state.Config.Operator.Mode {
 		c.state.Center = CenterView{}
+		c.sessionChoice = nil
 		c.state.Runtime.Center = app.CenterSnapshot{}
 	}
 	c.state.Config = cfg

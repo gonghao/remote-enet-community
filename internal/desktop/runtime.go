@@ -145,6 +145,7 @@ func (c *Controller) start(ctx context.Context, role, input, node string) error 
 		g.capture = hsfzcapture.New(hsfzcapture.Options{})
 		op.Capture = g.capture
 	}
+	c.sessionChoice = nil
 	c.run = g
 	c.state.Checkup = checkup.Report{}
 	c.state.Capture = hsfzcapture.Snapshot{}
@@ -313,6 +314,9 @@ func (c *Controller) serve(g *running, role string, client app.ClientConfig, op 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.run == g {
+		if !wasStopping && g.center {
+			errors.As(err, &c.sessionChoice)
+		}
 		if final.Center.Reason == centerflow.Unauthenticated || final.Center.Reason == centerflow.DeviceRevoked {
 			c.state.Center = CenterView{}
 		}

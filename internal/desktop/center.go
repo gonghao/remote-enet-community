@@ -13,6 +13,14 @@ import (
 	"remote-enet/internal/settings"
 )
 
+// CenterSessionChoice returns the candidate list from an asynchronous client run.
+// Keep full IDs out of snapshots, logs and diagnostics.
+func (c *Controller) CenterSessionChoice() *centerflow.ChooseSessionError {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.sessionChoice
+}
+
 // CheckCenter returns the saved center snapshot alongside its results so the
 // UI can discard them if the user changes the center during the request.
 func (c *Controller) CheckCenter(ctx context.Context) (settings.Center, []center.EntryResult, error) {
@@ -129,6 +137,10 @@ func (c *Controller) receptionAction(ctx context.Context, action func(context.Co
 func publicCenterError(err error) error {
 	if err == nil {
 		return nil
+	}
+	var choice *centerflow.ChooseSessionError
+	if errors.As(err, &choice) {
+		return choice
 	}
 	for _, known := range []error{context.Canceled, context.DeadlineExceeded, ErrBusy, ErrRole, app.ErrNotConnected, app.ErrSASExpired, ErrSASInputRequired, centercode.ErrCodeLength, centercode.ErrCodeCharacter} {
 		if errors.Is(err, known) {

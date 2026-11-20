@@ -75,6 +75,7 @@ var pairingMessages = map[string]string{
 }
 
 var centerMessages = map[string]string{
+	"choose_session":            "Choose a session to recover",
 	"nic_missing":               "The selected vehicle-side IPv4 adapter is unavailable.",
 	"unsupported":               "Numeric pairing unsupported",
 	"bad_request":               "The center rejected the request format",

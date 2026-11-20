@@ -1,4 +1,5 @@
 {
+  "Choose a session to recover": "请选择要恢复的会话",
   "The center rejected the request format": "中心拒绝了请求格式",
   "The current session state does not allow this action": "当前会话状态不允许此操作",
   "The request key was reused for a different operation": "不同操作使用了同一请求键",

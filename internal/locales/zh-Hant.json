@@ -1,4 +1,5 @@
 {
+  "Choose a session to recover": "請選擇要復原的工作階段",
   "The center rejected the request format": "中心拒絕了請求格式",
   "The current session state does not allow this action": "目前的工作階段狀態不允許此操作",
   "The request key was reused for a different operation": "不同操作使用了同一請求鍵",

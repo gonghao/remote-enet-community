@@ -1,0 +1,113 @@
+{
+  "format": 1,
+  "contract": "CENTER-CONTRACT v1 第八版（2026-11-20）",
+  "vector": "V2",
+  "title": "数字码规范化",
+  "generator": "gen/codes.py",
+  "cases": [
+    {
+      "name": "leading-zeros",
+      "input": "00001234",
+      "expect": {
+        "result": "accept",
+        "normalized": "00001234"
+      }
+    },
+    {
+      "name": "all-zeros",
+      "input": "00000000",
+      "expect": {
+        "result": "accept",
+        "normalized": "00000000"
+      }
+    },
+    {
+      "name": "space-grouping",
+      "input": "0123 4567",
+      "expect": {
+        "result": "accept",
+        "normalized": "01234567"
+      }
+    },
+    {
+      "name": "hyphen-grouping",
+      "input": "0123-4567",
+      "expect": {
+        "result": "accept",
+        "normalized": "01234567"
+      }
+    },
+    {
+      "name": "full-width-digits",
+      "input": "００９９ ８７６５",
+      "expect": {
+        "result": "accept",
+        "normalized": "00998765"
+      }
+    },
+    {
+      "name": "unicode-whitespace",
+      "input": " ０0 12　34\t56 ",
+      "expect": {
+        "result": "accept",
+        "normalized": "00123456"
+      }
+    },
+    {
+      "name": "seven-digits",
+      "input": "1234 567",
+      "expect": {
+        "result": "reject",
+        "reason": "4.2"
+      }
+    },
+    {
+      "name": "nine-digits",
+      "input": "1234-56789",
+      "expect": {
+        "result": "reject",
+        "reason": "4.2"
+      }
+    },
+    {
+      "name": "mixed-letter",
+      "input": "0123A567",
+      "expect": {
+        "result": "reject",
+        "reason": "4.2"
+      }
+    },
+    {
+      "name": "other-decimal-digits",
+      "input": "٠١٢٣٤٥٦٧",
+      "expect": {
+        "result": "reject",
+        "reason": "4.2"
+      }
+    },
+    {
+      "name": "zero-width-space",
+      "input": "0123​4567",
+      "expect": {
+        "result": "reject",
+        "reason": "4.2"
+      }
+    },
+    {
+      "name": "control-separator",
+      "input": "0123\u001c4567",
+      "expect": {
+        "result": "reject",
+        "reason": "4.2"
+      }
+    },
+    {
+      "name": "leading-bom",
+      "input": "﻿01234567",
+      "expect": {
+        "result": "reject",
+        "reason": "4.2"
+      }
+    }
+  ]
+}

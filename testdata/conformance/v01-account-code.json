@@ -1,0 +1,137 @@
+{
+  "format": 1,
+  "contract": "CENTER-CONTRACT v1 第八版（2026-11-20）",
+  "vector": "V1",
+  "title": "账号码规范化",
+  "generator": "gen/codes.py",
+  "cases": [
+    {
+      "name": "alphabet-digits-first",
+      "input": "01234567",
+      "expect": {
+        "result": "accept",
+        "normalized": "01234567",
+        "display": "0123-4567"
+      }
+    },
+    {
+      "name": "alphabet-digits-and-letters",
+      "input": "89ABCDEF",
+      "expect": {
+        "result": "accept",
+        "normalized": "89ABCDEF",
+        "display": "89AB-CDEF"
+      }
+    },
+    {
+      "name": "alphabet-letters-middle",
+      "input": "GHJKMNPQ",
+      "expect": {
+        "result": "accept",
+        "normalized": "GHJKMNPQ",
+        "display": "GHJK-MNPQ"
+      }
+    },
+    {
+      "name": "alphabet-letters-last",
+      "input": "RSTVWXYZ",
+      "expect": {
+        "result": "accept",
+        "normalized": "RSTVWXYZ",
+        "display": "RSTV-WXYZ"
+      }
+    },
+    {
+      "name": "lowercase",
+      "input": "abcdefgh",
+      "expect": {
+        "result": "accept",
+        "normalized": "ABCDEFGH",
+        "display": "ABCD-EFGH"
+      }
+    },
+    {
+      "name": "mixed-case",
+      "input": "aBcDeFgH",
+      "expect": {
+        "result": "accept",
+        "normalized": "ABCDEFGH",
+        "display": "ABCD-EFGH"
+      }
+    },
+    {
+      "name": "aliases",
+      "input": "iIlLoO2Z",
+      "expect": {
+        "result": "accept",
+        "normalized": "1111002Z",
+        "display": "1111-002Z"
+      }
+    },
+    {
+      "name": "mixed-separators",
+      "input": " \taB-cD　Ef\n-Gh ",
+      "expect": {
+        "result": "accept",
+        "normalized": "ABCDEFGH",
+        "display": "ABCD-EFGH"
+      }
+    },
+    {
+      "name": "uppercase-u",
+      "input": "ABCUEFGH",
+      "expect": {
+        "result": "reject",
+        "reason": "4.1"
+      }
+    },
+    {
+      "name": "lowercase-u",
+      "input": "ABCuefgh",
+      "expect": {
+        "result": "reject",
+        "reason": "4.1"
+      }
+    },
+    {
+      "name": "seven-symbols",
+      "input": "ABC-DEFG",
+      "expect": {
+        "result": "reject",
+        "reason": "4.1"
+      }
+    },
+    {
+      "name": "nine-symbols",
+      "input": "ABCD-EFGH1",
+      "expect": {
+        "result": "reject",
+        "reason": "4.1"
+      }
+    },
+    {
+      "name": "punctuation",
+      "input": "ABC*EFGH",
+      "expect": {
+        "result": "reject",
+        "reason": "4.1"
+      }
+    },
+    {
+      "name": "full-width-letter",
+      "input": "ＡBCDEFGH",
+      "expect": {
+        "result": "reject",
+        "reason": "4.1"
+      }
+    },
+    {
+      "name": "non-ascii-case-fold",
+      "input": "ABCDſFGH",
+      "expect": {
+        "result": "reject",
+        "reason": "4.1"
+      }
+    }
+  ]
+}

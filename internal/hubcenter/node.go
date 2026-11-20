@@ -103,6 +103,8 @@ func (n *Node) clockOK(ctx context.Context, server, sent, received time.Time) bo
 }
 
 func (n *Node) checkPolicy(ctx context.Context, p center.NodePolicy, sent, received time.Time) bool {
+	retention := min(seconds(p.LeaseTTLS), time.Duration(math.MaxInt64)-ClockSkew) + ClockSkew
+	n.o.Server.SetSessionRetention(retention)
 	ok := n.clockOK(ctx, time.Unix(p.ServerTime, 0), sent, received)
 	if p.NodeState == "disabled" {
 		n.closeAll()

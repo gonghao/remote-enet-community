@@ -501,3 +501,26 @@ func TestCancelInflight(t *testing.T) {
 		t.Fatal("Run did not join on cancellation")
 	}
 }
+
+func TestActivationAndHeartbeatRetention(t *testing.T) {
+	var scheduled atomic.Int64
+	f := newFixture(t, func(d time.Duration, _ func()) func() bool {
+		scheduled.Store(int64(d))
+		return func() bool { return true }
+	})
+	f.o.Server.SetSessionRetention(time.Second)
+	var expected time.Duration
+	check := func() {
+		t.Helper()
+		if got := time.Duration(scheduled.Load()); got != expected {
+			t.Fatalf("cleanup after %v, want %v", got, expected)
+		}
+	}
+	f.run(func(time.Duration) {
+		f.connect(f.op, f.token(1, 1, 1), nil)
+		expected = time.Duration(scheduled.Load()) + 300*time.Second + ClockSkew
+		f.o.Server.CloseAll()
+		check()
+		f.o.Server.SetSessionRetention(time.Hour)
+	}, func(time.Duration) { check() })
+}

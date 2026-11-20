@@ -122,6 +122,10 @@ func (f *flow) run(parent context.Context, base session.Options, serve serveFunc
 		return ctx.Err()
 	}
 	err = context.Cause(work)
+	var api *center.Error
+	if errors.As(err, &api) && api.Code == "session_ended" {
+		return f.cleanup(ctx, r, ReasonOf(err))
+	}
 	var ended remoteEnd
 	if errors.As(err, &ended) {
 		return f.cleanup(ctx, r, ended.Reason)

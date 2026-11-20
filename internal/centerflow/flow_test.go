@@ -666,3 +666,34 @@ func TestCenterIdentityMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestTicketObservesEndBeforePoll(t *testing.T) {
+	ticketStarted, release := make(chan struct{}), make(chan struct{})
+	f := fixtureFor(t, nil, func(r *http.Request, rt http.RoundTripper) (*http.Response, error) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/tickets"):
+			close(ticketStarted)
+			if err := blockRequest(r, release); err != nil {
+				return nil, err
+			}
+		case r.URL.Query().Has("since_version"):
+			<-r.Context().Done()
+			return nil, r.Context().Err()
+		}
+		return rt.RoundTrip(r)
+	})
+	f.start()
+	f.redeem()
+	cl := launch(f.ctx, f.cl, session.Options{}, hold)
+	select {
+	case <-ticketStarted:
+	case <-f.ctx.Done():
+		t.Fatal(f.ctx.Err())
+	}
+	f.check(f.op.End(f.ctx))
+	close(release)
+	f.check(waitRun(t, cl))
+	if got := f.cl.Snapshot(); got.Phase != "ended" || got.Reason != OperatorEnded {
+		t.Fatal(got)
+	}
+}

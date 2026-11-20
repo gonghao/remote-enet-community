@@ -1,4 +1,4 @@
-// Package ticket implements the self-hosted v2 COSE ticket format.
+// Package ticket implements center v1 and self-hosted v2 COSE tickets.
 package ticket
 
 import (
@@ -53,9 +53,6 @@ const (
 
 // Sign enforces the field profile and issues tickets at Unix-second precision.
 func Sign(priv ed25519.PrivateKey, c Claims) ([]byte, error) {
-	if len(priv) != ed25519.PrivateKeySize {
-		return nil, errors.New("invalid issuer private key length")
-	}
 	if c.Hub.IsZero() || c.Device.IsZero() != c.Bearer {
 		return nil, errors.New("missing hub or inconsistent device binding")
 	}
@@ -89,6 +86,13 @@ func Sign(priv ed25519.PrivateKey, c Claims) ([]byte, error) {
 	if !c.PairUntil.IsZero() {
 		fields[15] = c.PairUntil.Unix()
 	}
+	return signFields(priv, fields)
+}
+
+func signFields(priv ed25519.PrivateKey, fields map[uint64]any) ([]byte, error) {
+	if len(priv) != ed25519.PrivateKeySize {
+		return nil, errors.New("invalid issuer private key length")
+	}
 	kid := KidOf(priv.Public().(ed25519.PublicKey))
 	protected := must(enc.Marshal(map[int]any{1: -8, 4: kid[:]}))
 	payload := must(enc.Marshal(fields))
@@ -112,13 +116,26 @@ func Verify(raw []byte, key func(Kid) (ed25519.PublicKey, bool)) (Kid, Claims, e
 func Inspect(raw []byte) (Kid, Claims, error) { return parse(raw, nil) }
 
 func parse(raw []byte, key func(Kid) (ed25519.PublicKey, bool)) (Kid, Claims, error) {
+	kid, payload, step, err := openEnvelope(raw, key, key == nil)
+	if err != nil {
+		return Kid{}, Claims{}, fmt.Errorf("A%d: %w", step, err)
+	}
+	c, err := decodeClaims(payload)
+	if err != nil {
+		return Kid{}, Claims{}, fmt.Errorf("A5: %w", err)
+	}
+	return kid, c, nil
+}
+
+// Only Inspect permits unauthenticated payloads.
+func openEnvelope(raw []byte, key func(Kid) (ed25519.PublicKey, bool), inspect bool) (Kid, []byte, int, error) {
 	var tag cbor.RawTag
 	if len(raw) > 1024 || strict.Unmarshal(raw, &tag) != nil || tag.Number != 18 {
-		return Kid{}, Claims{}, errors.New("A2: invalid COSE tag or size")
+		return Kid{}, nil, 2, errors.New("invalid COSE tag or size")
 	}
 	var parts []any
 	if untagged.Unmarshal(tag.Content, &parts) != nil || len(parts) != 4 {
-		return Kid{}, Claims{}, errors.New("A2: invalid COSE array")
+		return Kid{}, nil, 2, errors.New("invalid COSE array")
 	}
 	protected, pok := parts[0].([]byte)
 	unprotected, uok := parts[1].(map[any]any)
@@ -126,30 +143,29 @@ func parse(raw []byte, key func(Kid) (ed25519.PublicKey, bool)) (Kid, Claims, er
 	sig, sok := parts[3].([]byte)
 	var headers map[any]any
 	if !pok || !uok || len(unprotected) != 0 || !bok || !sok || len(sig) != ed25519.SignatureSize || untagged.Unmarshal(protected, &headers) != nil || len(headers) != 2 || headers[uint64(1)] != int64(-8) {
-		return Kid{}, Claims{}, errors.New("A2: invalid COSE headers or signature format")
+		return Kid{}, nil, 2, errors.New("invalid COSE headers or signature format")
 	}
 	id, ok := headers[uint64(4)].([]byte)
 	if !ok || len(id) != 8 {
-		return Kid{}, Claims{}, errors.New("A2: invalid kid")
+		return Kid{}, nil, 2, errors.New("invalid kid")
 	}
 	if !bytes.Equal(protected, must(enc.Marshal(headers))) || !bytes.Equal(raw, must(enc.Marshal(cbor.Tag{Number: 18, Content: parts}))) {
-		return Kid{}, Claims{}, errors.New("A2: non-deterministic COSE encoding")
+		return Kid{}, nil, 2, errors.New("non-deterministic COSE encoding")
 	}
 	kid := Kid(id)
-	if key != nil {
+	if !inspect {
+		if key == nil {
+			return Kid{}, nil, 3, errors.New("missing issuer lookup")
+		}
 		pub, ok := key(kid)
 		if !ok || len(pub) != ed25519.PublicKeySize || KidOf(pub) != kid {
-			return Kid{}, Claims{}, errors.New("A3: unknown issuer")
+			return Kid{}, nil, 3, errors.New("unknown issuer")
 		}
 		if !ed25519.Verify(pub, signatureInput(protected, payload), sig) {
-			return Kid{}, Claims{}, errors.New("A4: invalid signature")
+			return Kid{}, nil, 4, errors.New("invalid signature")
 		}
 	}
-	c, err := decodeClaims(payload)
-	if err != nil {
-		return Kid{}, Claims{}, fmt.Errorf("A5: %w", err)
-	}
-	return kid, c, nil
+	return kid, payload, 0, nil
 }
 
 // headSize is called only on a well-formed definite-length CBOR item.
@@ -229,92 +245,122 @@ func validateInfo(item []byte) error {
 	return nil
 }
 
-func decodeClaims(payload []byte) (Claims, error) {
-	var c Claims
+// decodeFields enforces the wire types and deterministic encoding before either
+// profile constructs its claims. Optional information values retain their bytes.
+func decodeFields(payload []byte, version uint64) (map[uint64]any, error) {
 	fields := make(map[uint64]any)
 	if len(payload) == 0 || payload[0]>>5 != 5 {
-		return c, errors.New("expected claims map")
+		return nil, errors.New("expected claims map")
 	}
 	if err := strict.Wellformed(payload); err != nil {
-		return c, err
+		return nil, err
 	}
 	parts, err := children(payload)
 	if err != nil {
-		return c, err
+		return nil, err
 	}
 	for i := 0; i < len(parts); i += 2 {
 		var k uint64
 		if parts[i][0]>>5 != 0 || untagged.Unmarshal(parts[i], &k) != nil {
-			return c, errors.New("expected unsigned field key")
+			return nil, errors.New("expected unsigned field key")
 		}
 		if fields[k] != nil {
-			return c, fmt.Errorf("duplicate field %d", k)
+			return nil, fmt.Errorf("duplicate field %d", k)
 		}
 		v := parts[i+1]
+		if (version == 1 && (k == 15 || k == 16)) ||
+			(version == 2 && (k == 2 || k == 3 || k == 7 || k == 8 || k == 14)) {
+			return nil, fmt.Errorf("unknown constraint %d", k)
+		}
 		switch k {
-		case 1, 5, 10, 11, 12, 15:
+		case 1, 5, 10, 11, 12, 14, 15:
 			var n uint64
 			if v[0]>>5 != 0 || untagged.Unmarshal(v, &n) != nil || n > math.MaxUint32 {
-				return c, fmt.Errorf("invalid integer field %d", k)
+				return nil, fmt.Errorf("invalid integer field %d", k)
 			}
 			fields[k] = n
-			switch k {
-			case 1:
-				if n != 2 {
-					return c, errors.New("invalid ticket version")
-				}
-			case 5:
-				if n != roleDial && n != roleWait {
-					return c, errors.New("invalid role")
-				}
-				c.Role = uint8(n)
-			case 10:
-				c.IssuedAt = time.Unix(int64(n), 0).UTC()
-			case 11:
-				c.NotBefore = time.Unix(int64(n), 0).UTC()
-			case 12:
-				c.Expires = time.Unix(int64(n), 0).UTC()
-			case 15:
-				c.PairUntil = time.Unix(int64(n), 0).UTC()
+			if k == 1 && n != version {
+				return nil, errors.New("invalid ticket version")
 			}
-		case 4, 6, 9, 13:
-			dst := map[uint64][]byte{4: c.Device[:], 6: c.Peer[:], 9: c.Hub[:], 13: c.JTI[:]}[k]
+			if k == 5 && n != roleDial && n != roleWait {
+				return nil, errors.New("invalid role")
+			}
+		case 2:
+			var center string
+			if v[0]>>5 != 3 || untagged.Unmarshal(v, &center) != nil || !centerID.MatchString(center) {
+				return nil, errors.New("invalid center ID")
+			}
+			fields[k] = center
+		case 3, 4, 6, 7, 8, 9, 13:
+			size := 16
+			if k == 4 || k == 6 || k == 9 {
+				size = 32
+			}
 			var b []byte
-			if untagged.Unmarshal(v, &b) != nil || v[0]>>5 != 2 || len(b) != len(dst) {
-				return c, fmt.Errorf("invalid byte string field %d", k)
+			if v[0]>>5 != 2 || untagged.Unmarshal(v, &b) != nil || len(b) != size {
+				return nil, fmt.Errorf("invalid byte string field %d", k)
 			}
 			fields[k] = b
-			copy(dst, b)
 		case 16:
 			if len(v) != 1 || v[0] != 0xf5 {
-				return c, errors.New("invalid bearer flag")
+				return nil, errors.New("invalid bearer flag")
 			}
 			fields[k] = true
-			c.Bearer = true
 		default:
 			if k < 64 {
-				return c, fmt.Errorf("unknown constraint %d", k)
+				return nil, fmt.Errorf("unknown constraint %d", k)
 			}
 			if err := validateInfo(v); err != nil {
-				return c, err
+				return nil, err
 			}
 			fields[k] = cbor.RawMessage(v)
 		}
 	}
 	canonical, err := enc.Marshal(fields)
 	if err != nil {
-		return c, fmt.Errorf("encode canonical claims: %w", err)
+		return nil, fmt.Errorf("encode canonical claims: %w", err)
 	}
 	if !bytes.Equal(payload, canonical) {
-		return c, errors.New("non-deterministic claims encoding")
+		return nil, errors.New("non-deterministic claims encoding")
 	}
-	for _, k := range []uint64{1, 5, 9, 10, 11, 12, 13} {
+	required := []uint64{1, 5, 9, 10, 11, 12, 13}
+	if version == 1 {
+		required = []uint64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}
+	}
+	for _, k := range required {
 		if fields[k] == nil {
-			return c, fmt.Errorf("missing field %d", k)
+			return nil, fmt.Errorf("missing field %d", k)
 		}
 	}
+	return fields, nil
+}
+
+func claimTime(value any) time.Time {
+	return time.Unix(int64(value.(uint64)), 0).UTC()
+}
+
+func decodeClaims(payload []byte) (Claims, error) {
+	var c Claims
+	fields, err := decodeFields(payload, 2)
+	if err != nil {
+		return c, err
+	}
+	c.Role = uint8(fields[5].(uint64))
+	c.Bearer = fields[16] != nil
 	if (fields[4] == nil) != c.Bearer || (fields[6] != nil) != (c.Role == roleDial) || (c.Role == roleWait && c.Bearer) || (c.Role == roleDial && fields[15] != nil) {
-		return c, errors.New("invalid field combination")
+		return Claims{}, errors.New("invalid field combination")
+	}
+	c.Hub = identity.Fingerprint(fields[9].([]byte))
+	c.JTI = [16]byte(fields[13].([]byte))
+	c.IssuedAt, c.NotBefore, c.Expires = claimTime(fields[10]), claimTime(fields[11]), claimTime(fields[12])
+	if !c.Bearer {
+		c.Device = identity.Fingerprint(fields[4].([]byte))
+	}
+	if c.Role == roleDial {
+		c.Peer = identity.Fingerprint(fields[6].([]byte))
+	}
+	if fields[15] != nil {
+		c.PairUntil = claimTime(fields[15])
 	}
 	return c, nil
 }
@@ -322,19 +368,31 @@ func decodeClaims(payload []byte) (Claims, error) {
 // CheckTime applies A10 using signed limits expressed in seconds.
 func CheckTime(c Claims, now time.Time, skew, maxTTL, bootstrapMaxTTL, pairingWindowMax int64) error {
 	i, n, e := c.IssuedAt.Unix(), c.NotBefore.Unix(), c.Expires.Unix()
-	if skew < 0 || maxTTL < 0 || bootstrapMaxTTL < 0 || pairingWindowMax < 0 || i < 0 || i > n || n >= e || e > math.MaxUint32 {
-		return errors.New("A10: invalid time bounds")
+	if bootstrapMaxTTL < 0 || pairingWindowMax < 0 {
+		return errors.New("A10: invalid time limits")
 	}
-	// Comparing now to n-skew also implies i <= now+skew since i <= n.
-	s := now.Unix()
-	if s < n-skew || (s > e && s-e > skew) || e-i > maxTTL || (c.Bearer && e-i > bootstrapMaxTTL) {
-		return errors.New("A10: ticket outside validity window or TTL")
+	if c.Bearer {
+		maxTTL = min(maxTTL, bootstrapMaxTTL)
+	}
+	if err := checkWindow(i, n, e, now.Unix(), skew, maxTTL); err != nil {
+		return fmt.Errorf("A10: %w", err)
 	}
 	if !c.PairUntil.IsZero() {
 		p := c.PairUntil.Unix()
 		if p < n || p > e || p-i > pairingWindowMax {
 			return errors.New("A10: invalid pairing window")
 		}
+	}
+	return nil
+}
+
+func checkWindow(i, n, e, now, skew, maxTTL int64) error {
+	if skew < 0 || i < 0 || i > n || n >= e || e > math.MaxUint32 {
+		return errors.New("invalid time bounds")
+	}
+	// n-skew also covers i <= now+skew without overflowing on extreme clocks.
+	if now < n-skew || (now > e && now-e > skew) || e-i > maxTTL {
+		return errors.New("ticket outside validity window or TTL")
 	}
 	return nil
 }

@@ -444,6 +444,278 @@ func (c *Controller) CheckCenter(ctx context.Context) (settings.Center, []center
 
 `app.ClientConfig` 的配对来源仍为 `Invite` / `InviteFile` / `DirectPair` / `Peer` 之一；Client 经 `DialBootstrap` 配对，已保存配对在拨号前按 `Endpoint.Ticket` 的 `exp` 过滤端点，续期按 `PathInfo.Hub` + `PathInfo.Via` 调用 `UpdateEndpointTicket`。`renetd`：`operator --hub HOST:PORT --hub-fp FP [--share-address HOST:PORT]`（与 `--listen` 互斥）、`issuer --state-dir DIR [--name NAME]`、`invite --hub HOST:PORT --hub-fp FP [--ttl D]`。
 
+## R5. 各端接入中心（2026-11-20 冻结）
+
+设计、任务与提交对应关系、审查处理见 [CENTER-CLIENT](CENTER-CLIENT.md)；协议以 [CENTER-CONTRACT](CENTER-CONTRACT.md)（第十一版）为准。以下签名取自实现，以代码为准。R5 删除的接口：无；`locales.Text` 中「纯 8 位码改写为直连提示」的 R5 前特例已删除。
+
+### `internal/hub`（改动）
+
+```go
+type SessionID [16]byte // 零值表示自建授权
+type Grant struct {
+    Session               SessionID // 非零时启用契约 §8.4 第 10–12 步
+    JTI                   [16]byte  // 锁内消费，保留到 Expires（含边界）
+    Ref                   any
+    Expires, PairingUntil time.Time
+}
+type Options struct {
+    CenterMode  bool // 锁内拒绝 Session 为零的 Grant（unauthorized，记错误日志）
+    Local       *identity.Local
+    Policy      Policy
+    Now         func() time.Time
+    Embedded    *Embedded
+    Logger      *slog.Logger
+    SetupLimits SetupLimits
+    AfterFunc   func(time.Duration, func()) (stop func() bool) // 与 Now 同一时钟；nil 用 time.AfterFunc
+    SealTTL, SessionRetention time.Duration                    // 非正值取契约缺省（各 330 秒）
+}
+type Usage struct { Session SessionID; Paired bool; Conns int; RxBytes, TxBytes uint64; PairedFor time.Duration } // 本进程累计
+func (s *Server) SetAdmitting(open bool)                          // 只关新准入，不断开已有路由
+func (s *Server) Renew(id SessionID, deadline time.Time) bool     // 直接替换 D，允许缩短；没有会话记录时返回 false
+func (s *Server) Revoke(id SessionID) Usage                       // 锁内封存并关闭整组连接；未知会话同样封存，用量为零；幂等
+func (s *Server) CloseAll() int                                    // 关闭全部中心路由，不封存，保留尾部用量
+func (s *Server) Usage() []Usage                                   // 只列有连接的会话
+func (s *Server) TrafficTotals() (rx, tx uint64)                   // 含已断连与已退役会话，供心跳按两次采样差算吞吐
+func (s *Server) SetSessionRetention(retention time.Duration)      // 同时重排已断连会话的清理时刻
+```
+
+自建 Grant（`Session` 为零）的行为不变。中心会话的自拨（target 为本 Hub 指纹）在锁内同样 `unauthorized`。外层协议格式与状态码不变，中心会话一节见 [PROTOCOL](../internal/hub/PROTOCOL.md#中心会话)。
+
+### `internal/hubcenter`（新增）
+
+```go
+const ( ClockSkew = 30 * time.Second; TicketMaxTTL = 300 * time.Second; HeartbeatTimeout = 10 * time.Second )
+var ErrSuperseded = errors.New("node generation superseded; another process may be using this identity")
+type Config struct {
+    Version                   int
+    Mode, IdentityDir, Listen string
+    Center                    settings.Center
+    NodeID                    [16]byte
+    TicketKeys                []ed25519.PublicKey
+    SetupLimits               hubauth.SetupLimits
+} // JSON 键见 CENTER-CLIENT 3.1
+func Load(path string) (Config, error)                 // 严格解码并校验，不打开身份目录
+func (c Config) ReloadCompatible(old Config) error     // 只允许 ticket_keys 变化，入口顺序变化也需重启
+func NewPolicy(cfg Config, hubFP identity.Fingerprint) (*Policy, error) // 实现 hub.Policy；代次为 0 时拒绝一切
+func (p *Policy) SetGeneration(gen uint32)
+func (p *Policy) SetKeys(keys []ed25519.PublicKey) error // 1–16 把、kid 不重复，校验通过后整体替换
+func (p *Policy) Kids() []ticket.Kid
+type NodeOptions struct {
+    Config Config; Local *identity.Local; Server *hub.Server; Policy *Policy; API *center.Client
+    Version string; Now func() time.Time; Logger *slog.Logger
+}
+func NewNode(o NodeOptions) *Node
+func (n *Node) Run(ctx context.Context) error          // Serve 之后调用一次；返回 ErrSuperseded、终局错误或 ctx 错误，退出前关闸并 CloseAll
+func (n *Node) Reload(cfg Config) error                // ReloadCompatible 后 SetKeys
+```
+
+`Policy.Admit` 在 `ticket.VerifyCenter` 之后另行拒绝全零 `sid` 与 target 为 Hub 自身的 dial（契约第十一版 §8.4）；`Valid` 恒为真，`PairingOperator` 恒为零。`Node` 的激活键满 23 小时换新；保留期按 `lease_ttl + clock_skew` 调用 `SetSessionRetention`；`renew` 只作用于本次上报的会话；`closed` 每次至多 1000 项，保留到中心不再在 `revoke` 中列出。`internal/hubauth` 新增 `DecodeStrict(r io.Reader, limit int, dst any) error`，自建语义不变。
+
+### `internal/center`（扩展为签名 API 客户端）
+
+```go
+type ClientOptions struct {
+    Center           settings.Center
+    Role, AppVersion string             // Role: "operator" | "client" | "hub"
+    Device, NodeKey  ed25519.PrivateKey // 设备主体或节点主体
+    Node             [16]byte
+    HTTP             *http.Client       // nil：校验证书的缺省客户端
+    Now              func() time.Time
+    Logger           *slog.Logger
+}
+func NewClient(o ClientOptions) (*Client, error)        // 不做网络 I/O
+type Call struct { Method, Path string; Query url.Values; Body any; Key string; Nonce bool; Wait time.Duration }
+type Response struct { Status int; Replayed bool; Entry string }
+func (c *Client) Do(ctx context.Context, call Call, out any) (Response, error)
+func (c *Client) Now() time.Time                        // 设备主体按 server_time 校正；hub 角色为本地时钟
+type Class uint8                                        // ClassBusiness | ClassRetry | ClassWait | ClassFix
+func ClassOf(code string) Class                         // 未知 code 视为 B
+type Error struct { Status int; Code string; Class Class; RetryAfter time.Duration; Details jsonwire.RawMessage }
+func (e *Error) EndReason() string; func (e *Error) State() string; func (e *Error) ServerTime() (time.Time, bool)
+var ErrUnreachable = errors.New("center unreachable")            // 入口或预算耗尽
+var ErrIDMismatch = errors.New("center identity mismatch")       // 全部入口都报告了别的 center_id
+var ErrEndpointResponse = errors.New("center: invalid endpoint response")
+var ErrProtocol = ErrEndpointResponse                           // 成功响应格式或取值无效
+func NewIdempotencyKey() string
+// Operator
+func (c *Client) Login(ctx context.Context, key, accountCode, label string) (Device, Account, error)
+func (c *Client) Account(ctx context.Context) (AccountView, error)
+func (c *Client) Devices(ctx context.Context) ([]DeviceEntry, error)
+func (c *Client) RevokeDevice(ctx context.Context, key string, fp identity.Fingerprint) error
+func (c *Client) Nodes(ctx context.Context) ([]Node, error)
+func (c *Client) CreateSession(ctx context.Context, key string, node NodeID) (Session, error)
+func (c *Client) Established(ctx context.Context, key string, id SessionID, client identity.Fingerprint) (Session, error)
+// 两端
+func (c *Client) Session(ctx context.Context, id SessionID, since int64, wait time.Duration, nonce bool) (Session, error)
+func (c *Client) Ticket(ctx context.Context, key string, id SessionID) (Ticket, error)
+func (c *Client) End(ctx context.Context, key string, id SessionID, reason string) (Session, error)
+// Client
+func (c *Client) Redeem(ctx context.Context, key, code string) (Session, error)
+func (c *Client) ClientSessions(ctx context.Context) ([]Session, error)
+// Hub
+func (c *Client) Activate(ctx context.Context, key string, req Activation) (Activated, error)
+func (c *Client) Heartbeat(ctx context.Context, req Heartbeat) (HeartbeatResult, error)
+```
+
+线格式结构体（`Session`、`Ticket`、`Node`、`Account`、`AccountView`、`SessionSummary`、`Device`、`DeviceEntry`、`Activation`、`Activated`、`NodePolicy`、`Heartbeat`、`Load`、`SessionUsage`、`ClosedUsage`、`HeartbeatResult`、`Renewal`、`Revocation`）与 ID 类型（`SessionID`、`NodeID`、`AccountID`、`KeyID`，base64url 文本）按契约 §7 定义，未知字段忽略。`Do` 一次调用至多 3 次尝试，单次 10 秒、合计 30 秒，长轮询两者各加 `Wait`；没有错误信封的非 2xx 一律 R 类；已向入口发出的心跳不重发。心跳响应的 `renew` / `revoke` 可缺失或为 `null`。R3 的 `FetchMeta` / `Check` 改为也接受 `hub` 角色。
+
+### `internal/session`、`internal/pairing`、`internal/proto`（改动）
+
+```go
+// session
+type CenterBinding struct { CenterID string; Session [16]byte; Hub identity.Fingerprint }
+// Options 新增：
+//   Center *CenterBinding                       非 nil 时 ConfirmSAS 必填、隧道闸门初始关闭
+//   Pinned func(identity.Fingerprint) bool      Operator 判定数据连接的对端是否已钉住
+//   HoldTunnels bool
+//   ConfirmTimeout time.Duration                中心模式缺省 3 分钟
+//   BeginClientAttempt func() bool              Client 在发 11 前扣会话预算；false 表示已用尽
+func (s *Session) ReleaseTunnels()             // 幂等；配对连接永不放行
+var ErrTunnelsHeld = errors.New("session: tunnels held until the center confirms the session")
+
+// pairing/cpace：ReasonRejected = "rejected"、ReasonConfirmTimeout = "confirm_timeout"、ReasonNotPaired = "not_paired"
+
+// pairing
+func NewSessionResponder(code string, budget int) *SessionResponder
+func (r *SessionResponder) Begin(ctx context.Context) (*SessionAttempt, error) // 收到 11 后、发 12 前计数
+func (r *SessionResponder) AttemptsLeft() int
+func (r *SessionResponder) Close()
+func (a *SessionAttempt) Context() context.Context
+func (a *SessionAttempt) Respond(b cpace.Binding, commit [64]byte) (*cpace.Responder, [32]byte, error)
+func (a *SessionAttempt) Commit(save func(context.Context) error) error
+func (a *SessionAttempt) Finish()
+
+// proto
+func ReadCenterControl(r io.Reader) (any, error) // 数据连接控制流：配对帧仍按 256 字节上限
+```
+
+`pairing` 不导入 `session`，`*SessionAttempt` 由调用方适配为 `session.DigitalResponder`。
+
+### `internal/centerstate`（新增）
+
+```go
+var ErrNoPin = errors.New("centerstate: pin not found"); var ErrCorrupt = errors.New("centerstate: corrupt state")
+func Open(roleDir, centerID string) (*Store, error) // state/<role>/centers/<center_id>/，不触碰其他中心与 trust.json
+type NodeRef struct { ID [16]byte; Addr string; Port uint16; HubFP identity.Fingerprint }
+type Pin struct { CenterID string; Session [16]byte; Role string; Peer identity.Fingerprint; Node NodeRef; PairedAt time.Time }
+func (s *Store) SavePin(ctx context.Context, p Pin) error
+func (s *Store) Pin(id [16]byte) (Pin, error)       // ErrNoPin / ErrCorrupt
+func (s *Store) Pins() ([]Pin, error)               // 返回可用记录，并 join 不可用项的错误
+func (s *Store) DeletePin(ctx context.Context, id [16]byte) error
+type Login struct { DeviceFP identity.Fingerprint; DeviceLabel, AccountID, AccountLabel string; ExpiresAt, LoggedInAt time.Time }
+func (s *Store) SaveLogin(ctx context.Context, l Login) error
+func (s *Store) Login() (Login, bool, error)
+func (s *Store) ClearLogin(ctx context.Context) error
+```
+
+### `internal/centerflow`（新增）
+
+```go
+type Confirm func(context.Context, SASPrompt) (bool, error)
+type SASPrompt struct { ID uint64; Code string; Peer identity.Fingerprint; Deadline time.Time }
+type TicketConnector interface {
+    WaitTicket(context.Context, transport.Endpoint, identity.Fingerprint, []byte) (transport.Session, error)
+    DialTicket(context.Context, transport.Endpoint, identity.Fingerprint, []byte) (transport.Session, error)
+}
+type Dependencies struct {
+    API *center.Client; CenterID string; LocalFP identity.Fingerprint; Store *centerstate.Store
+    Connector TicketConnector; Confirm Confirm; RetryMin, RetryMax time.Duration
+}
+type OperatorDeps = Dependencies
+type ClientDeps struct { Dependencies; CheckNIC func(context.Context) error } // 兑换前必须通过
+type State struct {
+    Phase string; Reason Reason; SessionShort, Region, PeerShort string
+    AttemptsLeft int; CodeExpiresAt, ExpiresAt time.Time
+} // 不含码、票据与完整会话 ID
+type OperatorState = State; type ClientState = State
+type NodeLatency struct { center.Node; Latency time.Duration } // 探测失败为负
+
+func NewOperator(d OperatorDeps) *Operator
+func (o *Operator) Login(ctx context.Context, code, label string) error
+func (o *Operator) Logout(ctx context.Context) error                    // 吊销本机设备记录
+func (o *Operator) Account(ctx context.Context) (center.AccountView, error)
+func (o *Operator) Nodes(ctx context.Context) ([]NodeLatency, error)    // 并发不超过 4 的 TCP 探测，不做 TLS
+func (o *Operator) Start(parent context.Context, node center.NodeID) error // 有限预算（1 分钟），可取消
+func (o *Operator) Run(ctx context.Context, base session.Options, serve func(context.Context, *session.Session) error) error
+func (o *Operator) Invitation() string                                  // 只供本地显示码
+// Operator、Client 共有：End(ctx context.Context) error；Snapshot() State
+
+func NewClient(d ClientDeps) *Client
+func (c *Client) Redeem(ctx context.Context, code string) error
+func (c *Client) Resume(ctx context.Context, ids ...center.SessionID) error // 多个存活会话时须指定 ID
+func (c *Client) Retry(ctx context.Context) error
+func (c *Client) Run(ctx context.Context, base session.Options, serve func(context.Context, *session.Session) error) error
+
+type Reason string                     // 稳定的界面键；中心业务码与结束原因保留线上拼写
+func ReasonOf(err error) Reason
+const ErrChooseSession Reason = "choose_session"
+type SessionCandidate struct { ID center.SessionID; ShortID string; RedeemedAt time.Time }
+type ChooseSessionError struct{ /* 不可变 */ }
+func (e *ChooseSessionError) Candidates() []SessionCandidate // Error() 不含会话 ID；Unwrap() 为 ErrChooseSession
+```
+
+`Reason` 常量：`peer_version_incompatible`、`center_protocol_error`、`nic_missing`、`center_unconfigured`、`center_unreachable`、`center_id_mismatch`、`upgrade_required`、`rate_limited`、`device_busy`、`code_invalid`、`pairing_lost`、`hub_unauthorized`、`operator_waiting`、`busy`、`confirmation`、`awaiting_center`、`account_code_format`、`account_code_invalid`、`account_disabled`、`account_expired`、`device_limit`、`unauthenticated`、`quota_exhausted`、`quota_releasing`、`node_unavailable`、`not_found`、`forbidden`，以及契约 §12 的全部结束原因。
+
+### `internal/transport/hub`（改动）
+
+```go
+func (a *Connector) WaitTicket(ctx context.Context, ep transport.Endpoint, target identity.Fingerprint, token []byte) (transport.Session, error) // 单次，target 同时钉内层对端
+func (a *Connector) DialTicket(ctx context.Context, ep transport.Endpoint, peer identity.Fingerprint, token []byte) (transport.Session, error)   // 单次，peer 同时为 dial target 与内层对端
+var ErrHubFingerprintMismatch = errors.New("transport/hub: hub fingerprint mismatch") // 外层钉扎失败；同时匹配 identity.ErrFingerprintMismatch
+```
+
+两者不重试、不领票；Hub 的拒绝可用 `errors.Is` 匹配包内的 `ErrUnknownPeer`、`ErrPeerBusy`、`ErrUnauthorized`（与 `internal/hub` 同值）。
+
+### `internal/app`、`internal/desktop`、`internal/settings`、`internal/testutil/fakecenter`
+
+```go
+// app
+type CenterConfig struct { Center settings.Center; Node string; AppVersion string } // Node 为空表示恢复已有接待
+// OperatorConfig.Center *CenterConfig；ClientConfig.CenterCode string、ClientConfig.CenterResume center.SessionID（恢复所选候选会话）、ClientConfig.Center *settings.Center、ClientConfig.AppVersion string
+type CenterSnapshot struct { centerflow.State; SASID uint64; SASDeadline time.Time } // Snapshot.Center
+func NewWithCenterHTTP(client *http.Client) *Runtime
+func (r *Runtime) CenterDisplay() (invitation string, prompt centerflow.SASPrompt) // 明文码与 SAS 只经此处取得，只供本地控件
+func (r *Runtime) VerifySAS(id uint64, input string) bool                          // Operator：输入（忽略空格、接受全角数字）与本机 SAS 一致才标记已核对
+func (r *Runtime) AnswerSAS(ctx context.Context, id uint64, match bool) error      // Operator 未核对时答「一致」返回 ErrSASNotVerified，提示保持待答
+func (r *Runtime) EndReception(ctx context.Context) error
+func (r *Runtime) RetryPairing(ctx context.Context) error
+func (r *Runtime) CenterAccount(ctx context.Context, dir string, cfg CenterConfig) (*centerflow.Operator, error)
+var ErrSASNotVerified = errors.New("app: matching operator SAS input required")
+var ErrSASExpired = errors.New("app: SAS prompt expired or no longer pending")
+
+// desktop
+type CenterView struct {
+    app.CenterSnapshot
+    LoggedIn bool; EffectiveExpiry int64; Account center.Account; Devices []center.DeviceEntry
+    Nodes []centerflow.NodeLatency; RequiresSASInput bool
+} // State.Center
+func (c *Controller) CenterLogin(ctx context.Context, accountCode, label string) error
+func (c *Controller) CenterLogout(ctx context.Context) error
+func (c *Controller) RefreshCenter(ctx context.Context) error
+func (c *Controller) RevokeCenterDevice(ctx context.Context, fp string) error
+func (c *Controller) StartReception(ctx context.Context, nodeID string) error
+func (c *Controller) MatchSAS(id uint64, input string) bool
+func (c *Controller) AnswerSAS(ctx context.Context, id uint64, match bool) error
+func (c *Controller) RetryPairing(ctx context.Context) error
+func (c *Controller) EndReception(ctx context.Context) error
+func (c *Controller) CenterDisplay() (string, centerflow.SASPrompt)
+func (c *Controller) CenterSessionChoice() *centerflow.ChooseSessionError
+func (c *Controller) ResumeCenterSession(ctx context.Context, id center.SessionID) error // 只接受上一次失败的 Client 运行给出的候选
+var ErrSASInputRequired = app.ErrSASNotVerified
+var ErrCenterOperation = errors.New("desktop: center operation failed") // 隐藏无法识别的服务端错误
+```
+
+| 包 | 新增 |
+|---|---|
+| `internal/settings` | `operator.mode` 增加 `"center"`，版本仍为 2：中心模式要求已配置中心，`listen` 可为空，直连与 Hub 字段可保留（非空仍校验）。配置文件不存在时 `Default()` 在构建期缺省中心有效且非空时取 `center`，否则 `direct`；已有文件读入（含版本 1 升级）不改模式 |
+| `internal/locales` | `CenterMessage(reason, role string) string` 只接受已知原因并按角色给出文案 |
+| `internal/checkup` | 中心模式 Operator 与输入纯 8 位码的 Client 只做中心入口的 meta 检查，不兑换 |
+| `internal/testutil/fakecenter` | 只供测试的内存 TLS 假中心，不是参考中心实现，不提供命令；中心实现仍须对真实数据库跑 C1、C2、C9、C10 |
+
+`renet-hub`：配置的 `mode` 为 `"center"` 时，`check --config FILE [--online]` 打印 `center_id`、`node_id`、Hub 指纹、各 `kid` 与入口（`--online` 用匿名 meta 核对各入口，有入口未通过即失败；不带时不联网）；`serve --config FILE [--debug]` 先监听再激活，Unix 上 SIGHUP 只重载 `ticket_keys`；`ticket inspect` 对中心模式报不支持。退出码：0 正常（含收到信号）；2 中心模式 `serve` 的配置或激活终局错误（以及 `serve` 读不出 `mode` 或 `mode` 未知）；3 `node_superseded`；1 其他错误（用法、`check` 失败、自建模式 `serve` 的错误）。构建期版本变量 `-ldflags -X main.version=...`，缺省 `0.0.0-dev`。
+
+`renetd`：`operator --center-node ID [--config FILE]`（中心取自 GUI 设置文件，须已在同一状态目录经 GUI 登录；与 `--hub`、`--listen`、`--share-address` 互斥）；`client --center-code-file FILE [--config FILE]`（与 `--invite-file`、`--invite`、`--peer`、`--pair-file` 五选一）。命令行的 SAS 核对：Operator 显示来访设备与本机校验码，输入客户读出的 6 位，不一致提示后可重输，输入 `no` 拒绝；Client 回车确认、`no` 拒绝。Ctrl-C 退出时向中心提交结束。退出码沿用 0 / 1。
+
 ---
 
 ## 通用要求

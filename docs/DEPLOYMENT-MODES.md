@@ -1,6 +1,6 @@
 # 部署模式与配对入口
 
-记录日期：2026-11-19，2026-11-20 随 R3 更新。本文是设计基线，除第 8 节列为“已实现”的部分外，均为规划，不代表程序已经支持。中心相关的协议框架见 [CENTER-PROTOCOL](CENTER-PROTOCOL.md)，整体架构见 [DESIGN](DESIGN.md)。本文不修改现有 `renet1:` 邀请码、Settings 或 session 消息格式。
+记录日期：2026-11-19，2026-11-20 随 R3、R5 更新。本文是设计基线，除第 8 节列为“已实现”的部分外，均为规划，不代表程序已经支持。中心相关的协议框架见 [CENTER-PROTOCOL](CENTER-PROTOCOL.md)，整体架构见 [DESIGN](DESIGN.md)。本文不修改现有 `renet1:` 邀请码、Settings 或 session 消息格式。
 
 ## 1. 原则
 
@@ -16,7 +16,7 @@
 |---|---|---|---|
 | 直连 | Operator 有公网地址或 DDNS，可做端口转发 | Client → Operator 内嵌 Hub | 无 |
 | 自建 Hub（已实现，台架验收待执行） | 两端都在 NAT 后，或不想暴露 Operator 地址 | 两端分别出站连接自建 Hub | 自行运行独立 Hub 程序 `renet-hub`，并在其配置中列出 Operator 的签发公钥，见 [SELFHOST](SELFHOST.md) |
-| 中心协调 | 需要账号、免配置数字配对、多节点调度 | 两端连接中心分配的 Hub | 官方中心，或按 [CENTER-PROTOCOL](CENTER-PROTOCOL.md) 自建的中心 |
+| 中心协调（Go 端已实现，中心服务端另行实现；与真实中心的联调和人工验收待执行） | 需要账号、免配置数字配对、多节点调度 | 两端连接中心分配的 Hub | 官方中心，或按 [CENTER-CONTRACT](CENTER-CONTRACT.md) 自建的中心；Hub 以 `renet-hub` 的中心模式运行，见 [CENTER-CLIENT](CENTER-CLIENT.md) |
 
 三种模式下，车辆数据都在两端之间端到端加密，Hub 只转发密文，`carside` 的黑盒边界不变。
 
@@ -28,7 +28,7 @@ Client 使用同一个输入框，按输入格式自动识别：
 |---|---|---|
 | 原始 `renet1:` 邀请码 | 直连（已实现）；自建 Hub（已实现，版本 2 邀请码额外携带短期不记名票据，`renetd invite --hub` 或 GUI 生成） | 自带地址、Operator 指纹、首次配对令牌和有效期 |
 | `地址:端口` + 8 位数字码 | 直连；自建 Hub | 直连已实现（[PAIRING](PAIRING.md)），待假车与公网验收。自建 Hub 下输入同样的「Hub 地址 + 8 位码」：Hub 配置了 `pairing_operator` 的那台 Operator 在发码期间开放配对入口（能力 `pair-hub/1`，Hub 指纹写入 PAKE），已实现，台架验收待执行（[SELFHOST §7.2](SELFHOST.md#72-hub-地址--8-位码)）。便于口述或在聊天工具中发送；地址可以是 DDNS 域名 |
-| 8 位数字码 | 中心协调 | 规划中（R5）。需要 Client 已配置中心地址（官方构建有默认值）；已配置中心时输入框提示“暂不支持中心数字码” |
+| 8 位数字码 | 中心协调 | 已实现（R5，[CENTER-CLIENT](CENTER-CLIENT.md)），待与真实中心联调。需要 Client 已配置中心（官方构建有默认值）；未配置中心时提示“未配置中心”，不发请求。兑换后经中心分配的 Hub 完成 PAKE 与双端 SAS 核对，Operator 须输入客户读出的 6 位校验码 |
 
 配对成功后，双方保存对端身份，之后重连不需要任何码。数字码只用于首次配对，不是长期凭据。
 
@@ -87,6 +87,6 @@ Operator 的公网地址无法对客户保密：原始邀请码包含地址，�
 | 独立 Hub（自建模式） | 已实现（R3）：`cmd/renet-hub`，强制票据验签与签发者作用域，无策略拒绝启动；撤销靠编辑配置并重载（Unix 上 SIGHUP）。内嵌 Hub 不再替陌生设备中继。离线测试与独立审查通过，人工台架验收待执行，见 [SELFHOST](SELFHOST.md) |
 | 自建 Hub 下的邀请码与数字码配对、设备票续期 | 已实现（R3），台架验收待执行 |
 | `地址 + 8 位码` 直连配对（PAKE） | 已实现，待假车与公网验收（见 [PAIRING](PAIRING.md)） |
-| 纯 8 位码 + 中心协调 | 规划，依赖中心协议定稿 |
-| 中心地址配置 | 已实现（R3）：配置字段与校验、显式切换、界面显示、`GET /v1/meta` 核对 `center_id`；登录、领票、中心模式的 Hub 与数字码属 R5 |
-| 中心信任根隔离 | 规则已写入 [SELFHOST §8](SELFHOST.md#8-中心地址配置r3-做到哪一步)（中心状态存放在 `state/<role>/centers/<center_id>/`），目录的实际读写在 R5 |
+| 纯 8 位码 + 中心协调 | 已实现（R5，Go 端）：Hub 中心模式（`renet-hub` 的 `mode: "center"`，激活、心跳、租约与撤销）、中心 API 客户端、Operator 登录 / 选节点 / 发码 / SAS 核对 / 结束接待、Client 兑换 / 配对 / 重连 / 找回。离线测试、端到端测试（假中心）与独立审查通过；中心服务端不在本仓库，与真实中心的联调和人工验收待执行，见 [CENTER-CLIENT 第 12 节](CENTER-CLIENT.md#12-实现记录与审查处理) |
+| 中心地址配置 | 已实现（R3）：配置字段与校验、显式切换、界面显示、`GET /v1/meta` 核对 `center_id`。R5 起 Operator 的连接方式为直连 / 自建 Hub / 中心三选一（`operator.mode = "center"`），官方构建全新安装缺省为中心模式 |
+| 中心信任根隔离 | 已实现（R5）：规则见 [SELFHOST §8](SELFHOST.md#8-中心地址配置r3-做到哪一步)；登录缓存与按会话的钉住记录存放在 `state/<role>/centers/<center_id>/`（`internal/centerstate`），切换中心不迁移、不删除 |

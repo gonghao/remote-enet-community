@@ -1,6 +1,6 @@
 # R5 · 各端接入中心
 
-状态：设计定稿（2026-11-20），[第 11 节](#11-决定2026-11-20-负责人确认)的两项由负责人确认；第 9 节的澄清已写入契约第十版。尚未实现。目标见 [ROADMAP · R5](ROADMAP.md#r5--各端接入中心)。协议以 [CENTER-CONTRACT](CENTER-CONTRACT.md) 为唯一权威（当前第九版，第 9 节的澄清写入后为第十版），本文只规定 Go 端（Hub 中心模式、Operator、Client）怎样实现它，不重述契约条文。部署边界见 [DEPLOYMENT-MODES](DEPLOYMENT-MODES.md)，R3 的代码与约定见 [SELFHOST](SELFHOST.md) 与 [CONTRACTS · R3](CONTRACTS.md#r3-自建-hub-与中心地址配置2026-11-20-冻结)。实现完成后，在第 12 节补实现记录与审查处理，并把与设计稿不同的细节就地写回各节。
+状态：已实现（2026-11-20），人工验收待执行。设计于 2026-11-20 定稿，[第 11 节](#11-决定2026-11-20-负责人确认)的两项由负责人确认；第 9 节的澄清已写入契约第十版，实现反馈写入第十一版。目标见 [ROADMAP · R5](ROADMAP.md#r5--各端接入中心)。协议以 [CENTER-CONTRACT](CENTER-CONTRACT.md) 为唯一权威（当前第十一版），本文只规定 Go 端（Hub 中心模式、Operator、Client）怎样实现它，不重述契约条文。部署边界见 [DEPLOYMENT-MODES](DEPLOYMENT-MODES.md)，R3 的代码与约定见 [SELFHOST](SELFHOST.md) 与 [CONTRACTS · R3](CONTRACTS.md#r3-自建-hub-与中心地址配置2026-11-20-冻结)，R5 冻结的接口见 [CONTRACTS · R5](CONTRACTS.md#r5-各端接入中心2026-11-20-冻结)。实现记录、与设计稿不同的细节和独立审查的处理见[第 12 节](#12-实现记录与审查处理)；第 1–11 节保留设计稿原文。
 
 一句话概括：Hub 新增中心模式。它用 R4 的 `ticket.VerifyCenter` 在锁外完成第 1–9 步，`internal/hub` 在路由锁内完成第 10–12 步，并维护承载截止、封存集合、`jti` 集合与按会话的用量；激活与心跳循环放在新包 `internal/hubcenter`。`internal/center` 从只做 meta 扩展为完整的签名 API 客户端，负责时间校正、幂等键、R/B/W/F 分类与入口回退。两端的接待流程放在新包 `internal/centerflow`，复用现有配对状态机：中心模式下 SAS 钩子必填，拒绝和超时要发 16，配对连接与数据连接分开，`/established` 是开放隧道的提交点。钉住记录存放在 `state/<role>/centers/<center_id>/` 下。离线测试使用只在测试中使用的内存假中心 `internal/testutil/fakecenter`。
 
@@ -777,4 +777,81 @@ C 组本质上是中心实现的测试。本仓库只验证 Go 端在这些场�
 
 ## 12. 实现记录与审查处理
 
-（实现后补：任务与提交的对应关系、与设计稿不同的细节、独立审查的逐条处理、端到端测试证据、未验证与遗留项。格式同 [SELFHOST 第 14 节](SELFHOST.md#14-实现记录与审查处理)。）
+实现于 2026-11-20 完成，提交范围为 `e0c6cac..HEAD`。离线测试、端到端测试（假中心）与独立审查均已通过；中心服务端不在本仓库，与真实中心的联调和人工验收（第 8.5 节最后一项）尚未执行，因此本文状态为「已实现，人工验收待执行」。正文第 1–11 节保留设计稿原文，实现与之不同的地方列在 12.2；冻结的接口以 [CONTRACTS · R5](CONTRACTS.md#r5-各端接入中心2026-11-20-冻结) 为准。
+
+### 12.1 任务与提交
+
+| # | 提交 | 后续修正 |
+|---|---|---|
+| T1 hub 中心会话 | `cc4ac98` | `101ba8a`（保留期动态更新）、`81f2de5`（中心模式拒绝零会话授权）、`e669227`（`TestSetupSlots` 测试时序） |
+| T2 center 签名客户端 | `168beb4` | `f2a6155`、`b4882f4` |
+| T3 session 中心模式配对 | `68d645b` | `b730135`（`TestCenterFailedAttempts` 测试时序） |
+| T4 centerstate | `166322b` | — |
+| T5 fakecenter | `73ab184` | `60156ac` |
+| T6 settings | `4dd3618` | — |
+| T7 transport 持票 wait / dial | `41431ee` | — |
+| T8 center 端点 | `4f58be3` | `b033599`、`71c3bb5` |
+| T9 hubcenter 配置与策略 | `a805c56` | — |
+| T10 hubcenter 激活与心跳 | `46c2879` | `bd9c590`（保留尾部用量）、`b033599`、`de4729b`、`60156ac` |
+| T11 renet-hub 中心模式 | `506c02e` | `81f2de5` |
+| T12 centerflow | `903fc37` | `8d559d8`、`ca2932f`、`f2a6155`、`71c3bb5`、`d5a7938`、`48a7303`、`b4882f4` |
+| T13 app 与 renetd | `85e9378` | `c35cf9d`、`6ebf4ef`、`bfa5a4a` |
+| T14 desktop | `0a29858` | `c35cf9d`、`48a7303`、`2d2fee3`、`bfa5a4a` |
+| T15 ui | `1acc9d8` | `2dd6fd4` |
+| T16 端到端测试 | `0cf813a` | — |
+| T17 文档同步 | 本次文档改动 | — |
+
+### 12.2 与设计稿不同的实现细节
+
+| 位置 | 修订 |
+|---|---|
+| 3.4 / 3.6（T1、T10） | `Options` 新增 `CenterMode`：中心模式的 Hub 在锁内拒绝 `Session` 为零的 Grant，作为策略之外的第二道防线（`81f2de5`）。会话保留期为 `D + lease_ttl + clock_skew`（30 s），由 `hubcenter` 在每次激活与心跳成功后调用新增的 `Server.SetSessionRetention` 更新，已断连会话的清理时刻随之重排（`101ba8a`、`bd9c590`），不是启动时固定的 `Options.SessionRetention` |
+| 3.3（T10） | `load` 的 `rx_bps` / `tx_bps` 改用新增的 `Server.TrafficTotals()` 两次采样之差：它包含已断连与已退役的会话，两次心跳之间开始并结束的会话也计入。`renew` 只作用于本次心跳上报过的会话，其余项忽略并记警告。`closed` 超过 1000 项时分批上报而不是截断：尚未上报的优先，其次是已上报但仍被列出的，最后是新封存的，每项保留到中心不再在 `revoke` 中列出（`de4729b`）。激活遇到 `clock_skew` 时固定 15 秒后同键重试 |
+| 3.6（T9） | `Policy.Admit` 在 `ticket.VerifyCenter` 之后显式拒绝全零 `sid` 与 target 为 Hub 自身的 dial（即使票据 `peer` 与之相等），不依赖「票据不符」间接拒绝；已写入契约第十一版 §8.4 |
+| 3.9（T11） | `check` 打印完整的 `node_id` 与 Hub 指纹；新增 `check --online`，用匿名 meta 核对各入口。`serve` 的其他错误退出码为 1（2 只用于中心模式的配置与激活终局错误） |
+| 4.3（T2） | 长轮询的单次超时为 `10 s + wait`，整次预算为 `30 s + wait`；已向某个入口发出的心跳不重放、不换入口重发，只有发出前就失败的尝试才回退；没有错误信封（解析不出非空 `error.code`）的非 2xx 一律按 R 类处理。已写入契约第十一版 §6.6、§7.8、§11 |
+| 4.1（T2、T8、T12） | 新增 `Client.Now()`（与设备签名同一校正时钟，`f2a6155`）、`ErrIDMismatch`（全部入口都报告别的 `center_id`，与网络不可达区分，`b4882f4`）、`ErrEndpointResponse` / `ErrProtocol`（成功响应格式无效）。心跳响应的 `renew` / `revoke` 可缺失或为 `null`（`b033599`） |
+| 5.1（T3） | 新增 `Options.BeginClientAttempt`：Client 的会话预算由调用方在发 11 前扣减，返回 false 即已用尽。设置 `Options.Center` 时隧道闸门默认关闭，不必再同时设 `HoldTunnels`。数据连接的控制流用新增的 `proto.ReadCenterControl` 解码，配对帧仍受 256 字节上限 |
+| 5.2 / 5.3（T12） | `Operator.Start` 的创建与首次领票限定在 1 分钟预算内，并可被取消或被退出登录打断（`ca2932f`）。票据临近到期按中心校正时钟判断（`f2a6155`）。兑换的响应丢失后换键重兑得到 `code_invalid` 时，只在 `ClientSessions` 恰有一个存活会话时自动找回，有多个时返回 `ChooseSessionError` 候选列表，由用户选择后 `Resume(id)`（`48a7303`，界面 `2dd6fd4`、`bfa5a4a`）。Operator 得到 `DigitalPaired` 后不立即关闭配对连接，等 Client 关闭（上限 `confirm_timeout + 10 s`），以免丢弃传输中的 16 |
+| 4.6（T12） | 新增原因 `peer_version_incompatible` 与 `center_protocol_error`，区分对端版本不兼容与中心协议错误（`71c3bb5`）；`/end` 得到 `session_ended` 或 `not_found` 时视为已结束、正常收尾（`d5a7938`）；领票先观察到接待结束时同样正常收尾（`8d559d8`） |
+| 6.3（T13、T14） | 比对不只在界面层：`Runtime.VerifySAS` 核对 Operator 输入（忽略空格、接受全角数字）并把结果绑定到当前提示，`AnswerSAS` 对未核对的「一致」返回 `ErrSASNotVerified` 并保持提示待答（`c35cf9d`）；desktop 的 `MatchSAS` 调用它。明文数字码与 SAS 只经 `Runtime.CenterDisplay` / `Controller.CenterDisplay` 交给本地控件，Snapshot、State、日志与诊断中都没有。Operator 对话框显示本机 SAS（`2d2fee3`、`2dd6fd4`），与 6.3 一致 |
+| 6.2（T15） | 节点列表收在下拉选择框中（按实测延迟预选），不是单选表格 |
+| 第 10 节 T13 | `renetd operator --center-node` 要求同一状态目录已经在 GUI 中登录；命令行核对 SAS 时 Operator 显示来访设备与本机校验码，输入客户读出的 6 位，不一致时提示后可重输（`6ebf4ef`）。新增 `app.NewWithCenterHTTP` 与 `ClientConfig.CenterResume` |
+
+### 12.3 独立审查与处理
+
+实现期间做了独立只读审查（DeepSeek）。每条意见的结论如下，「修复」均带回归测试。
+
+| 意见 | 处理 |
+|---|---|
+| Hub 只靠中心策略拒绝零 Session，一旦策略出错，中心会话会落入自建路由语义 | 修复（`81f2de5`）：`Options.CenterMode`，锁内拒绝零 Session 并记错误日志；`renet-hub` 中心模式开启。测试 `TestZeroSessionGrantByMode` |
+| 心跳响应的 `renew` / `revoke` 缺失或为 `null` 时整条响应被判无效；决策应逐项处理，响应格式错误应可观察 | 修复（`b033599`）：两个列表缺失或 `null` 按空处理，逐项续租与撤销，未知会话的续租忽略并记警告；无效响应计数并记错误日志，按暂态处理。测试 `TestHeartbeatDecisionLists`、`TestPartialHeartbeatResponse` |
+| `closed` 超过 1000 项时截断会丢失最终用量 | 修复（`de4729b`）：分批轮转上报并保留最终用量，见 12.2。测试 `TestClosedBatchesRetainFinalUsage` |
+| 假中心不检查节点请求必需字段是否存在（缺字段被当作 0），`load` 与 `sessions` 截断后不一致 | 修复（`60156ac`）：假中心按字段存在性核验激活与心跳请求；`sessions` 截断后再汇总 `load`。测试 `TestNodeRequestPresence` |
+| Operator 的 SAS 核对只在界面层强制，绕过界面即可确认 | 修复（`c35cf9d`）：强制下沉到 app 层 `VerifySAS` / `AnswerSAS`，见 12.2；已写入契约第十一版 §10.2。测试 `TestCenterReception`、`TestUnverifiedOperatorTimesOut`（`2d2fee3`） |
+| 命令行 Operator 看不到来访设备与本机校验码，输入不一致没有提示 | 修复（`6ebf4ef`）：显示来访设备短 ID 与本机码，不一致提示后可重输。测试 `TestCenterAnswer` |
+| `Start` 在中心不可达时可能无限等待，且无法取消 | 修复（`ca2932f`）：创建与首次领票限定 1 分钟预算，可取消，退出登录可打断。测试 `TestStartRetryCanEndOrLogout`、`TestFirstTicketBudget` |
+| 票据临近到期按本地时钟判断，与中心时间有偏差时会误判 | 修复（`f2a6155`）：按 `Client.Now()` 的校正时钟判断 |
+| 原因映射不全；协议错误与对端版本不兼容混为一谈 | 修复（`71c3bb5`）：补齐原因与三语文案，新增 `peer_version_incompatible`、`center_protocol_error`。测试 `TestProtocolReasons`、`TestCenterMessages` |
+| `/end` 遇到中心已结束或已移除的会话时报错 | 修复（`d5a7938`）：`session_ended` / `not_found` 视为成功并清理钉住记录。测试 `TestEndAlreadyTerminal` |
+| 兑换找回在存在多个存活会话时任选其一 | 修复（`48a7303`，界面 `2dd6fd4`、`bfa5a4a`）：只在唯一候选时自动找回，否则返回候选列表由用户选择。测试 `TestRecoveryOffersMultipleSessions`、`TestClientSessionRecovery` |
+| 全部入口 `center_id` 不符时报告为「无法连接中心」 | 修复（`b4882f4`）：新增 `ErrIDMismatch`，界面显示「中心标识不一致」。测试 `TestClientIDMismatch`、`TestCenterIdentityMismatch` |
+| `TestLostDecision` 偶发失败 | 根因修复（`8d559d8`）：Operator 结束接待后，Client 的领票请求可能比长轮询先观察到会话已结束（HTTP 410 `session_ended`），原实现把它当作失败。修复后两条路径都正常清理并保留中心给出的结束原因；新增测试固定该顺序，修复前稳定失败，修复后 `-race -count=200` 通过 |
+| `TestCenterFailedAttempts` 偶发失败 | 测试时序修正（`b730135`）：Client 在 Hello 后放弃时 Operator 的失败位置取决于时序，改为断言 Operator 失败且不消耗尝试次数；`-count=500`、`-race -count=100` 通过 |
+| `TestSetupSlots` 偶发失败 | 测试时序修正（`e669227`）：wait 收到 `ok` 时唯一的 setup 槽可能尚未释放，dial 对传输层失败短暂重试；`-race -count=200` 通过 |
+
+### 12.4 端到端测试证据
+
+`internal/integration/center_test.go` 的每个用例都起真实的 loopback Hub（由 `hubcenter.Node` 激活与心跳驱动）、两个 TLS 入口的假中心，以及 Operator 与 Client 两个 `app.Runtime`：
+
+- `TestCenterReceptionLifecycle`：P1 完整接待；`/v1/sessions` 与 `/v1/redeem` 首个入口的响应被丢弃时换入口沿用同键，假中心只创建一个会话、只核销一次码（C5）；两端钉住记录、`/established` 恰好提交一次；日志、Snapshot 与诊断导出中不出现账号码、数字码、SAS 与票据；两端重启后凭钉住记录恢复数据连接；Operator 结束后两端以 `operator_ended` 收尾、钉住记录删除、端口释放、Hub 无残留路由、无协程泄漏（S8）。
+- `TestCenterPairingInterrupted`：`reject`（Operator 判 SAS 不一致，两端与中心均为 `rejected`，P5）与 `restart`（Client 在写钉住记录前重启，以 `pairing_lost` 结束，P7）。
+- `TestCenterSASTimeout`：无人核对时以 `confirm_timeout` 结束。用例需三分钟，只在设置 `RENET_LONG_CENTER_TEST=1` 时运行。
+- `TestCenterRevocation`：管理员撤销后 Hub 关闭路由，两端以 `admin_revoked` 结束，中心收到的最终用量与 `TrafficTotals` 一致且占位释放（S3）。
+- `TestCenterReasonDisplay`：「Operator 忙」`busy`、「节点离线」`node_lost`、「网卡缺失」`nic_missing`（且未兑换码）、「码无效」`code_invalid`、「授权到期」`account_expired`、「节点不可用」`node_unavailable` 的原因显示。
+- `TestCenterDeadlines`：`code_expired`，以及 `/established` 持续失败时不开放隧道、到期以 `pair_timeout` 结束（C7）。
+
+### 12.5 未验证与遗留
+
+- 中心服务端在私有仓库另行实现；与真实中心服务端的联调、官方构建验收和第 8.5 节最后一项的人工验收尚未执行，结果记录后在此补充。
+- 假中心只实现驱动 S/P/C 场景的最小语义，不证明任何中心实现合规；C1、C2、C9、C10 的并发写入须由中心实现对真实数据库验证（第 1 节非目标）。

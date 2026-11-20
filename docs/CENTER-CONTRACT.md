@@ -1,6 +1,6 @@
 # 中心契约 v1
 
-记录日期：2026-11-19（第八版 2026-11-20 增补自建 Hub 模式；第九版 2026-11-20 按一致性向量澄清边界；第十版 2026-11-20 按各端接入设计澄清）。状态：已定稿（第十版）。V1–V15 一致性向量已发布于 `testdata/conformance/`（见 [CONFORMANCE](CONFORMANCE.md)），Go 端的码规范化、请求签名与中心票据编解码已实现；中心 API 接入与 Hub 中心模式尚未实现（R5）。本文把 [CENTER-PROTOCOL](CENTER-PROTOCOL.md) 的约束落成可实现的接口：中心 HTTPS API、请求签名、连接票据、Hub 验签、租约与占位、首次配对的消息流程和错误码。第 10 节是配对消息编号、编码与状态机的唯一权威定义；[PAKE 选型](research/pake-selection.md) 只保留选型理由与安全分析。中心服务端可以用任意语言和存储实现，Go 端（Hub、Client、Operator）按本文接入。第 14 节的参数于 2026-11-19 确定。
+记录日期：2026-11-19（第八版 2026-11-20 增补自建 Hub 模式；第九版 2026-11-20 按一致性向量澄清边界；第十版 2026-11-20 按各端接入设计澄清；第十一版 2026-11-20 按各端接入的实现反馈澄清）。状态：已定稿（第十一版）。V1–V15 一致性向量已发布于 `testdata/conformance/`（见 [CONFORMANCE](CONFORMANCE.md)），Go 端的码规范化、请求签名与中心票据编解码已实现；Go 端的中心 API 客户端、Hub 中心模式与 Operator / Client 的中心接待已于 R5 实现（[CENTER-CLIENT](CENTER-CLIENT.md)），中心服务端不在本仓库。本文把 [CENTER-PROTOCOL](CENTER-PROTOCOL.md) 的约束落成可实现的接口：中心 HTTPS API、请求签名、连接票据、Hub 验签、租约与占位、首次配对的消息流程和错误码。第 10 节是配对消息编号、编码与状态机的唯一权威定义；[PAKE 选型](research/pake-selection.md) 只保留选型理由与安全分析。中心服务端可以用任意语言和存储实现，Go 端（Hub、Client、Operator）按本文接入。第 14 节的参数于 2026-11-19 确定。
 
 本文不涉及支付、定价、套餐或任何具体部署。管理端只向中心写入两类与收费相关的事实：账号有效期和并发额度。本文不修改现有 `renet1:` 邀请码、Settings 或 Hub 外层协议 v1（[internal/hub/PROTOCOL.md](../internal/hub/PROTOCOL.md)）；session 控制消息只新增第 10.2 节的消息编号，以及自建模式的 17 `HubTicket` 与能力 `hub-ticket/1`（[SELFHOST §6.4](SELFHOST.md#64-设备票下发消息-17-hubticket)），中心模式不使用它们。
 
@@ -164,7 +164,7 @@ SAS 只防中间人，不防猜中数字码的人抢占接待：猜中者知道�
 {"error": {"code": "quota_exhausted", "message": "human readable", "retry_after_s": 30, "details": {}}}
 ```
 
-`code` 是稳定的机器可读值（第 12 节），客户端只按 `code` 分支。没有这个信封的错误响应（例如代理生成的 502）按传输故障处理。
+`code` 是稳定的机器可读值（第 12 节），客户端只按 `code` 分支。没有这个信封的错误响应（例如代理生成的 502）按传输故障处理：任何状态码的非 2xx 响应，只要解析不出非空的 `error.code`，一律按第 12 节的 R 类处理。
 
 ### 6.3 幂等
 
@@ -198,7 +198,7 @@ SAS 只防中间人，不防猜中数字码的人抢占接待：猜中者知道�
 
 ### 6.6 长轮询
 
-`GET /v1/sessions/{id}?since_version=N&wait_s=W`，`W ≤ longpoll_max`，超出返回 `bad_request`；不带 `since_version` 时立即返回，不带 `wait_s` 视为 0。`version > N` 时立即返回，否则最多等待 W 秒后返回当前状态。返回前中心重新核对调用方的资格。长轮询请求的超时为 `W + fallback_attempt_timeout`，不套用普通请求的单次超时。
+`GET /v1/sessions/{id}?since_version=N&wait_s=W`，`W ≤ longpoll_max`，超出返回 `bad_request`；不带 `since_version` 时立即返回，不带 `wait_s` 视为 0。`version > N` 时立即返回，否则最多等待 W 秒后返回当前状态。返回前中心重新核对调用方的资格。长轮询请求的单次超时为 `W + fallback_attempt_timeout`，整次请求的总预算为 `W + fallback_total_timeout`：两者都在普通请求的预算上加长轮询的等待时长，不套用普通请求的单次超时与总超时。
 
 ## 7. 端点
 
@@ -321,7 +321,7 @@ Session 对象：
 
 **`POST /v1/node/heartbeat`**（节点签名；每 `heartbeat_interval` 一次；不带幂等键）
 
-心跳失败后不重放旧请求，而是在下一个周期发送 `seq` 加一的新心跳；中心按最新状态回复。
+心跳失败后不重放旧请求，而是在下一个周期发送 `seq` 加一的新心跳；中心按最新状态回复。这一条优先于第 11 节的入口回退：心跳请求一旦向某个入口发出，无论得到什么结果（含传输错误与 R 类错误）都不再重发，也不换入口重发；只有发出之前就失败的尝试（例如该入口的 `center_id` 核对不可达）才可以换入口。
 
 | 请求字段 | 说明 |
 |---|---|
@@ -333,7 +333,7 @@ Session 对象：
 
 `rx_bytes` = Hub 从该会话两端收到的字节合计，`tx_bytes` = Hub 发往该会话两端的字节合计，均按外层 TLS 解密后的内层字节计；`paired_s` = 该会话处于已配对状态的累计秒数。
 
-`sessions`、`closed` 各至多 `heartbeat_max_entries` 项，同一 `session_id` 在两个列表中合计至多出现一次；计数为 0 到 2⁵³−1 的整数。`kids`、`sessions`、`closed` 为 `null` 时按空列表处理。违反这些格式返回 `bad_request`。
+`sessions`、`closed` 各至多 `heartbeat_max_entries` 项，同一 `session_id` 在两个列表中合计至多出现一次；计数为 0 到 2⁵³−1 的整数。`kids`、`sessions`、`closed` 为 `null` 时按空列表处理。违反这些格式返回 `bad_request`。待报的 `closed` 超过单次上限时，Hub 分批上报：每次心跳至多带 `heartbeat_max_entries` 项，其余留到之后的心跳；每一项都保留到中心停止在 `revoke` 中列出该会话为止（第 9.3 节），每批的选取须保证每一项最终都能上报，不被持续到达的新项挤掉（例如先发尚未上报的项，再发已上报但仍被列出的项，最后是新封存的项）。
 
 | 响应字段 | 说明 |
 |---|---|
@@ -342,7 +342,7 @@ Session 对象：
 | `renew` | `{session_id, lease_s}` 列表 |
 | `revoke` | `{session_id, reason}` 列表 |
 
-中心对上报的每个会话给出续租或撤销二者之一（第 9.2 节）。`revoke` 还包含绑定本节点、已结束但占位尚未释放的全部会话，直到占位释放为止。用量按 (`session_id`, `node_id`, `gen`) 取最大值合并，`closed` 中的最终值同样合并，响应丢失后重报不会重复记账。
+`renew`、`revoke` 缺失或为 `null` 时，Hub 按空列表处理；两个列表逐项处理。未出现在二者中的会话保持原承载截止 D，既不续租也不撤销，到 D 时照常关闭（第 9.1 节）。中心对上报的每个会话给出续租或撤销二者之一（第 9.2 节）。`revoke` 还包含绑定本节点、已结束但占位尚未释放的全部会话，直到占位释放为止。用量按 (`session_id`, `node_id`, `gen`) 取最大值合并，`closed` 中的最终值同样合并，响应丢失后重报不会重复记账。
 
 节点只能作用于绑定本节点的会话（第 7.7 节）。`sessions` 中出现的未知会话、其他节点的会话或仍为 `open` 的会话一律撤销，原因固定为 `admin_revoked`，不泄露其他节点会话的状态，也不写入任何状态；`closed` 中的这类会话，以及仍未结束的会话，被忽略。心跳不带 `Idempotency-Key`；带了也只参与签名，不起作用。
 
@@ -353,7 +353,7 @@ Session 对象：
 | 结果 | 激活时 | 心跳时 |
 |---|---|---|
 | 2xx | 记下 `gen`，`seq` 从 1 起，按 `node_state` 开始工作 | 处理 `renew` / `revoke`（第 9.1、9.3 节），采用新的 `heartbeat_interval_s` / `lease_ttl_s` |
-| 传输错误、超时、无错误信封的 5xx、`unavailable`、`internal` | 暂态：同键重试 | 暂态 |
+| 传输错误、超时、无错误信封的非 2xx、`unavailable`、`internal` | 暂态：同键重试 | 暂态 |
 | `clock_skew` | 按 `details.server_time` 记录偏差并报错，校时恢复前不进入中心模式；校时后同键重试 | 暂态；同时停止新准入，直到时钟偏差回到 `clock_skew` 以内（第 6.4 节） |
 | `bad_request` | Hub 缺陷或配置错误：记录错误，不进入中心模式 | 暂态（Hub 缺陷，例如 `seq` 未递增或格式错误）；记录错误，下个周期照常发送新心跳 |
 | `upgrade_required` | 不进入中心模式，提示升级 | 同 `unauthenticated` |
@@ -438,6 +438,11 @@ Session 对象：
 8. `role` 等于路由头 role；`peer` 等于路由头 target（非零）。wait 方必须带非零 target。
 9. 时间关系满足 8.2；`iat ≤ now + clock_skew`；`nbf − clock_skew ≤ now ≤ exp + clock_skew`。全部用有符号 64 位运算，避免无符号下溢。
 
+第 1–9 步通过后、进入路由锁之前，还有两项拒绝（同样回 `unauthorized`，不改变上述步骤的编号与一致性向量的判定）：
+
+- **全零 `sid`。** 全零的 `session_id` 保留不用：中心不得签发 `sid` 全为零的票据，Hub 收到时拒绝。
+- **dial 到 Hub 自身。** 中心模式没有配对入口（第 1 步不启用内嵌交接），dial 的 target 等于本节点身份指纹时拒绝，即使票据的 `peer` 与之相等。
+
 然后在路由锁内一次完成提交：
 
 10. 重新读取当前时间，再查一次 `now ≤ exp + clock_skew`（排队等锁期间票据可能已过期）；本进程处于可准入状态（已激活，未被取代或停用，时钟偏差在容忍内）；`sid` 不在封存集合中；`jti` 未被消费。
@@ -509,7 +514,7 @@ Hub 为每个会话维护一个截止时间 D（本地单调时钟），到 D �
 | 节点离线 | 连续 `node_offline_after_s` 未收到心跳，中心停止为它创建会话和签发票据，其上会话以 `node_lost` 结束（惰性迁移，结束时间为最后一次心跳 + `node_offline_after_s`；节点恢复心跳、覆盖最后心跳时间之前，先在同一事务里落库这一迁移） |
 | 管理员结束指定会话 | `admin_revoked` |
 
-Hub 收到 `revoke` 后，在路由锁内一次完成：把 `session_id` 放进封存集合（拒绝其后续准入，保留 `ticket_max_ttl + clock_skew`）、从撤销索引取出该会话的全部连接并关闭。完成之后，才能在**同一代次**的后续心跳 `closed` 中报告该会话及其最终累计用量。中心停止在 `revoke` 中列出它之后，Hub 也停止在 `closed` 中报告。
+Hub 收到 `revoke` 后，在路由锁内一次完成：把 `session_id` 放进封存集合（拒绝其后续准入，保留 `ticket_max_ttl + clock_skew`）、从撤销索引取出该会话的全部连接并关闭。完成之后，才能在**同一代次**的后续心跳 `closed` 中报告该会话及其最终累计用量；待报项超过单次上限时分批上报（第 7.8 节）。中心停止在 `revoke` 中列出它之后，Hub 也停止在 `closed` 中报告。
 
 没有连接的会话不在 `sessions` 中列出（列出即续租），所以从上一次心跳到连接全部断开之间的尾部用量，只能在之后收到 `revoke` 时经 `closed` 报告。Hub 应保留没有连接的会话的累计用量，至少到其承载截止之后 `lease_ttl`；中心不经 `closed` 释放占位（第 9.4 节）时，未上报的尾部用量允许丢失。
 
@@ -517,7 +522,7 @@ Hub 收到 `revoke` 后，在路由锁内一次完成：把 `session_id` 放进�
 
 | 心跳结果 | Hub 行为 |
 |---|---|
-| 传输错误、超时、`unavailable`、`internal`、无错误信封的 5xx、`bad_request` | 会话照常转发直到各自的 D，下个周期发送新的心跳 |
+| 传输错误、超时、`unavailable`、`internal`、无错误信封的非 2xx、`bad_request` | 会话照常转发直到各自的 D，下个周期发送新的心跳 |
 | `clock_skew` | 同上，另外停止新准入直到时钟偏差恢复 |
 | `node_superseded` | 立即关闭全部会话，停止准入并退出中心模式；运维重新启动进程会取得新代次 |
 | `node_disabled`、`unauthenticated`、`upgrade_required` | 立即关闭全部会话，停止准入，继续心跳以便恢复 |
@@ -617,6 +622,8 @@ SAS = uint64_be(HKDF-SHA-512(IKM = ISK, salt = "", info = "renet-sas-v1", L = 8)
 
 **中心模式两端都必须人工核对 SAS，不提供自动接受。** SAS 是发现中心或入口冒充的唯一手段，任何一端跳过核对都会使中间人只需骗过另一端；而且只有 Operator 与客户互相报出 SAS，Operator 才能确认屏幕上的来访者就是电话里的那位客户（第 13 节）。
 
+**Operator 的确认方式。** Operator 确认 SAS 一致之前，必须输入客户报出的 6 位数字，且与本机 SAS 一致。这项检查由实现在接受「一致」答复的接口处强制执行，不能只靠界面控件的禁用；输入不一致时不自动判为拒绝，Operator 可以重新输入。选择「不一致」（拒绝）始终可用，不要求输入。Client 一侧负责把 SAS 读给 Operator，确认方式不变。
+
 **Client 状态机（配对连接，从协商出配对能力开始）。**
 
 | 状态 | 事件 | 动作 | 下一状态 |
@@ -700,7 +707,7 @@ Operator 先于 Client 写入钉住记录。若 16 丢失，Client 未完成，�
 ## 11. API 入口回退
 
 - 入口列表随安装包预置，或来自此前已验证的配置；不能在中心不可达时向同一中心查询备用入口。每个入口的 `GET /v1/meta` 返回的 `center_id` 必须与配置一致。Hub 同样在使用入口前核对 `center_id`。
-- 每次请求最多尝试 `fallback_attempts` 次，合计不超过 `fallback_total_timeout`，单次超时 `fallback_attempt_timeout`（长轮询见 6.6）。按配置顺序尝试，只有第 12 节标为 R 的错误才换下一个入口，重试时沿用同一个 `Idempotency-Key`。
+- 每次请求最多尝试 `fallback_attempts` 次，合计不超过 `fallback_total_timeout`，单次超时 `fallback_attempt_timeout`；长轮询的单次超时与总预算各加 `W`（第 6.6 节）。按配置顺序尝试，只有第 12 节标为 R 的错误才换下一个入口，重试时沿用同一个 `Idempotency-Key`。没有错误信封的非 2xx 响应（不论状态码）属于 R 类（第 6.2 节）。
 - 标为 W 的错误按 `retry_after_s` 在原入口等待，不换入口：限流在所有入口间共享，换入口也绕不过去。标为 B 的错误直接呈现给用户，不重试，不换入口。
 
 ## 12. 错误码
@@ -709,7 +716,7 @@ Operator 先于 Client 写入钉住记录。若 16 丢失，Client 未完成，�
 
 | code | HTTP | 类 | 含义与客户端处理 |
 |---|---|---|---|
-| （传输错误、TLS 错误、无错误信封的 5xx） | — | R | 网络超时、连接失败、代理错误 |
+| （传输错误、TLS 错误、无错误信封的非 2xx） | — | R | 网络超时、连接失败、代理错误；没有错误信封的 4xx 同样按此处理（第 6.2 节） |
 | `unavailable` | 503 | R | 中心暂时不可用 |
 | `internal` | 500 | R | 中心内部错误；幂等保证重试安全 |
 | `rate_limited` | 429 | W | 限流（含登录、兑换、码生成预算和全中心开放码上限），附 `retry_after_s` |
@@ -879,7 +886,7 @@ Hub 需要的值经激活和心跳响应下发；Operator / Client 本地参数�
 
 ## 16. Go 端接入点
 
-以下是实现时需要的能力，具体签名在 R2、R3、R5 实现时由整合者确定：
+以下是实现时需要的能力，具体签名在 R2、R3、R5 实现时由整合者确定（R5 冻结的签名见 [CONTRACTS · R5](CONTRACTS.md#r5-各端接入中心2026-11-20-冻结)）：
 
 - `internal/hub` 准入：现有 `AuthorizeToken(dev, role, target, token) bool` 在路由锁外执行、只返回布尔值，`wait` / `dial` 也在解锁后才写 `ok`，无法满足第 8.4 节的提交点。需要拆成两段：锁外的验票回调返回准入信息（R3 计划落地的 `hub.Policy` / `hub.Grant` / `Server.SetPolicy`；中心模式的策略在 `Grant` 中携带 `sid`、`jti` 与 `exp`），由 Hub 在路由锁内完成第 10–12 步（重查时间、代次、封存和 `jti`，核对配对双方 `sid`，登记路由、撤销索引与承载截止，消费 `jti`），解锁后写状态。验票回调仍须本地完成、快速返回，不访问网络。
 - Hub 维护：每会话承载截止 D 与连接集合、封存集合、`jti` 集合、每会话按方向的累计字节。撤销在路由锁内完成封存与关连接后，才进入 `closed`。中心模式不启用 `Embedded`。
@@ -1062,3 +1069,15 @@ community 分支 `continue-planned-work` 已独立实现 R2 直连数字配对�
 | 第 10.4 节 | 配对完成前重启以 `pairing_lost` 结束的规则同样适用于 `open` 状态 |
 | 第 8.5 节 | Operator 领新票据重试仍被拒时按退避查询会话状态，不连续领票 |
 | 第 7.8 节 | Hub 对同一激活幂等键的重试不超过 `idempotency_ttl`，接近时换新键 |
+
+### 2026-11-20 第十一版：各端接入实现反馈（R5）
+
+依据 R5 的实现与独立审查（[CENTER-CLIENT 第 12 节](CENTER-CLIENT.md#12-实现记录与审查处理)），经项目负责人批准写入。均为澄清，不改变线格式与已有语义；V1–V15 覆盖的条文未变，向量不重新生成（`contract_version` 仍为 `v1.9`，见 [CONFORMANCE](CONFORMANCE.md)）：
+
+| 位置 | 处理 |
+|---|---|
+| 第 8.4 节 | 第 1–9 步之后、进入路由锁之前新增两项拒绝：全零 `sid` 保留，中心不得签发、Hub 拒绝；中心模式下 dial 的 target 为 Hub 自身指纹时拒绝，即使票据 `peer` 与之相等。步骤编号与向量判定不变 |
+| 第 6.2 节、第 6.6 节、第 11 节、第 12 节 | 长轮询的单次超时与总预算在普通请求预算上各加 `W`；没有错误信封（解析不出非空 `error.code`）的非 2xx 响应不论状态码一律按 R 类处理。第 7.8 节处理表与第 9.3 节心跳失败表的「无错误信封的 5xx」同步改为「非 2xx」 |
+| 第 7.8 节、第 9.3 节 | 已发出的心跳请求失败后不重放、不换入口重发，由下一周期以新 `seq` 恢复；心跳响应的 `renew`、`revoke` 缺失或为 `null` 按空列表处理并逐项处理，未出现在二者中的会话保持原承载截止；`closed` 超过单次上限时分批上报，每项保留到中心停止在 `revoke` 中列出为止 |
+| 第 10.2 节 | Operator 确认 SAS 前必须输入客户报出的 6 位且与本机一致，由实现在确认接口处强制，不只靠界面；拒绝始终可用 |
+| 开头 | 状态行同步为第十一版，注明 Go 端已于 R5 接入 |

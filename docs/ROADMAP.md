@@ -94,15 +94,33 @@
 
 ## R5 · 各端接入中心
 
-设计见 [CENTER-CLIENT](CENTER-CLIENT.md)，已定稿；其第 9 节的契约澄清已写入契约第十版。
+已完成（离线测试、端到端测试与独立审查通过；中心服务端与真实中心联调、人工验收待执行）。设计、任务与提交对应关系、与设计稿的差异和独立审查的逐条处理见 [CENTER-CLIENT](CENTER-CLIENT.md)（第 12 节），冻结的接口见 [CONTRACTS · R5](CONTRACTS.md#r5-各端接入中心2026-11-20-冻结)。中心契约第十版写入设计期的澄清，第十一版写入实现反馈（[CENTER-CONTRACT §18](CENTER-CONTRACT.md#18-修订记录)）。中心服务端不在本仓库；离线测试用的 `internal/testutil/fakecenter` 只供测试，不是参考中心。
 
-**下一项开发。** 先承接 R4 留下的部分：Hub 中心模式的锁内提交、节点激活与心跳、中心 API 客户端，以及 S、P、C 组场景；再做下列各端接入。
+交付物：
 
-1. Operator 的连接方式扩展为直连、自建 Hub、中心三选一，首页按所选模式呈现会话控制。中心模式支持登录、选择节点、生成纯数字码、确认来访设备与结束接待。
-2. Client：输入纯数字码兑换授权、连接指定 Hub、断线重连；分别显示网卡缺失、Operator 忙、授权到期、码无效、节点离线等原因。
-3. Hub：上报心跳、负载与用量，执行租约与撤销。
-4. 离线测试覆盖 [CENTER-PROTOCOL 第 11 节](CENTER-PROTOCOL.md#11-一致性测试要求)列出的场景。
-5. 中心模式复用直连的配对状态机，但需要补上中心模式专属的行为：SAS 确认钩子必填；Operator 拒绝 SAS 或确认超时时，发 16 `rejected` / `confirm_timeout` 并以同名原因结束会话（[CENTER-CONTRACT §10.2](CENTER-CONTRACT.md#102-sas-与承诺)）。直连模式的钩子为 nil，目前只在本地以 `confirmation` 结束。
+1. Hub 中心模式：`internal/hub` 的中心会话（锁内第 10–12 步、承载截止 D、封存、`jti` 单次消费、按会话用量、`CenterMode` 拒绝零会话授权）；`internal/hubcenter`（节点配置、中心准入策略、激活与心跳循环、`closed` 分批上报、保留期随租期更新）；`renet-hub check|serve` 的中心模式（`check --online`、SIGHUP 只重载 `ticket_keys`、`node_superseded` 退出码 3）。
+2. 中心 API 客户端：`internal/center` 的 `Client`（签名、时间校正、nonce、幂等键、R/W/F/B 分类、入口回退与长轮询）与契约 §7 全部端点的类型化封装。
+3. 两端接待流程：`internal/centerflow`（Operator 登录 / 选节点 / 发码 / 提交 `/established` / 结束；Client 兑换 / 配对 / 重连 / 找回）、`internal/centerstate`（登录缓存与钉住记录）、`internal/session` 与 `internal/pairing` 的中心模式配对（SAS 钩子必填、16 `rejected` / `confirm_timeout` / `not_paired`、隧道闸门）、`internal/transport/hub` 的单次持票 wait / dial。
+4. 运行时与界面：`internal/app` 的中心运行路径（Operator 的「一致」须经 `VerifySAS` 核对客户读出的 6 位）、`renetd operator --center-node` 与 `renetd client --center-code-file`；`internal/desktop` 的中心控制器与原因映射；`internal/ui` 的连接方式三选一、登录、节点下拉选择与双端 SAS 对话；`internal/settings` 的 `operator.mode = "center"`，官方构建全新安装缺省为中心模式。
+
+证据：
+
+| 范围 | 测试 |
+|---|---|
+| Hub 中心会话 | `internal/hub`：`TestCenterRoutes`、`TestCenterDeadline`、`TestCenterCommitOrdering`、`TestCenterStatusWriteFailure`、`TestZeroSessionGrantByMode` |
+| 节点配置、准入策略、激活与心跳 | `internal/hubcenter`：`TestLoad`、`TestReloadCompatible`、`TestAdmissionVectors`、`TestActivationRotationAndRouting`、`TestActivationRetries`、`TestActivationTerminal`、`TestSkewAndHeartbeatRecovery`、`TestSuperseded`、`TestClockUncertainty`、`TestClosedTailAndLoad`、`TestSendTimeLeaseAndDisconnectedDeadline`、`TestPartialHeartbeatResponse`、`TestClosedBatchesRetainFinalUsage`；`cmd/renet-hub`：`TestCenterCheck`、`TestCenterReload`、`TestCenterServe` |
+| 中心 API 客户端 | `internal/center`：`TestClientFallbackReplay`、`TestClientClassActions`、`TestClientIDMismatch`、`TestClientDeadlines`、`TestHeartbeatFallsBackOnlyBeforeSending`、`TestEndpointLifecycle`、`TestHeartbeatDecisionLists` |
+| 配对与隧道闸门 | `internal/session`：`TestCenterConfirmAndPin`、`TestCenterDecisionWhileConfirming`、`TestCenterFailedAttempts`、`TestCenterDataGate`、`TestCenterUnpinnedData`、`TestCenterRequiresHook`、`TestCenterSeparateAuthenticatedLinksShowDifferentSAS`；`internal/pairing`：`TestSessionResponderSaveOwnership`；`internal/pairing/cpace`：`TestCenterSASIndependentExchanges` |
+| 接待流程与恢复 | `internal/centerflow`：`TestCommitGatesAndRecovery`、`TestLostDecision`、`TestPrePairRestartAndNIC`、`TestRedeemContentionAndLostReply`、`TestRecoveryOffersMultipleSessions`、`TestEndAlreadyTerminal`、`TestForbiddenPreservesPin`；`internal/centerstate`：`TestRecordsAndIsolation`、`TestCorruptRecords` |
+| 运行时、控制器与界面 | `internal/app`：`TestCenterReception`、`TestUnverifiedOperatorTimesOut`；`internal/desktop`：`TestControllerCenterReception`；`internal/ui`：`TestCenterSASDialog`、`TestOperatorModesLayout`；`internal/settings`：`TestValidateCenterMode`、`TestLoadBuildDefaultCenter` |
+| 端到端（真实 loopback Hub 由 `hubcenter.Node` 驱动、假中心、两端 app） | `internal/integration/center_test.go`：`TestCenterReceptionLifecycle`、`TestCenterPairingInterrupted`、`TestCenterRevocation`、`TestCenterReasonDisplay`、`TestCenterDeadlines`；`TestCenterSASTimeout`（三分钟，需 `RENET_LONG_CENTER_TEST=1`） |
+
+遗留：中心服务端在私有仓库另行实现；与真实中心服务端的联调、官方构建验收与人工验收（Operator 与 Client 都在 NAT 之后，节点在家庭网络以外）已列入下方「并行验收线」。
+
+**下一项开发：待定**，由项目负责人决定。候选：
+
+- R1 剩余项：贡献规则、Windows 安装包、版本与发布、签名与更新。
+- 中心服务端就绪后的联调（见「并行验收线」）。
 
 ## 并行验收线
 
@@ -117,6 +135,7 @@
 | macOS 上的 Operator 功能 | HSFZ 抓取、全局快捷键 Cmd+Shift+M（可能需要“辅助功能”权限）、三语言切换、像素风界面只做过交叉构建，未在 Mac 实机验证 |
 | MGU 直连与 L3 呈现的实车验证 | 隔离 fixture 已验证，实车尚未验证 |
 | 编码与刷写经隧道的透明转发 | 未验收；只验证转发，由用户使用真实工具操作 |
+| 中心模式与真实中心服务端联调、官方构建验收 | Go 端离线测试、端到端测试（假中心）与独立审查已通过（[CENTER-CLIENT](CENTER-CLIENT.md) 第 12 节）。待中心服务端可用后：官方或私有测试中心 + 家庭网络以外的节点，Operator 与 Client 都在 NAT 之后，完成登录、发码、首次配对与双端 SAS 核对、断线重连、两端重启恢复、撤销与到期；官方构建验证缺省中心与缺省中心模式；记录版本、拓扑与脱敏日志，不进入离线 CI |
 | 自建 Hub 的台架与公网验收 | 离线测试与独立审查已通过（[SELFHOST](SELFHOST.md) 第 14 节）。待在台架上用隔离的假车，Hub 跑在家庭网络以外的主机，Operator 与 Client 都位于 NAT 之后：分别用邀请码和数字码完成首次配对，重启两端后无码重连，按设备撤销后重载；记录版本、拓扑、结果与脱敏日志，不进入离线 CI |
 | 数字配对的 Mac GUI Client 与公网验收 | LAN 台架已通过；需在同网段或接车时验证 Mac GUI Client（含 rebase 后的紧凑窗口布局），并从家庭以外网络经 DDNS 走一遍首次配对与无码重连 |
 | 实车或公网下的长时运行 | 现有八小时结果只限 loopback / 内存设备 |

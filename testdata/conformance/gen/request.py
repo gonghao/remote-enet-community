@@ -14,7 +14,7 @@ def b64(data: bytes) -> str:
     return urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
 
 
-def signed(kind: str, target: str) -> tuple[dict, dict]:
+def signed(kind: str, target: str, timestamp: int = common.NOW) -> tuple[dict, dict]:
     device = kind == "device"
     key = "device-operator" if device else "hub-node-1"
     public = common.public_key(key)
@@ -27,18 +27,18 @@ def signed(kind: str, target: str) -> tuple[dict, dict]:
     idem = "" if device else "activate-00000001"
     center = "center.example"
     message = common.encode(["renet-center/v1 request", center, kind, principal, method,
-                             target.encode(), common.NOW, client, nonce, idem, sha256(body).digest()])
+                             target.encode(), timestamp, client, nonce, idem, sha256(body).digest()])
     sig = common.sign(key, message)
     headers = {
         "Renet-Device-Key" if device else "Renet-Node-Id": [b64(principal)],
-        "Renet-Timestamp": [str(common.NOW)], "Renet-Client": [client], "Renet-Signature": [b64(sig)],
+        "Renet-Timestamp": [str(timestamp)], "Renet-Client": [client], "Renet-Signature": [b64(sig)],
     }
     if nonce:
         headers["Renet-Nonce"] = [b64(nonce)]
     if idem:
         headers["Idempotency-Key"] = [idem]
     inputs = dict(key=key, center_id=center, kind=kind, principal=principal.hex(), method=method,
-                  target=target, timestamp=common.NOW, renet_client=client, nonce=nonce.hex(),
+                  target=target, timestamp=timestamp, renet_client=client, nonce=nonce.hex(),
                   idempotency_key=idem, body=body.hex())
     return inputs, dict(result="accept", signing_input=message.hex(), signature=sig.hex(), headers=headers)
 
@@ -115,5 +115,21 @@ def generate(check: bool) -> list[Path]:
         cases.append(dict(name=name, input=inputs, expect=dict(result="reject", reason=reason)))
         if name.startswith("signed-"):
             cases[-1]["note"] = "签名针对原始目标，中心以规范化后的目标验签。"
+    window = 60
+    for offset in (-window - 1, -window, window, window + 1):
+        inputs, expected = signed("device", get, common.NOW + offset)
+        inputs.update(server_time=common.NOW, request_window=window)
+        if abs(offset) > window:
+            inputs["headers"] = expected["headers"]
+            expected = dict(result="reject", reason="clock_skew")
+        side = "past" if offset < 0 else "future"
+        cases.append(dict(name=f"time-{side}-{abs(offset)}", input=inputs, expect=expected))
+
+    for name, prefix in [("plus", "+"), ("leading-zero", "0")]:
+        inputs, expected = signed("device", get)
+        inputs["headers"] = expected["headers"]
+        inputs["headers"]["Renet-Timestamp"] = [prefix + str(common.NOW)]
+        cases.append(dict(name=f"timestamp-{name}", input=inputs,
+                          expect=dict(result="reject", reason="bad_request")))
     return common.write_vector("v03-request-signature.json", "V3", "中心 API 请求签名",
                                "gen/request.py", cases, check)

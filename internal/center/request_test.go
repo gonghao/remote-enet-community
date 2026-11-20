@@ -25,6 +25,8 @@ type vectorRequest struct {
 	Client         string `json:"renet_client"`
 	IdempotencyKey string `json:"idempotency_key"`
 	RawURL         string `json:"raw_url"`
+	ServerTime     *int64 `json:"server_time"`
+	RequestWindow  int64  `json:"request_window"`
 	Timestamp      int64
 	Headers        http.Header
 }
@@ -122,13 +124,19 @@ func TestRequestSignatureVectors(t *testing.T) {
 			default:
 				t.Fatalf("unknown kind %q", in.Kind)
 			}
+			if in.ServerTime != nil {
+				if in.RequestWindow != RequestWindow || err != nil {
+					t.Fatalf("time vector has window %d and signature verification error %v", in.RequestWindow, err)
+				}
+				err = CheckTimestamp(*in.ServerTime, in.Timestamp, RequestWindow)
+			}
 			switch want.Result {
 			case "accept":
 				if err != nil {
 					t.Fatal(err)
 				}
 			case "reject":
-				reason := map[string]error{"unauthenticated": ErrUnauthenticated, "bad_request": ErrBadRequest}[want.Reason]
+				reason := map[string]error{"unauthenticated": ErrUnauthenticated, "bad_request": ErrBadRequest, "clock_skew": ErrClockSkew}[want.Reason]
 				if reason == nil || !errors.Is(err, reason) {
 					t.Fatalf("error %v, want %s", err, want.Reason)
 				}

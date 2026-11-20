@@ -34,9 +34,25 @@ var (
 	ErrBadRequest = errors.New("bad_request")
 	// ErrUnauthenticated identifies a well-formed signature that failed verification.
 	ErrUnauthenticated = errors.New("unauthenticated")
+	// ErrClockSkew identifies a timestamp outside the allowed request window.
+	ErrClockSkew       = errors.New("clock_skew")
 	idempotencyPattern = regexp.MustCompile("^[A-Za-z0-9_-]{16,64}$")
 	wire64             = base64.RawURLEncoding.Strict()
 )
+
+// RequestWindow is the inclusive request timestamp tolerance in seconds.
+const RequestWindow int64 = 60
+
+// CheckTimestamp compares Unix seconds without overflowing at the int64 limits.
+func CheckTimestamp(serverNow, ts, window int64) error {
+	if serverNow < ts {
+		serverNow, ts = ts, serverNow
+	}
+	if window < 0 || uint64(serverNow)-uint64(ts) > uint64(window) {
+		return ErrClockSkew
+	}
+	return nil
+}
 
 // SigningInput uses byte strings for the target, principal, nonce and digest.
 // The caller supplies validated fields; a nil nonce encodes as an empty bstr.
@@ -56,6 +72,9 @@ func SigningInput(r Request, a RequestAuth, kind string, principal []byte) []byt
 }
 
 func (a RequestAuth) validate(r Request) error {
+	if a.Timestamp < 0 {
+		return fmt.Errorf("%w: negative timestamp", ErrBadRequest)
+	}
 	if r.Method == "" || r.Method != strings.ToUpper(r.Method) {
 		return fmt.Errorf("%w: invalid method", ErrBadRequest)
 	}
@@ -144,8 +163,9 @@ func verifyHeaders(r Request, h http.Header, kind string, id []byte, key ed25519
 		}
 		fields[name] = values[0]
 	}
-	ts, err := strconv.ParseInt(fields["Renet-Timestamp"], 10, 64)
-	if err != nil {
+	timestamp := fields["Renet-Timestamp"]
+	ts, err := strconv.ParseInt(timestamp, 10, 64)
+	if err != nil || ts < 0 || strconv.FormatInt(ts, 10) != timestamp {
 		return fmt.Errorf("%w: invalid timestamp", ErrBadRequest)
 	}
 	nonce, err := wire64.DecodeString(fields["Renet-Nonce"])

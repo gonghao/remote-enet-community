@@ -77,8 +77,20 @@ func testSetupSlots(t *testing.T, embedded bool) {
 	}
 	if !embedded {
 		connect(t, addr, h, c, Request{Role: RoleWait})
-		connect(t, addr, h, h, Request{Role: RoleDial, Target: c.Fingerprint()})
-		return
+		// The single setup slot is released after the wait's ok is written, so
+		// an immediate dial may still find it occupied and be dropped.
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			conn, err := Connect(t.Context(), addr, h, h.Fingerprint(), Request{Role: RoleDial, Target: c.Fingerprint()})
+			if err == nil {
+				conn.Close()
+				return
+			}
+			if errors.Is(err, ErrUnauthorized) || errors.Is(err, ErrUnknownPeer) || errors.Is(err, ErrPeerBusy) || time.Now().After(deadline) {
+				t.Fatalf("dial after slot release: %v", err)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
 	conn, fp, err := ConnectBootstrap(t.Context(), addr, c)
 	if err != nil {

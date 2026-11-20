@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
 	"remote-enet/internal/app"
+	"remote-enet/internal/center"
+	"remote-enet/internal/centerflow"
 	"remote-enet/internal/checkup"
 	"remote-enet/internal/identity"
 	"remote-enet/internal/invite"
@@ -71,12 +74,29 @@ func (c *Controller) CheckConnection(ctx context.Context, invitation string) err
 	current := epoch == c.stopEpoch && cfg.Equal(c.state.Config) && c.run == g
 	c.mu.Unlock()
 	if err == nil && current {
-		in := checkup.Input{Config: cfg, Runtime: pending.sample, Running: g != nil}
+		in := checkup.Input{AppVersion: c.opts.AppVersion, Config: cfg, Runtime: pending.sample, Running: g != nil}
 		if cfg.Role == settings.RoleClient {
 			peer, code := c.checkEndpoints(ctx, cfg, invitation)
 			in.PeerID, in.Endpoints, in.PeerCode = peer.ID, slices.Clone(peer.Endpoints), code
 			for i := range in.Endpoints {
 				in.Endpoints[i].Ticket = ""
+			}
+		}
+		if cfg.Role == settings.RoleOperator && cfg.Operator.Mode == "center" {
+			in.AccountStatus = func(ctx context.Context) error {
+				id, err := identity.LoadExisting(filepath.Join(c.roleDir(settings.RoleOperator), "identity"))
+				if errors.Is(err, os.ErrNotExist) {
+					return centerflow.Unauthenticated
+				}
+				if err != nil {
+					return err
+				}
+				api, err := center.NewClient(center.ClientOptions{Center: cfg.Center, Role: cfg.Role, AppVersion: c.opts.AppVersion, Device: id.Key})
+				if err != nil {
+					return err
+				}
+				_, err = api.Account(ctx)
+				return err
 			}
 		}
 		if cfg.Role == settings.RoleOperator && c.opts.NetworkStatus != nil && ctx.Err() == nil {
@@ -158,10 +178,7 @@ func (c *Controller) checkEndpoints(ctx context.Context, cfg settings.Config, co
 		case input.Kind == invite.Direct:
 			return transport.PeerInfo{}, checkup.DirectInputValid
 		case input.Kind == invite.Center:
-			if cfg.Center.ID != "" {
-				return transport.PeerInfo{}, checkup.CenterInputUnsupported
-			}
-			return transport.PeerInfo{}, checkup.DirectInputAddressRequired
+			return transport.PeerInfo{}, checkup.CenterInput
 		}
 		i := input.Invite
 		if i.Peer.ID.IsZero() || i.Token == ([16]byte{}) || len(i.Peer.Endpoints) == 0 {

@@ -5,10 +5,14 @@ import (
 	"errors"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
+	"remote-enet/internal/app"
 	"remote-enet/internal/center"
+	"remote-enet/internal/centerflow"
+	"remote-enet/internal/session"
 	"remote-enet/internal/settings"
 )
 
@@ -73,5 +77,17 @@ func TestCheckCenterStopsOnControllerClose(t *testing.T) {
 	}
 	if err := await(t, done); !errors.Is(err, context.Canceled) {
 		t.Fatalf("check returned %v, want cancellation", err)
+	}
+}
+
+func TestUnknownCenterReasonIsPrivate(t *testing.T) {
+	const private = "ticket-canary-12345678"
+	s := app.Snapshot{Role: session.RoleClient, LastError: private, Center: app.CenterSnapshot{State: centerflow.State{Phase: "ended", Reason: centerflow.Reason(private)}}}
+	projected := displayRuntime(s)
+	if projected.Center.Reason != "" || strings.Contains(projected.LastError, private) {
+		t.Fatal("unrecognized remote reason reached public state")
+	}
+	if err := publicCenterError(&center.Error{Code: private}); err != ErrCenterOperation {
+		t.Fatal("unrecognized remote reason reached the action result")
 	}
 }

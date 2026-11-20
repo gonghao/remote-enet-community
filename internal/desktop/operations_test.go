@@ -566,7 +566,7 @@ func TestDigitalPairingPersistence(t *testing.T) {
 
 func TestNumericInputErrorsAndTerminalMessagesAreSecretFree(t *testing.T) {
 	for _, tc := range []struct{ input, message string }{
-		{"0000 1234", "Enter the direct address and port"},
+		{"0000 1234", "No center is configured. Set one in Settings, or enter a direct address and code."},
 		{"0.0.0.0:47000 00001234", "Invalid host"},
 		{"[::]:47000 00001234", "Invalid host"},
 		{"example.invalid:0 00001234", "Invalid port"},

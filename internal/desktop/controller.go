@@ -13,6 +13,7 @@ import (
 	"remote-enet/internal/app"
 	"remote-enet/internal/carside"
 	"remote-enet/internal/center"
+	"remote-enet/internal/centerflow"
 	"remote-enet/internal/checkup"
 	"remote-enet/internal/hsfzcapture"
 	"remote-enet/internal/identity"
@@ -48,6 +49,7 @@ type Options struct {
 // State is an independent, in-memory view. Only Config is persisted;
 // Invitation is an explicitly requested secret and must never be logged.
 type State struct {
+	Center                     CenterView
 	Config                     settings.Config
 	Runtime                    app.Snapshot
 	Capture                    hsfzcapture.Snapshot
@@ -66,6 +68,11 @@ type State struct {
 }
 
 type appRuntime interface {
+	AnswerSAS(context.Context, uint64, bool) error
+	EndReception(context.Context) error
+	RetryPairing(context.Context) error
+	CenterDisplay() (string, centerflow.SASPrompt)
+	CenterAccount(context.Context, string, app.CenterConfig) (*centerflow.Operator, error)
 	RunClient(context.Context, app.ClientConfig) error
 	RunOperator(context.Context, app.OperatorConfig) error
 	Snapshot() app.Snapshot
@@ -334,6 +341,10 @@ func (c *Controller) saveConfig(ctx context.Context, cfg settings.Config, center
 	}
 	// Save cannot interrupt an atomic rename. A successful write is reflected
 	// even if cancellation raced with it; it must not report a fictitious rollback.
+	if cfg.Center.ID != c.state.Config.Center.ID || !slices.Equal(cfg.Center.API, c.state.Config.Center.API) || cfg.Role != c.state.Config.Role || cfg.Operator.Mode != c.state.Config.Operator.Mode {
+		c.state.Center = CenterView{}
+		c.state.Runtime.Center = app.CenterSnapshot{}
+	}
 	c.state.Config = cfg
 	if c.check != nil {
 		c.check.cancel()

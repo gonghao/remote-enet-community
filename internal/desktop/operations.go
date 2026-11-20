@@ -37,7 +37,7 @@ func (c *Controller) IssueInvite(ctx context.Context) (string, error) {
 	c.state.Invitation = ""
 	c.publishLocked()
 	err = c.availableLocked(ctx, false)
-	if err == nil && (c.state.Config.Role != settings.RoleOperator || !c.allowsRole(settings.RoleOperator)) {
+	if err == nil && (c.state.Config.Role != settings.RoleOperator || c.state.Config.Operator.Mode == "center" || !c.allowsRole(settings.RoleOperator)) {
 		err = ErrRole
 	}
 	g := c.run

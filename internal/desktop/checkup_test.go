@@ -30,7 +30,7 @@ func TestCheckNumericInputUsesOnlyFixedCodes(t *testing.T) {
 		{"host", "https://example.invalid:47000 00001234", checkup.DirectInputInvalidHost},
 		{"port", "192.0.2.1:65536 00001234", checkup.DirectInputInvalidPort},
 		{"code", "192.0.2.1:47000 00001234x", checkup.DirectInputInvalidCode},
-		{"center", "0000 1234", checkup.DirectInputAddressRequired},
+		{"center", "0000 1234", checkup.CenterInput},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := testController(t, clientSettings(), func(d *dependencies) {
@@ -43,7 +43,11 @@ func TestCheckNumericInputUsesOnlyFixedCodes(t *testing.T) {
 						t.Fatal("direct input reached checkup with endpoints or the wrong result")
 					}
 					report := checkedReport()
-					report.Findings = []checkup.Finding{{ID: "peer_configuration", Status: checkup.Pass, Code: in.PeerCode}}
+					result := in.PeerCode
+					if result == checkup.CenterInput {
+						result = "center_unconfigured"
+					}
+					report.Findings = []checkup.Finding{{ID: "peer_configuration", Status: checkup.Pass, Code: result}}
 					return report
 				}
 			})
@@ -52,7 +56,11 @@ func TestCheckNumericInputUsesOnlyFixedCodes(t *testing.T) {
 			}
 			s := c.Snapshot()
 			data, err := checkup.JSON(s.Checkup)
-			if err != nil || !strings.Contains(string(data), tc.code) {
+			expected := tc.code
+			if expected == checkup.CenterInput {
+				expected = "center_unconfigured"
+			}
+			if err != nil || !strings.Contains(string(data), expected) {
 				t.Fatal("local input result missing from the JSON report")
 			}
 			all := string(data) + s.Error + s.Notice + s.Runtime.LastError + strings.Join(s.Events, " ")

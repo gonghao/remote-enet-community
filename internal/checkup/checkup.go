@@ -17,6 +17,8 @@ import (
 
 	"remote-enet/internal/app"
 	"remote-enet/internal/carside"
+	"remote-enet/internal/center"
+	"remote-enet/internal/centerflow"
 	"remote-enet/internal/hub"
 	"remote-enet/internal/identity"
 	"remote-enet/internal/netpriv"
@@ -55,17 +57,20 @@ type Report struct {
 // Input is borrowed only for Run. PeerCode is a fixed locator result, and
 // Endpoints are already pinned public endpoints from an invite or paired store.
 type Input struct {
-	Config     settings.Config
-	Runtime    app.Snapshot
-	Running    bool
-	PeerID     identity.Fingerprint
-	Endpoints  []transport.Endpoint
-	PeerCode   string
-	Permission netpriv.Status
+	AppVersion    string
+	AccountStatus func(context.Context) error
+	Config        settings.Config
+	Runtime       app.Snapshot
+	Running       bool
+	PeerID        identity.Fingerprint
+	Endpoints     []transport.Endpoint
+	PeerCode      string
+	Permission    netpriv.Status
 }
 
 // Direct-input results carry only syntax status across the checkup boundary.
 const (
+	CenterInput                = "center_input"
 	CenterInputUnsupported     = "center_input_unsupported"
 	DirectInputValid           = "direct_input_valid"
 	DirectInputInvalidHost     = "direct_input_invalid_host"
@@ -75,6 +80,7 @@ const (
 )
 
 type backend struct {
+	meta       func(context.Context, settings.Center, string, string) []center.EntryResult
 	interfaces func() ([]carside.NIC, error)
 	lookup     func(context.Context, string) ([]netip.Addr, error)
 	dial       func(context.Context, string) (io.Closer, error)
@@ -84,7 +90,7 @@ type backend struct {
 
 func systemBackend() backend {
 	return backend{
-		interfaces: carside.Interfaces,
+		meta: center.Check, interfaces: carside.Interfaces,
 		lookup: func(ctx context.Context, host string) ([]netip.Addr, error) {
 			return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
 		},
@@ -95,7 +101,7 @@ func systemBackend() backend {
 	}
 }
 
-// Run has a ten-second overall budget and never sends application bytes. Local
+// Run has a ten-second overall budget and uses unsigned metadata for center codes. Local
 // port probes are disabled while running. Synchronous interface/filesystem APIs
 // cannot be forcibly interrupted; cancellation is checked around each call.
 func Run(ctx context.Context, in Input) Report { return run(ctx, in, systemBackend()) }
@@ -118,9 +124,50 @@ func run(ctx context.Context, in Input, b backend) Report {
 		}
 		return Pass, "settings_valid"
 	})
+	centerOperator := in.Config.Role == settings.RoleOperator && in.Config.Operator.Mode == "center"
+	centerClient := in.Config.Role == settings.RoleClient && in.PeerCode == CenterInput
+	if (centerOperator || centerClient) && len(r.Findings) > 0 && r.Findings[0].Status == Pass {
+		verified := false
+		add("center_meta", 0, func() (Status, string) {
+			if in.Config.Center.ID == "" {
+				return Failed, "center_unconfigured"
+			}
+			mismatch := false
+			for _, entry := range b.meta(ctx, in.Config.Center, in.Config.Role, in.AppVersion) {
+				switch entry.Status {
+				case center.Verified:
+					verified = true
+				case center.IDMismatch:
+					mismatch = true
+				}
+			}
+			if verified {
+				return Pass, "center_verified"
+			}
+			if mismatch {
+				return Failed, "center_id_mismatch"
+			}
+			return Failed, "center_unreachable"
+		})
+		if centerOperator {
+			add("center_login", 0, func() (Status, string) {
+				if !verified || in.AccountStatus == nil {
+					return Skipped, "login_unchecked"
+				}
+				err := in.AccountStatus(ctx)
+				if err == nil {
+					return Pass, "signed_in"
+				}
+				if centerflow.ReasonOf(err) == centerflow.Unauthenticated {
+					return Failed, "unauthenticated"
+				}
+				return Failed, "login_unchecked"
+			})
+		}
+	}
 	if status, ok := directInputStatus(in.PeerCode); in.Config.Role == settings.RoleClient && ok {
 		add("peer_configuration", 0, func() (Status, string) { return status, in.PeerCode })
-	} else if len(r.Findings) > 0 && r.Findings[0].Status != Failed {
+	} else if !centerClient && len(r.Findings) > 0 && r.Findings[0].Status != Failed {
 		var nics []carside.NIC
 		var interfaceErr error
 		add("interfaces", 0, func() (Status, string) {
@@ -217,6 +264,9 @@ func run(ctx context.Context, in Input, b backend) Report {
 				{"control_port", "tcp4", net.JoinHostPort(bind.String(), strconv.Itoa(in.Config.Operator.ControlPort)), true},
 				{"discovery_port", "udp4", net.JoinHostPort(bind.String(), strconv.Itoa(in.Config.Operator.DiscoveryPort)), true},
 			} {
+				if item.id == "hub_port" && centerOperator {
+					continue
+				}
 				if item.id == "hub_port" && in.Config.Operator.Mode == "hub" {
 					pin, _ := identity.ParseFingerprint(in.Config.Operator.Hub.FP)
 					add("hub_tls", 0, func() (Status, string) { return checkHubTLS(ctx, in.Config.Operator.Hub.Addr, pin) })
@@ -237,24 +287,26 @@ func run(ctx context.Context, in Input, b backend) Report {
 					return Pass, "port_available"
 				})
 			}
-			add("public_endpoint", 0, func() (Status, string) {
-				addr := in.Config.Operator.Endpoint
-				if in.Config.Operator.Mode == "hub" {
-					// Hub invitations carry the share address; the direct endpoint is ignored.
-					addr = in.Config.Operator.Hub.Share
-					if addr == "" {
-						addr = in.Config.Operator.Hub.Addr
+			if !centerOperator {
+				add("public_endpoint", 0, func() (Status, string) {
+					addr := in.Config.Operator.Endpoint
+					if in.Config.Operator.Mode == "hub" {
+						// Hub invitations carry the share address; the direct endpoint is ignored.
+						addr = in.Config.Operator.Hub.Share
+						if addr == "" {
+							addr = in.Config.Operator.Hub.Addr
+						}
 					}
-				}
-				if addr == "" {
-					return Warning, "endpoint_missing"
-				}
-				status, code := resolve(ctx, b, addr)
-				if status != Pass {
-					return status, code
-				}
-				return Warning, "remote_check_required"
-			})
+					if addr == "" {
+						return Warning, "endpoint_missing"
+					}
+					status, code := resolve(ctx, b, addr)
+					if status != Pass {
+						return status, code
+					}
+					return Warning, "remote_check_required"
+				})
+			}
 			add("mgu_permission", 0, func() (Status, string) { return permission(in.Permission) })
 			add("mgu_routes", 0, func() (Status, string) {
 				if !in.Runtime.Direct.Address.IsValid() {

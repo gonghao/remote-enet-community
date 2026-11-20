@@ -84,6 +84,10 @@ func cloneState(s State) State {
 		s.HubInviteDigest = sha256.Sum256([]byte(s.Invitation))
 		s.Invitation = ""
 	}
+	s.Center.CenterSnapshot = s.Runtime.Center
+	s.Center.RequiresSASInput = s.Center.SASID != 0 && s.Config.Role == "operator" && !s.Stopping
+	s.Center.Nodes = slices.Clone(s.Center.Nodes)
+	s.Center.Devices = slices.Clone(s.Center.Devices)
 	s.Config.Center.API = slices.Clone(s.Config.Center.API)
 	s.NICs = slices.Clone(s.NICs)
 	s.Events = slices.Clone(s.Events)
@@ -134,6 +138,14 @@ func trimDisplayText(value string) string {
 // Snapshot strings stay separate from the runtime logger’s diagnostic events.
 func displayRuntime(s app.Snapshot) app.Snapshot {
 	s = cloneRuntime(s)
+	if s.Center.Reason != "" {
+		if key := locales.CenterMessage(string(s.Center.Reason), string(s.Role)); key == "" {
+			s.Center.Reason = ""
+			s.LastError = "Runtime stopped with an error. Check runtime diagnostics."
+		} else if s.LastError != "" {
+			s.LastError = key
+		}
+	}
 	if message := locales.PairingMessage(s.LastError); message != "" {
 		s.LastError = message
 	}

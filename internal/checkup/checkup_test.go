@@ -19,6 +19,8 @@ import (
 
 	"remote-enet/internal/app"
 	"remote-enet/internal/carside"
+	"remote-enet/internal/center"
+	"remote-enet/internal/centerflow"
 	"remote-enet/internal/hub"
 	"remote-enet/internal/identity"
 	"remote-enet/internal/netpriv"
@@ -412,6 +414,41 @@ func TestOperatorHubModeChecksShareAddress(t *testing.T) {
 		run(t.Context(), in, b)
 		if slices.Contains(hosts, "old-direct.example") || tc.want != "" && !slices.Contains(hosts, tc.want) || tc.want == "" && len(hosts) != 0 {
 			t.Fatalf("share %q resolved %v", tc.share, hosts)
+		}
+	}
+}
+
+func TestCenterChecks(t *testing.T) {
+	for _, role := range []string{settings.RoleClient, settings.RoleOperator} {
+		in := operatorInput()
+		in.Config.Role = role
+		in.Config.Operator.Mode = "center"
+		in.Config.Center = settings.Center{ID: "test-center", API: []string{"https://localhost"}}
+		in.PeerCode = CenterInput
+		in.AppVersion = "1.0.0"
+		b := fakeBackend(t)
+		metaCalls, accountCalls := 0, 0
+		b.meta = func(_ context.Context, cfg settings.Center, r, v string) []center.EntryResult {
+			metaCalls++
+			if cfg.ID != in.Config.Center.ID || r != role || v != in.AppVersion {
+				t.Fatal("wrong meta request")
+			}
+			return []center.EntryResult{{Status: center.Verified, Entry: "secret-entry"}}
+		}
+		in.AccountStatus = func(context.Context) error { accountCalls++; return centerflow.Unauthenticated }
+		report := run(t.Context(), in, b)
+		if metaCalls != 1 || finding(t, report, "center_meta", 0).Status != Pass {
+			t.Fatal("missing metadata check")
+		}
+		if role == settings.RoleClient && (accountCalls != 0 || len(report.Findings) != 2) {
+			t.Fatal("bare code triggered additional probes")
+		}
+		if role == settings.RoleOperator && (accountCalls != 1 || finding(t, report, "center_login", 0).Code != "unauthenticated") {
+			t.Fatal("operator login not checked")
+		}
+		data, err := JSON(report)
+		if err != nil || strings.Contains(string(data), "secret-entry") {
+			t.Fatal("unsafe checkup output")
 		}
 	}
 }

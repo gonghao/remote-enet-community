@@ -1,5 +1,6 @@
 """Generate the v2 COSE fixtures using OpenSSL's Ed25519 implementation."""
 
+import argparse
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -35,7 +36,7 @@ def encode(value: object) -> bytes:
     raise TypeError(type(value))
 
 
-def generate(directory: Path) -> None:
+def generate(directory: Path, check: bool) -> None:
     key = directory / "seed.der"
     # RFC 8410 PrivateKeyInfo containing the fixture seed.
     key.write_bytes(bytes.fromhex("302e020100300506032b657004220420") + bytes(range(32)))
@@ -66,9 +67,17 @@ def generate(directory: Path) -> None:
         vector = dict(kid=kid.hex(), protected=protected.hex(), payload=payload.hex(),
                       input=message.hex(), raw=raw.hex())
         output = Path(__file__).resolve().parents[1] / (name + ".json")
-        output.write_bytes((json.dumps(vector, indent=2) + "\n").encode("ascii"))
+        expected = (json.dumps(vector, indent=2) + "\n").encode("ascii")
+        if check:
+            if not output.is_file() or output.read_bytes() != expected:
+                raise SystemExit(f"stale or missing: {output}")
+        else:
+            output.write_bytes(expected)
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--check", action="store_true")
+    args = parser.parse_args()
     with TemporaryDirectory() as temp:
-        generate(Path(temp))
+        generate(Path(temp), args.check)

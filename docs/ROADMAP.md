@@ -72,13 +72,29 @@
 
 ## R4 · 中心协议契约定稿
 
-把 [CENTER-PROTOCOL](CENTER-PROTOCOL.md) 第 12 节的待定参数落成正式契约，包括 API 与版本协商、票据编码、续租与撤销、写请求幂等、入口回退。同时发布票据与 PAKE 的测试向量，供第三方中心验证兼容性。
+已完成（独立审查已处理，契约第九版）。把 [CENTER-PROTOCOL](CENTER-PROTOCOL.md) 第 12 节的待定参数落成正式契约 [CENTER-CONTRACT](CENTER-CONTRACT.md)（2026-11-19 定稿，第八版加入自建模式条文，第九版按一致性向量澄清边界，逐条记录见其第 18 节），并发布 V1–V15 一致性向量，供第三方中心验证兼容性。发布格式、各文件字段与 `reason` 枚举见 [CONFORMANCE](CONFORMANCE.md)；中心仓库按版本标签拉取 `testdata/conformance/`。
 
-契约：[CENTER-CONTRACT](CENTER-CONTRACT.md)（2026-11-19 定稿，测试向量尚未生成）。第八版已加入自建模式相关条文。
+交付物：
 
-**下一项开发：** 契约已定稿而向量未生成，所以先做本节的测试向量（票据 `v = 1` 与中心 PAKE 应用向量，由独立生成器产出，并补充「`v = 2` 票据被中心 Hub 拒绝」的向量），再进入 R5。R3 的自建票据向量已有，可作为生成器与目录布局的参照。
+1. 向量：`testdata/conformance/` 下 `v01-account-code.json`、`v02-numeric-code.json`、`v03-request-signature.json`、`v04-ticket.json`（含 V5）、`v06-pake-ci.json`、`v07-pairing-messages.json`、`v08-ticket-reject.json`（V8–V15），头部带 `contract_version`（`v1.9`）。生成器在 `testdata/conformance/gen/`，只用 Python 标准库、OpenSSL 命令行与（V6/V7）libsodium，不依赖 Go 代码。
+2. 与向量交叉验证的 Go 端纯编解码：`internal/centercode`（账号码与数字码规范化，区分长度与字符错误）；`internal/center`（`CanonicalTarget`、`SignDevice` / `SignNode`、`VerifyDevice` / `VerifyNode`、`CheckTimestamp`）；`internal/ticket`（中心票据 `v = 1` 的 `SignCenter` 与 §8.4 第 1–9 步的 `VerifyCenter`，拒绝步骤以 `StepError.Step` 表示）；`internal/pairing/cpace`（`pair-center/1` 的 CI 绑定）。
+3. CI：check 任务安装 `libsodium23`，对 CPace、自建票据与本目录全部生成器做逐字节复现检查。
+
+证据：
+
+| 范围 | 测试 |
+|---|---|
+| V1/V2 码规范化 | `internal/centercode`：`TestCodeConformance`、`TestNormalizationErrors` |
+| V3 请求签名、目标规范化与时间窗 | `internal/center`：`TestRequestSignatureVectors` |
+| V4/V5 签发、V8–V15 准入 | `internal/ticket`：`TestCenterVectorHeader`、`TestCenterIssuanceVectors`、`TestCenterAdmissionVectors`、`TestSignCenterBounds`、`TestSignCenterTTLBoundaries`、`TestInvalidCBORHeadSize` |
+| V6/V7 CI 与配对消息 | `internal/pairing/cpace`：`TestConformanceCI`、`TestConformancePairingMessages`、`TestCenterCIVector` |
+| 生成器复现 | `python3 -B testdata/conformance/gen/run_all.py --check` 及 `testdata/conformance/gen/test_common.py` |
+
+留给 R5：Hub 中心模式的锁内提交（§8.4 第 10–12 步）、节点激活与心跳、中心 API 客户端，以及 S、P、C 组行为场景（需要 Hub 中心模式与中心假实现）。
 
 ## R5 · 各端接入中心
+
+**下一项开发。** 先承接 R4 留下的部分：Hub 中心模式的锁内提交、节点激活与心跳、中心 API 客户端，以及 S、P、C 组场景；再做下列各端接入。
 
 1. Operator 的连接方式扩展为直连、自建 Hub、中心三选一，首页按所选模式呈现会话控制。中心模式支持登录、选择节点、生成纯数字码、确认来访设备与结束接待。
 2. Client：输入纯数字码兑换授权、连接指定 Hub、断线重连；分别显示网卡缺失、Operator 忙、授权到期、码无效、节点离线等原因。

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 
 	"github.com/gtank/ristretto255"
 
@@ -22,9 +23,13 @@ const (
 	dsi     = "CPaceRistretto255"
 )
 
+var centerIDPattern = regexp.MustCompile(`^[a-z0-9.-]{1,32}$`)
+
 // Binding uses the inner TLS exporter, full peer fingerprints and hashes of the exact framed Hellos.
 type Binding struct {
 	Capability                         string
+	CenterID                           string
+	SessionID                          [16]byte
 	HubFP                              [32]byte // Zero for direct pairing, required for Hub pairing.
 	Exporter                           [32]byte
 	ClientFP, OperatorFP               identity.Fingerprint
@@ -34,7 +39,12 @@ type Binding struct {
 func (b Binding) ci() ([]byte, error) {
 	fields := [][]byte{[]byte("renet-pake-v1"), []byte(suiteID), []byte(b.Capability), []byte("renet/1"),
 		b.ClientFP[:], b.OperatorFP[:], b.HelloClientHash[:], b.HelloOperatorHash[:]}
+	if b.Capability != proto.PairCenterCapability && (b.CenterID != "" || b.SessionID != [16]byte{}) {
+		return nil, errBinding
+	}
 	switch {
+	case b.Capability == proto.PairCenterCapability && b.HubFP != [32]byte{} && centerIDPattern.MatchString(b.CenterID) && b.SessionID != [16]byte{}:
+		fields = append(fields, b.HubFP[:], []byte(b.CenterID), b.SessionID[:])
 	case b.Capability == proto.PairHubCapability && b.HubFP != [32]byte{}:
 		fields = append(fields, b.HubFP[:])
 	case b.Capability == proto.PairDirectCapability && b.HubFP == [32]byte{}:

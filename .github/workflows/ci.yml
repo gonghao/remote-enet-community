@@ -33,6 +33,14 @@ jobs:
         run: |
           python3 -B -m unittest discover -s tools -p 'test_*.py'
           sh -n tools/build-macos-client.sh
+      - name: Test conformance generators
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsodium23
+          python3 -B internal/pairing/cpace/testdata/gen/application.py --check
+          python3 -B internal/ticket/testdata/gen/generate.py --check
+          python3 -B -m unittest discover -s testdata/conformance/gen -p 'test_*.py'
+          python3 -B testdata/conformance/gen/run_all.py --check
       - name: Scan for private markers
         env:
           REPO_GUARD_RULES_INLINE: ${{ secrets.REPO_GUARD_RULES_INLINE }}

@@ -1,0 +1,123 @@
+package cpace
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"os"
+	"testing"
+
+	"remote-enet/internal/proto"
+)
+
+type conformanceCase struct {
+	Name          string
+	Input, Expect vector
+}
+
+func conformanceCases(t *testing.T, file, vectorID string, count int) []conformanceCase {
+	t.Helper()
+	data, err := os.ReadFile("../../../testdata/conformance/" + file + ".json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Format           int
+		Contract, Vector string
+		ContractVersion  string `json:"contract_version"`
+		Cases            []conformanceCase
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.ContractVersion != "v1.9" || doc.Format != 1 || doc.Vector != vectorID || doc.Contract != "CENTER-CONTRACT v1 第九版（2026-11-20）" {
+		t.Fatalf("%s: unexpected header format=%d contract=%q version=%q vector=%q", file, doc.Format, doc.Contract, doc.ContractVersion, doc.Vector)
+	}
+	if len(doc.Cases) != count {
+		t.Fatalf("got %d cases, want %d", len(doc.Cases), count)
+	}
+	return doc.Cases
+}
+
+func (v vector) text(t *testing.T, key string) string {
+	t.Helper()
+	var s string
+	if err := json.Unmarshal(v[key], &s); err != nil {
+		t.Fatal(key, err)
+	}
+	return s
+}
+
+func TestConformanceCI(t *testing.T) {
+	for _, tc := range conformanceCases(t, "v06-pake-ci", "V6", 3) {
+		t.Run(tc.Name, func(t *testing.T) {
+			v, w := tc.Input, tc.Expect
+			b := Binding{
+				Capability:        v.text(t, "capability"),
+				ClientFP:          [32]byte(v.bytes(t, "fp_client")),
+				OperatorFP:        [32]byte(v.bytes(t, "fp_operator")),
+				HelloClientHash:   sha256.Sum256(v.bytes(t, "hc")),
+				HelloOperatorHash: sha256.Sum256(v.bytes(t, "ho")),
+			}
+			w.check(t, "hc_sha256", b.HelloClientHash[:])
+			w.check(t, "ho_sha256", b.HelloOperatorHash[:])
+			if b.Capability != proto.PairDirectCapability {
+				b.HubFP = [32]byte(v.bytes(t, "hub_fp"))
+			}
+			if b.Capability == proto.PairCenterCapability {
+				b.CenterID = v.text(t, "center_id")
+				b.SessionID = [16]byte(v.bytes(t, "session_id"))
+			}
+			ci, err := b.ci()
+			if err != nil {
+				t.Fatal(err)
+			}
+			w.check(t, "ci", ci)
+		})
+	}
+}
+
+func TestConformancePairingMessages(t *testing.T) {
+	for _, tc := range conformanceCases(t, "v07-pairing-messages", "V7", 3) {
+		t.Run(tc.Name, func(t *testing.T) {
+			v, w := tc.Input, tc.Expect
+			sid := v.bytes(t, "sid")
+			g, err := generator(v.bytes(t, "prs"), v.bytes(t, "ci"), sid)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ya := v.scalar(t, "ya")
+			a, b := multiply(ya, g), multiply(v.scalar(t, "yb"), g)
+			k, err := sharedPoint(ya, b[:])
+			if err != nil {
+				t.Fatal(err)
+			}
+			key := isk(sid, k[:], a[:], nil, b[:], nil)
+			digest := commitment(a)
+			tags := confirmationTags(Binding{Exporter: [32]byte(sid)}, k, a, b)
+			w.check(t, "commit", digest[:])
+			w.check(t, "isk", key[:])
+			w.check(t, "ta", tags.client[:])
+			w.check(t, "tb", tags.operator[:])
+			if tags.sas != w.text(t, "sas") {
+				t.Fatalf("unexpected SAS %q", tags.sas)
+			}
+			msgs := []any{
+				proto.PakeCommit{Value: digest},
+				proto.PakeShareB{Value: b},
+				proto.PakeShareA{Value: a},
+				proto.PakeConfirmB{Value: tags.operator},
+				proto.PakeConfirmA{Value: tags.client},
+				proto.PairDecision{Accepted: true, Reason: "accepted"},
+			}
+			for i, msg := range msgs {
+				var frame bytes.Buffer
+				if err := proto.Write(&frame, msg); err != nil {
+					t.Fatal(err)
+				}
+				w.check(t, fmt.Sprintf("cbor%d", 11+i), frame.Bytes()[4:])
+			}
+		})
+	}
+}

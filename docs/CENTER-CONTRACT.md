@@ -1,6 +1,6 @@
 # 中心契约 v1
 
-记录日期：2026-11-19（第八版 2026-11-20 增补自建 Hub 模式）。状态：已定稿，尚未实现。本文把 [CENTER-PROTOCOL](CENTER-PROTOCOL.md) 的约束落成可实现的接口：中心 HTTPS API、请求签名、连接票据、Hub 验签、租约与占位、首次配对的消息流程和错误码。第 10 节是配对消息编号、编码与状态机的唯一权威定义；[PAKE 选型](research/pake-selection.md) 只保留选型理由与安全分析。中心服务端可以用任意语言和存储实现，Go 端（Hub、Client、Operator）按本文接入。第 14 节的参数于 2026-11-19 确定。
+记录日期：2026-11-19（第八版 2026-11-20 增补自建 Hub 模式；第九版 2026-11-20 按一致性向量澄清边界）。状态：已定稿（第九版）。V1–V15 一致性向量已发布于 `testdata/conformance/`（见 [CONFORMANCE](CONFORMANCE.md)），Go 端的码规范化、请求签名与中心票据编解码已实现；中心 API 接入与 Hub 中心模式尚未实现（R5）。本文把 [CENTER-PROTOCOL](CENTER-PROTOCOL.md) 的约束落成可实现的接口：中心 HTTPS API、请求签名、连接票据、Hub 验签、租约与占位、首次配对的消息流程和错误码。第 10 节是配对消息编号、编码与状态机的唯一权威定义；[PAKE 选型](research/pake-selection.md) 只保留选型理由与安全分析。中心服务端可以用任意语言和存储实现，Go 端（Hub、Client、Operator）按本文接入。第 14 节的参数于 2026-11-19 确定。
 
 本文不涉及支付、定价、套餐或任何具体部署。管理端只向中心写入两类与收费相关的事实：账号有效期和并发额度。本文不修改现有 `renet1:` 邀请码、Settings 或 Hub 外层协议 v1（[internal/hub/PROTOCOL.md](../internal/hub/PROTOCOL.md)）；session 控制消息只新增第 10.2 节的消息编号，以及自建模式的 17 `HubTicket` 与能力 `hub-ticket/1`（[SELFHOST §6.4](SELFHOST.md#64-设备票下发消息-17-hubticket)），中心模式不使用它们。
 
@@ -85,13 +85,16 @@ SAS 只防中间人，不防猜中数字码的人抢占接待：猜中者知道�
 
 - 管理员开户或重置时由 CSPRNG 生成 40 位随机数，编码为 8 个 Crockford base32 符号（字母表 `0123456789ABCDEFGHJKMNPQRSTVWXYZ`），显示为 `XXXX-XXXX`。
 - 规范化：去掉 `-` 和空白，转大写，`I`、`L` 视为 `1`，`O` 视为 `0`；含 `U` 或其他字符即为格式错误，客户端直接提示，不发请求。
+  - 空白指 Unicode White_Space 属性集合，与 Go `unicode.IsSpace` 一致（含 U+0085、U+00A0、U+3000 等）。U+FEFF、U+200B 和 U+001C–U+001F 不属于空白，出现即为非法字符。
+  - 转大写只做 ASCII 大小写折叠（`a`–`z` → `A`–`Z`），不做 Unicode 折叠：`ſ`、全角字母等一律为非法字符。
+  - 格式错误分两种：含字母表以外的字符为字符错误；去掉分隔符后不是恰好 8 个符号为长度错误。两者同时成立（例如超长且含非法字符）时报字符错误。
 - 在所有未删除账号中唯一，只在 Operator 设备首次登录时输入，客户端不保存。
 - 重置账号码：吊销该账号全部设备记录，这些设备的非 `ended` 会话以 `device_revoked` 结束。
 
 ### 4.2 数字码
 
 - 中心用 CSPRNG 拒绝采样生成 `00000000`–`99999999` 的均匀值，按字符串处理，保留前导零，显示为 `XXXX XXXX`。
-- 规范化：去掉空白和 `-`，全角数字转为 ASCII；结果必须恰好 8 个 ASCII 数字。
+- 规范化：去掉空白和 `-`，全角数字转为 ASCII；结果必须恰好 8 个 ASCII 数字。空白的定义同第 4.1 节；只转换全角数字 `０`–`９`，其他数字字符（如阿拉伯-印度数字）为非法字符。错误同样分为字符错误与长度错误，同时成立时报字符错误。
 - 绑定一个会话，有效期 `code_ttl`，只能兑换一次，**兑换成功即核销**：码记录随之删除，之后同一个码对任何人都无效。码同时是两端的 PAKE 口令（第 10 节），Client 只把它保存在内存中，配对完成或会话结束后丢弃。
 - 码到期只结束尚未兑换的会话；已兑换的会话由配对期限和后续规则约束。
 
@@ -104,7 +107,7 @@ SAS 只防中间人，不防猜中数字码的人抢占接待：猜中者知道�
 | 请求头 | 内容 |
 |---|---|
 | `Renet-Device-Key` 或 `Renet-Node-Id` | 设备公钥（base64url），或节点的 `node_id` |
-| `Renet-Timestamp` | Unix 秒，按第 6.4 节校正后的时间 |
+| `Renet-Timestamp` | Unix 秒，按第 6.4 节校正后的时间。无符号十进制，无前导零（`0` 本身除外），无 `+` 号，否则 `bad_request` |
 | `Renet-Client` | `<role>/<app_version>`（第 6.1 节） |
 | `Renet-Nonce` | 可选，16 字节随机数，base64url（第 6.5 节） |
 | `Idempotency-Key` | 写请求必带（第 6.3 节） |
@@ -118,8 +121,12 @@ SAS 只防中间人，不防猜中数字码的人抢占接待：猜中者知道�
 
 `kind` 为 `"device"` 或 `"node"`；`principal` 为设备公钥或 `node_id` 的字节串；`method` 为大写文本；`path_and_query` 为请求目标规范形式的字节（见下）；`renet_client` 为该头的值；`nonce` 为字节串，没有则为空串；`idempotency_key` 为文本，没有则为空串；`body` 为原始请求体字节，没有则为空串。
 
-- 中心检查时间戳在 `request_window` 内，然后验签：设备请求用头中的公钥，节点请求用激活时登记的公钥。
-- 请求目标的规范形式：按 WHATWG URL 标准解析后序列化的 pathname，后接 search；只有 `?` 而没有查询串时视为没有查询，片段从不发送。已有的百分号编码按原样保留（不改大小写、不解码）。客户端必须按规范形式发送请求目标并对它签名。中心所在的 HTTP 栈只提供规范化之后的 URL，非规范形式（如含 `.`、`..` 段或末尾裸 `?`）到达中心时已被改写，验签随之失败（第 15 节 V3 反例）。
+- 中心检查时间戳在 `request_window` 内（闭区间，见第 6.4 节），然后验签：设备请求用头中的公钥，节点请求用激活时登记的公钥。
+- 请求目标的规范形式：按 WHATWG URL 标准解析后序列化的 pathname，后接 search；只有 `?` 而没有查询串时视为没有查询，片段从不发送。已有的百分号编码按原样保留（不改大小写、不解码）。客户端必须按规范形式发送请求目标并对它签名。中心所在的 HTTP 栈只提供规范化之后的 URL，非规范形式（如含 `.`、`..` 段或末尾裸 `?`）到达中心时已被改写，验签随之失败（第 15 节 V3 反例）。具体规则：
+  - 允许的字节：本协议的请求目标只允许不需要百分号编码的 ASCII 字符，即字母、数字和 `-._~!$&()*+,/:;=?@`，以及完整的 `%XX` 转义（`X` 为十六进制数字，大小写不限）。其余字节都视为需要编码，包括空格、`"`、`<`、`>`、`` ` ``、`{`、`}`、`|`、`\`、`^`、`[`、`]`、`'`、控制字符和非 ASCII（其中 `'`、`[`、`]` 等 WHATWG 未必编码，本协议同样不接受）；它们和不完整的转义（如末尾的 `%`、`%4`、`%zz`）一律不合法：客户端规范化时报错、不发送，中心收到时返回 `bad_request`。
+  - 点段：pathname 按 `/` 切段，`%2e` / `%2E` 视为 `.` 后构成完整的 `.` 或 `..` 段时按点段处理（`.` 删除；`..` 删除前一段，已在根时不动；点段位于末尾时保留末尾的 `/`）。其余转义原样保留，例如 `%2efile`、`%2F` 不变。
+  - 连续斜杠保留空段，例如 `/v1//nodes//` 不变。查询串原样保留，不处理其中的点或转义。
+  - 中心对收到的请求目标先规范化，再用规范化的结果验签。客户端若对非规范形式签名，签名目标与中心规范化后的目标不同，表现为验签失败 `unauthenticated`。
 - 上表中的任何一个头出现多次，中心返回 `bad_request`。有的 HTTP 栈会把重复头合并成以 `, ` 连接的一个值；上表各头的合法取值都不含逗号，中心把含逗号的值按重复头处理。
 - 除 `GET /v1/meta` 外没有免签名的端点，也没有单独的健康检查端点；探活使用 `GET /v1/meta`。
 - 入口代理必须原样转发请求方法、请求目标、请求体和上表各头，不得改写、合并或补加。代理若需要路径前缀，由中心在验签前按配置还原为客户端发出的请求目标（规范形式）。
@@ -180,6 +187,7 @@ SAS 只防中间人，不防猜中数字码的人抢占接待：猜中者知道�
 
 ### 6.4 时间
 
+- 第 5.1 节的时间窗为闭区间：`|server_time − timestamp| ≤ request_window` 时接受（等号接受，超前与滞后对称），超出即超窗。
 - 设备请求的时间戳超出 `request_window` 时，中心返回 `clock_skew`，`details.server_time` 为中心时间。客户端记下偏移量，校正后重新签名重发（同一个幂等键）。`GET /v1/meta` 也返回 `server_time`。
 - Hub 必须校时。心跳响应带 `server_time`；Hub 发现偏差超过 `clock_skew` 时记录错误并拒绝新准入，直到偏差恢复。
 
@@ -377,7 +385,7 @@ Session 对象：
 | 键 | 字段 | 类型 | 说明 |
 |---|---|---|---|
 | 1 | `v` | uint | `1` = 中心票据。`2` 是自建票据（[SELFHOST §3](SELFHOST.md#3-自建票据v--2)），字段集与准入规则不同；中心模式的 Hub 按第 8.4 节第 5 步拒绝 `v ≠ 1` |
-| 2 | `center` | tstr ≤ 32 | `center_id` |
+| 2 | `center` | tstr ≤ 32 | `center_id`，字符集 `[a-z0-9.-]{1,32}`（与第 1 节一致），不符按第 8.4 节第 5 步拒绝 |
 | 3 | `acct` | bstr 16 | `account_id`（不是账号码） |
 | 4 | `dev` | bstr 32 | 持票设备指纹 |
 | 5 | `role` | uint | `1` = dial（Client），`2` = wait（Operator），与 `hub.RoleDial` / `hub.RoleWait` 数值一致 |
@@ -391,7 +399,7 @@ Session 对象：
 | 13 | `jti` | bstr 16 | 票据唯一标识 |
 | 14 | `gen` | uint ≤ 2³²−1 | 节点代次 |
 
-中心签发时取 `iat = nbf = 当前时间`，`exp = min(iat + ticket_ttl, 硬截止 − 2 × clock_skew)`。时间关系：`iat ≤ nbf < exp`，`exp − iat ≤ ticket_max_ttl`。键 1–63 为约束字段，验证方遇到不认识的约束键必须拒绝；键 ≥ 64 留给不影响准入的信息字段，验证方忽略。改变准入语义只能升 `v`。键 15 `pair_until`、16 `bearer` 只在 `v = 2` 中定义，中心票据中出现即按未知约束键拒绝。
+中心签发时取 `iat = nbf = 当前时间`，`exp = min(iat + ticket_ttl, 硬截止 − 2 × clock_skew)`。签发方必须按该公式计算 `exp`；算出的 `exp ≤ iat`（距硬截止不超过 `2 × clock_skew`）或 `exp − iat > ticket_max_ttl` 时不签发。验证方不知道硬截止，只按 `ticket_max_ttl` 检查上限（第 8.4 节第 9 步）。时间关系：`iat ≤ nbf < exp`，`exp − iat ≤ ticket_max_ttl`。`iat`、`nbf`、`exp` 与 `gen` 一样取值不超过 2³²−1，超出按第 8.4 节第 5 步拒绝。键 1–63 为约束字段，验证方遇到不认识的约束键必须拒绝；键 ≥ 64 留给不影响准入的信息字段，验证方忽略。改变准入语义只能升 `v`。键 15 `pair_until`、16 `bearer` 只在 `v = 2` 中定义，中心票据中出现即按未知约束键拒绝。
 
 ### 8.3 尺寸上限
 
@@ -420,10 +428,10 @@ Session 对象：
 中心模式的 Hub 对每个入站请求先在路由锁外完成第 1–9 步，任何一步失败都回 `unauthorized`（状态 3）并关闭连接，原因只写调试日志：
 
 1. token 非空。中心模式下不启用内嵌交接，也不接受空 token。
-2. 严格解码：tag 18，4 元素数组，定长，无重复键，嵌套深度有界；protected 恰为 `{1: -8, 4: kid}`；unprotected 为空；signature 为 64 字节。
+2. 严格解码：tag 18，4 元素数组，定长，无重复键，嵌套深度有界；protected 恰为 `{1: -8, 4: kid}`；unprotected 为空；signature 为 64 字节。protected 与 payload 都不得有重复键：protected 的重复键在本步拒绝；payload 在验签前不解码，它的重复键由第 5 步的严格解码拒绝。超过 1024 字节的 token 也在本步拒绝。
 3. `kid` 在本节点配置的验签公钥中。
 4. Ed25519 验签。验签通过之前不解释 payload。
-5. payload 严格解码；`v == 1`；必需字段齐全且类型与长度准确；没有未知约束键。
+5. payload 严格解码（确定性编码，无重复键）；`v == 1`；必需字段齐全且类型与长度准确；没有未知约束键。
 6. `center`、`node`、`hub` 分别等于本节点配置的 `center_id`、`node_id` 和本节点身份指纹；`gen` 等于本进程激活得到的代次。
 7. `dev` 等于本连接 TLS 客户端证书算出的设备指纹。
 8. `role` 等于路由头 role；`peer` 等于路由头 target（非零）。wait 方必须带非零 target。
@@ -550,6 +558,7 @@ Hub 收到 `revoke` 后，在路由锁内一次完成：把 `session_id` 放进�
 - `HC`、`HO` 是本条控制流上 Client 发出、Operator 发出的 `Hello` 帧的**原始字节**（含 4 字节长度前缀），按收发的原样捕获，不得解码后重新编码。
 - `fp_client`、`fp_operator` 取各端在内层 TLS 握手中**实际看到的证书**的指纹。两端以中心给出的对端指纹作为内层 `Expect`，不一致时 TLS 即失败，不进入 PAKE，也不扣预算。
 - `hub_fp` 取外层钉住的 Hub 指纹，`center_id` 取本地配置，`session_id` 为 16 字节原始值。两端各自独立取得，不由对方提供。
+- 三种配对能力的绑定字段组合：CI 的前八个字段相同，之后按能力追加。`pair-direct/1`：`hub_fp`、`center_id`、`session_id` 均为零值（全零或空串），不追加（第 10.6 节）。`pair-hub/1`：`hub_fp` 非零，`center_id`、`session_id` 为零值，只追加 `hub_fp`（第 10.7 节）。`pair-center/1`：`hub_fp` 非零、`center_id` 符合第 1 节字符集、`session_id` 不全为零，按 `hub_fp`、`center_id`（ASCII 字节）、`session_id` 的顺序追加。组合不符时不构造 CI，也不开始 PAKE。
 - `renet-pake-v1` 同时标识草案 -21 与本契约的绑定方式。草案或 RFC 定稿后若有不兼容变化，改用新的标签与能力名，不在 v1 下改含义。
 - 每次尝试都生成新的标量，状态只用一次；拒绝非规范编码的点和单位元。`ISK`、`Ta`、`Tb` 按草案 §10.4 计算：`mac_key = SHA-512("CPaceMac" ‖ sid ‖ ISK)`，`Tb = HMAC-SHA-512(mac_key, lv_cat(Yb, ADb))`，`Ta = HMAC-SHA-512(mac_key, lv_cat(Ya, ADa))`，标签 64 字节，用常量时间比较。ISK 不用作流量密钥。
 
@@ -790,33 +799,33 @@ Hub 需要的值经激活和心跳响应下发；Operator / Client 本地参数�
 
 ## 15. 一致性测试向量计划
 
-对应 [CENTER-PROTOCOL 第 11 节](CENTER-PROTOCOL.md#11-一致性测试要求)。下列向量在实现时生成并发布，本文只列清单。向量使用固定的测试密钥与固定时间。Go 端测试只用 loopback、`net.Pipe` 和内存传输，中心由内存假实现替代；中心实现自身另须对真实数据库跑 C1、C2、C9、C10 的并发写入场景，验证唯一约束与条件写，内存假实现不能替代这一项。
+对应 [CENTER-PROTOCOL 第 11 节](CENTER-PROTOCOL.md#11-一致性测试要求)。V1–V15 已发布于 [`testdata/conformance/`](../testdata/conformance/)，发布格式、各文件字段与 `reason` 枚举见 [CONFORMANCE](CONFORMANCE.md)；V16 随 SELFHOST 发布。S、P、C 组场景需要 Hub 中心模式与中心假实现，属于 R5。向量使用固定的测试密钥与固定时间。Go 端测试只用 loopback、`net.Pipe` 和内存传输，中心由内存假实现替代；中心实现自身另须对真实数据库跑 C1、C2、C9、C10 的并发写入场景，验证唯一约束与条件写，内存假实现不能替代这一项。
 
 **编码与签名向量**
 
+| 编号 | 内容 | 发布文件 |
+|---|---|---|
+| V1 | 账号码规范化：大小写、`I`/`L`/`O` 替换、`-` 与空白、含 `U` 的非法输入；空白边界（U+0085、U+3000 等 White_Space 接受，U+FEFF、U+200B、U+001C–U+001F 拒绝）；只做 ASCII 大小写折叠；长度错误与字符错误分别标注，同时成立时为字符错误 | `v01-account-code.json` |
+| V2 | 数字码规范化：前导零、空格分组、全角数字、7 位与 9 位非法输入；空白边界同 V1；其他数字字符为非法字符 | `v02-numeric-code.json` |
+| V3 | 请求签名：设备与节点各一例，含查询串、空请求体、带与不带 nonce 和幂等键（节点公钥取激活登记值）；`Renet-Client` 被改动后验签失败；请求目标规范化对照表（含需要编码的字节与不完整转义被拒、`%2e` 点段、连续斜杠），以及按非规范请求目标签名时验签失败；时间窗等号边界（±60 秒接受，±61 秒 `clock_skew`）；`Renet-Timestamp` 带 `+` 号或前导零为 `bad_request` | `v03-request-signature.json` |
+| V4 | 合法票据：payload、protected、Sig_structure、完整票据字节、签名与长度（最大尺寸一例）；硬截止夹取 `exp`、`exp − iat = ticket_max_ttl` 的等号边界 | `v04-ticket.json` |
+| V5 | `kid` 推导 | 并入 `v04-ticket.json` |
+| V6 | 直连、自建 Hub 与中心三种模式的 CI 字节（`CPACE-RISTR255-SHA512`，含双方 Hello 原始帧的 SHA-256） | `v06-pake-ci.json` |
+| V7 | 三种模式各一轮：配对消息 11–16 的 CBOR 编码；承诺、ISK、Tb、Ta（HMAC-SHA-512）与 6 位 SAS（含前导零一例）；CPace 层可与草案 -21 附录 B.3 向量对照 | `v07-pairing-messages.json` |
+| V16 | 自建票据（`v = 2`）的向量，见 [SELFHOST 第 10 节](SELFHOST.md#10-测试计划)。「`v = 2` 票据被中心验证器拒绝」已由 V10 的 `v10-selfhost-v2` 用例覆盖 | `internal/ticket/testdata/` |
+
+**票据拒绝向量**（期望 `unauthorized`；V8–V15 合并发布于 `v08-ticket-reject.json`，每例标明拒绝步骤）
+
 | 编号 | 内容 |
 |---|---|
-| V1 | 账号码规范化：大小写、`I`/`L`/`O` 替换、`-` 与空白、含 `U` 的非法输入 |
-| V2 | 数字码规范化：前导零、空格分组、全角数字、7 位与 9 位非法输入 |
-| V3 | 请求签名：设备与节点各一例，含查询串、空请求体、带与不带 nonce 和幂等键；`Renet-Client` 被改动后验签失败；请求目标规范化对照表，以及按非规范请求目标签名时验签失败 |
-| V4 | 合法票据：payload、protected、Sig_structure、完整票据字节、签名与长度（最大尺寸一例） |
-| V5 | `kid` 推导 |
-| V6 | 中心模式与直连模式的 CI 字节（`CPACE-RISTR255-SHA512`，含双方 Hello 原始帧的 SHA-256） |
-| V7 | 配对消息 11–16 的 CBOR 编码；承诺、ISK、Tb、Ta（HMAC-SHA-512）与 6 位 SAS（含前导零一例）；CPace 层可与草案 -21 附录 B.3 向量对照 |
-| V16 | 自建票据（`v = 2`）的向量，见 [SELFHOST 第 10 节](SELFHOST.md#10-测试计划)。R5 实现中心验证器时，需要补充「`v = 2` 票据被中心 Hub 拒绝」的向量 |
-
-**票据拒绝向量**（期望 `unauthorized`）
-
-| 编号 | 内容 |
-|---|---|
-| V8 | 篡改签名；篡改 payload 一个字节；未知 `kid` |
+| V8 | 篡改签名；篡改 payload 一个字节；签名后把 payload 换成另一份合法 CBOR（改 `role`），第 4 步拒绝；未知 `kid`；payload 重复键（签名有效，第 5 步拒绝） |
 | V9 | protected 多一个键；unprotected 非空；缺 tag 18；不定长编码；重复键 |
 | V10 | `v = 2`；未知约束键（< 64）；另有一张带未知信息键（≥ 64）的票据应当接受 |
 | V11 | `center`、`node`、`hub`、`gen` 各不匹配 |
 | V12 | `dev` 不等于 TLS 指纹 |
 | V13 | `role` 与路由头不符；`peer` 与 target 不符；wait 方 target 为零 |
 | V14 | 时间：`exp + clock_skew` 前后 1 秒；`nbf` 在未来；`iat` 超前超过 `clock_skew`；`exp − iat` 超过上限；`nbf ≥ exp`；`iat > nbf`；接近 uint32 上界的时间值 |
-| V15 | 超过 1024 字节的 token |
+| V15 | 超过 1024 字节的 token（恰好 1024 字节接受，1025 字节在第 2 步拒绝）；空 token（第 1 步） |
 
 **Hub 行为场景**
 
@@ -1020,3 +1029,18 @@ community 分支 `continue-planned-work` 已独立实现 R2 直连数字配对�
 | 自建 · 第 15 节 | 新增 V16，指向 SELFHOST 第 10 节的自建票据向量，并注明 R5 需补「`v = 2` 票据被中心 Hub 拒绝」的向量 |
 | 自建 · 第 16 节 | 准入接口的示意名 `Admission` 改为 R3 计划落地的 `hub.Policy` / `hub.Grant` / `Server.SetPolicy`；中心模式的策略在 `Grant` 中携带 `sid`、`jti` 与 `exp` |
 | 自建 · 第 17 节 | 改写为自建模式使用 `v = 2` 票据：无代次、心跳、租约与 `jti` 消费，撤销经 Hub 配置重载生效，参数由自建者设定 |
+
+### 2026-11-20 第九版：一致性向量（R4）
+
+发布 V1–V15 一致性向量（[CONFORMANCE](CONFORMANCE.md)）并经独立审查后，把向量与 Go 实现已经采用、原文没有写明的边界补进正文。全部是澄清，不改变已有语义；向量头的 `contract_version` 为 `v1.9`：
+
+| 编号 | 处理 |
+|---|---|
+| 向量 1 · 码的空白与字符 | 第 4.1、4.2 节写明「空白」为 Unicode White_Space 属性集合（与 Go `unicode.IsSpace` 一致），U+FEFF、U+200B、U+001C–U+001F 不算空白、出现即为非法字符；账号码只做 ASCII 大小写折叠；数字码只转换全角数字。格式错误分为字符错误与长度错误，同时成立时报字符错误（向量 `reason` 为 `4.1/character`、`4.1/length` 等） |
+| 向量 2 · 请求目标 | 第 5.1 节写明请求目标只允许不需要百分号编码的 ASCII 字符（列出字符集）与完整的 `%XX` 转义；需要编码的字节和不完整转义在客户端规范化时报错，中心收到时返回 `bad_request`。中心先规范化再验签，客户端对非规范形式签名表现为 `unauthenticated`。`%2e` / `%2E` 构成完整点段时按点段处理，其余转义原样保留；连续斜杠保留空段；查询串原样保留 |
+| 向量 3 · 时间戳文本 | 第 5.1 节 `Renet-Timestamp` 一行写明为无符号十进制、无前导零、无 `+` 号，否则 `bad_request` |
+| 向量 4 · 时间窗边界 | 第 6.4 节写明时间窗为闭区间 `\|server_time − timestamp\| ≤ request_window`，等号接受，超前与滞后对称；第 5.1 节引用之。`request_window` 仍为第 14 节的 60 秒 |
+| 向量 5 · 票据 `center` 与 `exp` | 第 8.2 节 `center` 一行注明字符集 `[a-z0-9.-]{1,32}`，不符在第 8.4 节第 5 步拒绝；表后写明签发方必须按公式计算 `exp`，`exp ≤ iat` 或超过 `ticket_max_ttl` 时不签发，验证方只按 `ticket_max_ttl` 检查上限；时间字段与 `gen` 一样不超过 2³²−1 |
+| 向量 6 · 重复键与尺寸 | 第 8.4 节第 2 步写明 protected 与 payload 都不得有重复键：protected 的在第 2 步拒绝，payload 在验签前不解码，它的重复键由第 5 步拒绝（第 5 步补「确定性编码，无重复键」）；超过 1024 字节的 token 在第 2 步拒绝 |
+| 向量 7 · 配对绑定字段 | 第 10.1 节写明三种配对能力的绑定字段组合与零值规则：`pair-direct/1` 三项均为零值；`pair-hub/1` 只有 `hub_fp` 非零；`pair-center/1` 三项都必须有效，按 `hub_fp`、`center_id`（ASCII 字节）、`session_id` 顺序追加。与第 10.6、10.7 节的 CI 一致 |
+| 向量 8 · 向量计划 | 第 15 节注明 V1–V15 已发布于 `testdata/conformance/`，每组标出发布文件；V6/V7 覆盖直连、自建 Hub、中心三种模式；补入本轮新增的覆盖点（V1/V2 空白边界、V3 时间窗与时间戳文本、V4 硬截止夹取与 TTL 等号边界、V8 payload 重复键与签名后的合法 CBOR 篡改、V15 的 1024 字节边界）；V16 一行注明「`v = 2` 票据被中心验证器拒绝」已由 `v10-selfhost-v2` 覆盖。开头的状态行同步为第九版 |

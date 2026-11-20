@@ -1,0 +1,1234 @@
+{
+  "format": 1,
+  "contract": "CENTER-CONTRACT v1 第九版（2026-11-20）",
+  "contract_version": "v1.9",
+  "vector": "V8–V15",
+  "title": "中心票据准入边界",
+  "generator": "gen/ticket.py",
+  "cases": [
+    {
+      "name": "v8-signature",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058d8ae0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a584014a280172b03a3b5b42e5714ea9f6e4d08b2caa2949b0d5b8f1fa9ee8f930990de61c2facd583ecba9490463120c92901dd5f32fc5e5eea6d58b609cfec83604",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/4"
+      }
+    },
+    {
+      "name": "v8-payload-byte",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058d8ff0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a584014a280172b03a3b5b42e5714ea9f6e4d08b2caa2949b0d5b8f1fa9ee8f930990de61c2facd583ecba9490463120c92901dd5f32fc5e5eea6d58b609cfec83605",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/4"
+      }
+    },
+    {
+      "name": "v8-modified-role",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058d8ae0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050206582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a584014a280172b03a3b5b42e5714ea9f6e4d08b2caa2949b0d5b8f1fa9ee8f930990de61c2facd583ecba9490463120c92901dd5f32fc5e5eea6d58b609cfec83605",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/4"
+      }
+    },
+    {
+      "name": "v10-duplicate-payload-key",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058dbaf0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a0e182a584019697c69f39a01522779497c86b2da4b93436b0faa16b024707644758f0a550534135c47d141c308fe322b5fbc6eb91229bfa982eb59acd38416aac1ae1c5207",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/5"
+      }
+    },
+    {
+      "name": "v8-unknown-kid",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058d8ae0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a584014a280172b03a3b5b42e5714ea9f6e4d08b2caa2949b0d5b8f1fa9ee8f930990de61c2facd583ecba9490463120c92901dd5f32fc5e5eea6d58b609cfec83605",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "40a5df9d53a72f10",
+              "public_key": "b01a6d5bcafb46f5499121df645baa5b375bce3b96bcc867ce85cbc42ad2043d"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/3"
+      }
+    },
+    {
+      "name": "v9-extra-protected",
+      "input": {
+        "token": "d2844fa301270448b0a644d9ca60277a0700a058d8ae0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a5840ab1ac6bcf824fe078fef30b849147a365316a830d5eed4cb151c59c27a30f56180c3d12227a1d626c0273177a6f650f038bd90fb2c3b2ecc88de9582a7d27308",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/2"
+      }
+    },
+    {
+      "name": "v9-duplicate-key",
+      "input": {
+        "token": "d28457a301270448b0a644d9ca60277a0448b0a644d9ca60277aa058d8ae0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a58402dc657c0b8e2272fc8d077e178ade867b17861f979c4c3ee7d63035e0c77ad67c21cf411676cbc1c2a35d019f4d6fe346cd75b13fdb53018f6093f9b50270807",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/2"
+      }
+    },
+    {
+      "name": "v9-unprotected",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa1070158d8ae0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a584014a280172b03a3b5b42e5714ea9f6e4d08b2caa2949b0d5b8f1fa9ee8f930990de61c2facd583ecba9490463120c92901dd5f32fc5e5eea6d58b609cfec83605",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/2"
+      }
+    },
+    {
+      "name": "v9-missing-tag",
+      "input": {
+        "token": "844da201270448b0a644d9ca60277aa058d8ae0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a584014a280172b03a3b5b42e5714ea9f6e4d08b2caa2949b0d5b8f1fa9ee8f930990de61c2facd583ecba9490463120c92901dd5f32fc5e5eea6d58b609cfec83605",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/2"
+      }
+    },
+    {
+      "name": "v9-indefinite",
+      "input": {
+        "token": "d29f4da201270448b0a644d9ca60277aa058d8ae0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a584014a280172b03a3b5b42e5714ea9f6e4d08b2caa2949b0d5b8f1fa9ee8f930990de61c2facd583ecba9490463120c92901dd5f32fc5e5eea6d58b609cfec83605ff",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/2"
+      }
+    },
+    {
+      "name": "v9-nonminimal-tag",
+      "input": {
+        "token": "d812844da201270448b0a644d9ca60277aa058d8ae0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a584014a280172b03a3b5b42e5714ea9f6e4d08b2caa2949b0d5b8f1fa9ee8f930990de61c2facd583ecba9490463120c92901dd5f32fc5e5eea6d58b609cfec83605",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/2"
+      }
+    },
+    {
+      "name": "v10-selfhost-v2",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa05892a90102045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d0158409835d6b52374806e52228afaefa4ebd0c779fc3a2b588147b87a34e627a2b42def0658988cf7c32134c8631c469d4d527e9938584238007c8cb89246b5c5aa07",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/5"
+      }
+    },
+    {
+      "name": "v10-constraint",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058deaf0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a0f1a6afd86c058401c6559f5afd8d70cc3288c50b9ffce28dac269eb280928b7e876adb7404826046d5553c160350c265591b4db2ff7240daf89e64a3e28c2bd4903964f515ba101",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/5"
+      }
+    },
+    {
+      "name": "v10-information",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058e7af0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a1840a166736f75726365647465737458409c029e4db0eecb98ee441567e0b741b63d7e29fd120adaee1a1896bb1c4885a77199dffd243382d5532e77e7dc932043f44c530c315c5e95f68fa49c2b09f60f",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "accept"
+      }
+    },
+    {
+      "name": "v10-missing-account",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058c6ad0101026b746573742e63656e746572045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a584083f47b701d2e650b41844fd48319e0b66786c30b28579d8533cb9b85859a0dab5817e02703d47ba78dc067bbd1dc6eb4712803a84e8e485530ee32eb68d7cb02",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/5"
+      }
+    },
+    {
+      "name": "v10-center-alphabet",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058d1ae01010264544553540350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a5840396edb95e8a127e8ecbfab84b8a91fed2ef8629decc6ea3950c234557a05a66c528e6f40a75fb46eae3201a9167de7919d68a398353d479d2522da0813628e08",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/5"
+      }
+    },
+    {
+      "name": "v10-short-node",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058d7ae0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b0084f000000000000000000000000000000095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a584061b7e0a5a6d4b01819f3d889bce02397b003e5768bc20542a3cb18ca900b5c75d8fc14ff29f01a5a2f679459421dba295ec374297e17beef0e2d3c7830595601",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/5"
+      }
+    },
+    {
+      "name": "v10-role-type",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058d8ae0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf19005f506582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a58408910622e9e0ae76a0b481232d1cf074b4a75870849306dbc054b6734da1e3fa11c1dc7dd442958d7c384abac711df896534d36d99c0525cb3901fc99a91b8e0e",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/5"
+      }
+    },
+    {
+      "name": "v10-generation-overflow",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058dfae0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e1b00000001000000005840dda33abd1dfcec6dcd0d88d8fd267f2f5c08754e64eeb41a7a36cd69333c5520c1798768761a240f38d33be92d0acbb594903b9cf07391a9c1c0c91b651ea70f",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/5"
+      }
+    },
+    {
+      "name": "v10-nonminimal-version",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058d9ae011801026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a5840c0475762d63b4f82feeef4d6e0596c611a798d766ff9a89f996c5e4338685b7c51db80d71868f4a213f3f1a1a0d1381681d6e40e74086f9985e69c69d52d600f",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/5"
+      }
+    },
+    {
+      "name": "v11-center",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058d8ae0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a584014a280172b03a3b5b42e5714ea9f6e4d08b2caa2949b0d5b8f1fa9ee8f930990de61c2facd583ecba9490463120c92901dd5f32fc5e5eea6d58b609cfec83605",
+        "config": {
+          "center_id": "other",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/6"
+      }
+    },
+    {
+      "name": "v11-node",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058d8ae0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a584014a280172b03a3b5b42e5714ea9f6e4d08b2caa2949b0d5b8f1fa9ee8f930990de61c2facd583ecba9490463120c92901dd5f32fc5e5eea6d58b609cfec83605",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "00000000000000000000000000000000",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/6"
+      }
+    },
+    {
+      "name": "v11-hub",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058d8ae0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a584014a280172b03a3b5b42e5714ea9f6e4d08b2caa2949b0d5b8f1fa9ee8f930990de61c2facd583ecba9490463120c92901dd5f32fc5e5eea6d58b609cfec83605",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "0000000000000000000000000000000000000000000000000000000000000000",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/6"
+      }
+    },
+    {
+      "name": "v11-gen",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058d8ae0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a584014a280172b03a3b5b42e5714ea9f6e4d08b2caa2949b0d5b8f1fa9ee8f930990de61c2facd583ecba9490463120c92901dd5f32fc5e5eea6d58b609cfec83605",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 43,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/6"
+      }
+    },
+    {
+      "name": "v12-device",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058d8ae0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a584014a280172b03a3b5b42e5714ea9f6e4d08b2caa2949b0d5b8f1fa9ee8f930990de61c2facd583ecba9490463120c92901dd5f32fc5e5eea6d58b609cfec83605",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/7"
+      }
+    },
+    {
+      "name": "v13-role",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058d8ae0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a584014a280172b03a3b5b42e5714ea9f6e4d08b2caa2949b0d5b8f1fa9ee8f930990de61c2facd583ecba9490463120c92901dd5f32fc5e5eea6d58b609cfec83605",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 2,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/8"
+      }
+    },
+    {
+      "name": "v13-peer",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058d8ae0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a584014a280172b03a3b5b42e5714ea9f6e4d08b2caa2949b0d5b8f1fa9ee8f930990de61c2facd583ecba9490463120c92901dd5f32fc5e5eea6d58b609cfec83605",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/8"
+      }
+    },
+    {
+      "name": "v13-wait-zero-target",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058d8ae0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac04582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c090502065820000000000000000000000000000000000000000000000000000000000000000007502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d50b8ec132ee7a681d5d611add7e90aea560e182a584067a371687bce28a9910b9b8493e78798cd7071eb03cd7d18e2586196df75e1dba80738fd4395221c684c4b3d76cbf67ca2bcb62f2ba55f4a164425da8d46c60c",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 2,
+          "target": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "tls_device": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/8"
+      }
+    },
+    {
+      "name": "v14-expiry-before",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058d8ae0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a584014a280172b03a3b5b42e5714ea9f6e4d08b2caa2949b0d5b8f1fa9ee8f930990de61c2facd583ecba9490463120c92901dd5f32fc5e5eea6d58b609cfec83605",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000149
+      },
+      "expect": {
+        "result": "accept"
+      }
+    },
+    {
+      "name": "v14-expiry-at",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058d8ae0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a584014a280172b03a3b5b42e5714ea9f6e4d08b2caa2949b0d5b8f1fa9ee8f930990de61c2facd583ecba9490463120c92901dd5f32fc5e5eea6d58b609cfec83605",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000150
+      },
+      "expect": {
+        "result": "accept"
+      }
+    },
+    {
+      "name": "v14-expiry-after",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058d8ae0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a584014a280172b03a3b5b42e5714ea9f6e4d08b2caa2949b0d5b8f1fa9ee8f930990de61c2facd583ecba9490463120c92901dd5f32fc5e5eea6d58b609cfec83605",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000151
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/9"
+      }
+    },
+    {
+      "name": "v14-nbf-future",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058d8ae0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86df0c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a5840aa28e10b9351625630297f2cc814f7b9fe6918394edba6f05dac9669611695116c5076eca12ee87e8849260144446222eb1c7e4c1dedad024f460b222b7e0204",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/9"
+      }
+    },
+    {
+      "name": "v14-iat-future",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058d8ae0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86df0b1a6afd86df0c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a5840c2b3fbe72e127fb5be6d4a132768a89623257eee31134a8f212ff2ec1a6b0bb72728a5b724a035ed1c03fb3bea3ef67f11b71ce1472dbf916a06f179b4953200",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/9"
+      }
+    },
+    {
+      "name": "v14-ttl",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058d8ae0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87ed0d5042de2be40093c3d8b62ecf52261e7d010e182a5840362c5a82d1e79cf3df83a837cae23acedb0840eaf833193ce83313d0e013d9e2242f2804ff46b745a6c96e24146393bb3ddf9618e74953f12c92c5a0d7a9b007",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/9"
+      }
+    },
+    {
+      "name": "v14-nbf-at-exp",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058d8ae0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd87380c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a58406e643059bbe8f698bcb6fc3a33b4620d9490d8cc17b79c0b515ad4a415e44295c4d6dddb902f41cc4083b4a816f922b249bc940a726184c9062ad452d4b2b809",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/9"
+      }
+    },
+    {
+      "name": "v14-iat-after-nbf",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058d8ae0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86bf0c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a58402a652676a1598cb90b27d2dd7c5b64db9ce5c139e17834ae4976cfc800ead0a6006985ae8ef42589dba9c0f331f985ab711c1d582dd7a8cdde3192e0209f1003",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/9"
+      }
+    },
+    {
+      "name": "v14-nbf-within-skew",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058d8ae0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86de0c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a5840f6819791edb2cfd95cd493cf82ab9872686a08538b9698da44282d4d75b92a4d2d6cd501cf889906cb6f8309f8179cdeace9f1ee13edb3120d4c819b7fb3af08",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "accept"
+      }
+    },
+    {
+      "name": "v14-uint32-upper",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058d8ae0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1affffff870b1affffff870c1affffffff0d5042de2be40093c3d8b62ecf52261e7d010e182a58409c10b1f7dc92094ebfb8a9d8d6cadf20aee4a4cb29c66e66c07f4a55e6d9ac87157e25e57c77c2f7dea62e712ca89c63348f52fc31864f1c90d0c5dec10c6b05",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 4294967325
+      },
+      "expect": {
+        "result": "accept"
+      }
+    },
+    {
+      "name": "v15-empty",
+      "input": {
+        "token": "",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/1"
+      }
+    },
+    {
+      "name": "v15-size-1024",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa05903aaaf0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a18405902cd0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005840c2e5a39ed4f790e778858031f45c668f7b851a416480651523e06bf5aa84f539cc972626dc0d7ceb3acf3d8995b1191c53639aa3055399d5d216e22d2ff3cf05",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "accept"
+      }
+    },
+    {
+      "name": "v15-size-1025",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa05903abaf0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a18405902ce000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005840b7fd37d5808d43623858ff02e04dc3132cc56d6fec3ee7dda11981a80e780e67b0d696e8e2861be463afba16951629509661d5cd2310676dd45db36888cba30a",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/2"
+      }
+    }
+  ]
+}

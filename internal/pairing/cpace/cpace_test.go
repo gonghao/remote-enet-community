@@ -167,18 +167,16 @@ func TestOutOfOrderAndReflectedConfirmation(t *testing.T) {
 }
 
 func TestInvalidCapabilityBinding(t *testing.T) {
-	for _, capability := range []string{"", "pair-center/1", proto.PairDirectCapability, proto.PairHubCapability} {
-		for _, fp := range [][32]byte{{}, {1}} {
-			b := testBinding()
-			b.Capability, b.HubFP = capability, fp
-			if capability == proto.PairDirectCapability && fp == [32]byte{} || capability == proto.PairHubCapability && fp != [32]byte{} {
-				continue
-			}
-			if _, _, err := Start(exampleCode, b); err != errBinding {
-				t.Errorf("Start(%q, %x): %v", capability, fp, err)
-			}
-			if _, _, err := Respond(exampleCode, b, [64]byte{}); err != errBinding {
-				t.Errorf("Respond(%q, %x): %v", capability, fp, err)
+	for _, cap := range []string{"", proto.PairDirectCapability, proto.PairHubCapability, proto.PairCenterCapability} {
+		for _, hub := range [][32]byte{{}, {1}} {
+			for _, center := range []string{"", "example", "INVALID"} {
+				for _, sid := range [][16]byte{{}, {1}} {
+					b := Binding{Capability: cap, HubFP: hub, CenterID: center, SessionID: sid}
+					valid := (cap == proto.PairDirectCapability && hub == [32]byte{} || cap == proto.PairHubCapability && hub != [32]byte{}) && center == "" && sid == [16]byte{} || cap == proto.PairCenterCapability && hub != [32]byte{} && center == "example" && sid != [16]byte{}
+					if _, err := b.ci(); (err == nil) != valid {
+						t.Errorf("cap=%q hub=%x center=%q sid=%x: %v", cap, hub, center, sid, err)
+					}
+				}
 			}
 		}
 	}

@@ -6,6 +6,9 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+	"unicode"
+
+	"remote-enet/internal/centercode"
 )
 
 // InputKind identifies which connection flow may use the parsed input.
@@ -60,46 +63,25 @@ func ParseInput(s string) (Input, error) {
 		return Input{Kind: Raw, Invite: i}, nil
 	}
 
-	fields := strings.Fields(s)
-	if _, ok := parseCode(fields); ok {
+	if _, err := centercode.NormalizeNumericCode(s); err == nil {
 		return Input{Kind: Center}, nil
 	}
-	if len(fields) == 0 {
+	if s == "" {
 		return Input{}, ErrInvalidCode
 	}
-	address, err := ParseAddress(fields[0])
+	addressInput, codeInput := s, ""
+	if split := strings.IndexFunc(s, unicode.IsSpace); split >= 0 {
+		addressInput, codeInput = s[:split], s[split:]
+	}
+	address, err := ParseAddress(addressInput)
 	if err != nil {
 		return Input{}, err
 	}
-	code, ok := parseCode(fields[1:])
-	if !ok {
+	code, err := centercode.NormalizeNumericCode(codeInput)
+	if err != nil {
 		return Input{}, ErrInvalidCode
 	}
 	return Input{Kind: Direct, Address: address, Code: code}, nil
-}
-
-func parseCode(fields []string) (string, bool) {
-	var digits [8]byte
-	n := 0
-	for _, field := range fields {
-		for _, r := range field {
-			if r == '-' {
-				continue
-			}
-			if r >= '０' && r <= '９' {
-				r = r - '０' + '0'
-			}
-			if r < '0' || r > '9' || n == len(digits) {
-				return "", false
-			}
-			digits[n] = byte(r)
-			n++
-		}
-	}
-	if n != len(digits) {
-		return "", false
-	}
-	return string(digits[:]), true
 }
 
 // ParseAddress returns the canonical form of a direct share address.

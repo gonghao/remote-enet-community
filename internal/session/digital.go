@@ -59,6 +59,9 @@ func admissionReason(err error) (cpace.Reason, bool) {
 }
 
 func (o Options) pairCapability() string {
+	if o.Center != nil {
+		return proto.PairCenterCapability
+	}
 	if o.HubFP.IsZero() {
 		return proto.PairDirectCapability
 	}
@@ -71,6 +74,9 @@ func (s *Session) digital(ctx context.Context, local, peer [32]byte) error {
 		return pairingFailure(ReasonInterrupted)
 	}
 	b := cpace.Binding{Capability: s.opts.pairCapability(), HubFP: s.opts.HubFP, Exporter: exp.PairingExporter(), ClientFP: s.opts.LocalFP, OperatorFP: s.Peer(), HelloClientHash: local, HelloOperatorHash: peer}
+	if center := s.opts.Center; center != nil {
+		b.HubFP, b.CenterID, b.SessionID = center.Hub, center.CenterID, center.Session
+	}
 	if s.opts.Role == RoleClient {
 		return s.digitalClient(ctx, b)
 	}
@@ -148,11 +154,17 @@ func (s *Session) digitalClient(ctx context.Context, b cpace.Binding) error {
 	if err != nil {
 		return pairingFailure(cpace.ReasonConfirmation)
 	}
+	if s.opts.Center != nil && s.opts.BeginClientAttempt != nil && !s.opts.BeginClientAttempt() {
+		return pairingFailure(cpace.ReasonBudgetExhausted)
+	}
 	if err = s.sendPair(proto.PakeCommit{Value: c}); err != nil {
 		return err
 	}
 	y, err := readPair[proto.PakeShareB](s.control)
 	if err != nil {
+		if r, ok := admissionReason(err); s.opts.Center != nil && ok && r != cpace.ReasonBudgetExhausted {
+			return pairingFailure(ReasonInterrupted)
+		}
 		return err
 	}
 	a, err := client.Reveal(y.Value)
@@ -173,15 +185,28 @@ func (s *Session) digitalClient(ctx context.Context, b cpace.Binding) error {
 	if err = s.sendPair(proto.PakeConfirmA{Value: ta}); err != nil {
 		return err
 	}
+	if s.opts.Center != nil {
+		return s.confirmCenterClient(ctx, sas)
+	}
 	if err = s.confirmSAS(ctx, sas); err != nil {
 		return err
 	}
+	return s.readDecision()
+}
+
+func (s *Session) readDecision() error {
 	decision, err := readPair[proto.PairDecision](s.control)
 	if err != nil {
 		return err
 	}
 	if decision.Accepted && decision.Reason == "accepted" {
 		return nil
+	}
+	if s.opts.Center != nil && !decision.Accepted {
+		switch r := cpace.Reason(decision.Reason); r {
+		case cpace.ReasonRejected, cpace.ReasonConfirmTimeout:
+			return pairingFailure(r)
+		}
 	}
 	if !decision.Accepted && decision.Reason == string(ReasonHubTicket) && slices.Contains(s.NegotiatedCapabilities, proto.HubTicketCapability) {
 		return pairingFailure(ReasonHubTicket)
@@ -196,6 +221,9 @@ func (s *Session) digitalOperator(ctx context.Context, b cpace.Binding) error {
 	c, err := readPair[proto.PakeCommit](s.control)
 	if err != nil {
 		return err
+	}
+	if s.opts.DigitalManager == nil {
+		return pairingFailure(ReasonInterrupted)
 	}
 	attempt, err := s.opts.DigitalManager.Begin(ctx)
 	if err != nil {
@@ -230,7 +258,7 @@ func (s *Session) digitalOperator(ctx context.Context, b cpace.Binding) error {
 	if err != nil {
 		return pairingFailure(cpace.ReasonConfirmation)
 	}
-	if err = s.confirmSAS(attempt.Context(), sas); err != nil {
+	if err := s.confirmOperator(attempt.Context(), sas); err != nil {
 		return err
 	}
 	if err := s.prepareHubTicket(); err != nil {
@@ -260,10 +288,89 @@ func (s *Session) digitalOperator(ctx context.Context, b cpace.Binding) error {
 
 func (s *Session) admissionFailure(err error) error {
 	if r, ok := admissionReason(err); ok {
+		if s.opts.Center != nil && r != cpace.ReasonBudgetExhausted {
+			return pairingFailure(ReasonInterrupted)
+		}
 		return s.rejectPair(r)
 	}
 	if errors.Is(err, cpace.ReasonConfirmation) {
 		return pairingFailure(cpace.ReasonConfirmation)
 	}
 	return pairingFailure(ReasonInterrupted)
+}
+
+func (s *Session) confirmOperator(ctx context.Context, sas string) error {
+	if s.opts.Center == nil {
+		return s.confirmSAS(ctx, sas)
+	}
+	if !s.extendCenterSetup() {
+		return pairingFailure(ReasonInterrupted)
+	}
+	confirmCtx, cancel := context.WithCancel(ctx)
+	stopConfirm := context.AfterFunc(s.ctx, cancel)
+	err := s.confirmCenter(confirmCtx, sas)
+	s.setupTimer.Reset(handshakeTimeout)
+	stopConfirm()
+	cancel()
+	switch {
+	case errors.Is(err, cpace.ReasonRejected):
+		return s.rejectPair(cpace.ReasonRejected)
+	case errors.Is(err, cpace.ReasonConfirmTimeout):
+		return s.rejectPair(cpace.ReasonConfirmTimeout)
+	default:
+		return err
+	}
+}
+
+// Leave time for the peer's manual check and for delivery of its decision.
+func (s *Session) extendCenterSetup() bool {
+	if !s.setupTimer.Stop() {
+		return false
+	}
+	s.setupTimer.Reset(s.opts.ConfirmTimeout + handshakeTimeout)
+	return true
+}
+
+func (s *Session) confirmCenter(ctx context.Context, sas string) error {
+	prompt, cancel := context.WithTimeoutCause(ctx, s.opts.ConfirmTimeout, cpace.ReasonConfirmTimeout)
+	defer cancel()
+	ok, err := s.opts.ConfirmSAS(prompt, sas, s.Peer())
+	if cause := context.Cause(prompt); cause != nil {
+		if errors.Is(cause, cpace.ReasonConfirmTimeout) {
+			return pairingFailure(cpace.ReasonConfirmTimeout)
+		}
+		return cause
+	}
+	if err != nil {
+		return pairingFailure(ReasonInterrupted)
+	}
+	if !ok {
+		return pairingFailure(cpace.ReasonRejected)
+	}
+	return nil
+}
+
+func (s *Session) confirmCenterClient(ctx context.Context, sas string) error {
+	if !s.extendCenterSetup() {
+		return pairingFailure(ReasonInterrupted)
+	}
+	prompt, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	decision := make(chan error, 1)
+	go func() {
+		err := s.readDecision()
+		if err != nil {
+			cancel(err)
+		}
+		decision <- err
+	}()
+	if err := s.confirmCenter(prompt, sas); err != nil {
+		return err
+	}
+	select {
+	case err := <-decision:
+		return err
+	case <-ctx.Done():
+		return pairingFailure(ReasonInterrupted)
+	}
 }

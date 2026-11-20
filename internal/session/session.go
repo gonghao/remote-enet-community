@@ -15,6 +15,7 @@ import (
 
 	"remote-enet/internal/identity"
 	"remote-enet/internal/linktest"
+	"remote-enet/internal/pairing/cpace"
 	"remote-enet/internal/proto"
 	"remote-enet/internal/transport"
 )
@@ -33,7 +34,23 @@ var (
 
 const handshakeTimeout = 10 * time.Second
 
+// CenterBinding comes from local center configuration and the pinned outer connection.
+type CenterBinding struct {
+	CenterID string
+	Session  [16]byte
+	Hub      identity.Fingerprint
+}
+
 type Options struct {
+	// Center requires ConfirmSAS and starts with the tunnel gate closed.
+	Center *CenterBinding
+	// Pinned checks the client fingerprint within this center session.
+	Pinned      func(identity.Fingerprint) bool
+	HoldTunnels bool
+	// ConfirmTimeout defaults to three minutes in center mode.
+	ConfirmTimeout time.Duration
+	// BeginClientAttempt charges the center client's budget immediately before frame 11. False means exhausted.
+	BeginClientAttempt func() bool
 	// Initiator is true on the transport dialer, independent of Role.
 	Initiator    bool
 	Role         Role
@@ -47,7 +64,7 @@ type Options struct {
 	Token          [16]byte
 	DigitalCode    string
 	DigitalManager DigitalResponder
-	// ConfirmSAS may block until ctx is canceled. A nil hook accepts automatically.
+	// ConfirmSAS may block until ctx is canceled. A nil hook accepts automatically outside center mode.
 	ConfirmSAS func(context.Context, string, identity.Fingerprint) (bool, error)
 	LocalFP    identity.Fingerprint
 	// HubFP selects hub-bound PAKE. Use zero for direct pairing.
@@ -93,6 +110,7 @@ type Session struct {
 	hubTicket              []byte
 	pendingTicket          []byte
 	linkTestNegotiated     bool
+	tunnelsHeld            atomic.Bool
 	linkTestIn             atomic.Bool
 	linkTestOut            atomic.Bool
 }
@@ -103,6 +121,14 @@ type Session struct {
 func Run(ctx context.Context, ts transport.Session, o Options) (*Session, error) {
 	if o.Role != RoleClient && o.Role != RoleOperator {
 		return nil, fmt.Errorf("session: invalid role %q", o.Role)
+	}
+	if o.Center != nil {
+		if o.ConfirmSAS == nil || o.ConfirmTimeout < 0 {
+			return nil, errors.New("session: center mode requires SAS confirmation and a nonnegative timeout")
+		}
+		if o.ConfirmTimeout == 0 {
+			o.ConfirmTimeout = 3 * time.Minute
+		}
 	}
 	if o.PingInterval < 0 {
 		return nil, fmt.Errorf("session: negative ping interval")
@@ -115,12 +141,12 @@ func Run(ctx context.Context, ts transport.Session, o Options) (*Session, error)
 	}
 	o.Capabilities = linkTestCapabilities(o.Capabilities, o.AllowLinkTest)
 	o.Capabilities = slices.DeleteFunc(o.Capabilities, func(v string) bool {
-		return v == proto.PairDirectCapability || v == proto.PairHubCapability || v == proto.HubTicketCapability
+		return v == proto.PairDirectCapability || v == proto.PairHubCapability || v == proto.HubTicketCapability || v == proto.PairCenterCapability
 	})
-	if o.Role == RoleClient && o.DigitalCode != "" || o.Role == RoleOperator && o.DigitalManager != nil {
+	if o.Role == RoleClient && o.DigitalCode != "" || o.Role == RoleOperator && (o.DigitalManager != nil || o.Center != nil) {
 		o.Capabilities = append(o.Capabilities, o.pairCapability())
 	}
-	if o.Role == RoleClient || o.GrantTicket != nil {
+	if o.Center == nil && (o.Role == RoleClient || o.GrantTicket != nil) {
 		o.Capabilities = append(o.Capabilities, proto.HubTicketCapability)
 	}
 	if o.Now == nil {
@@ -128,11 +154,18 @@ func Run(ctx context.Context, ts transport.Session, o Options) (*Session, error)
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	s := &Session{ts: ts, opts: o, ctx: runCtx, cancel: cancel, done: make(chan struct{})}
+	s.tunnelsHeld.Store(o.HoldTunnels || o.Center != nil)
+	transportDone := ts.Done()
+	if o.Center != nil && o.Role == RoleClient && o.DigitalCode == "" {
+		// The control reader owns the final buffered not_paired even if the
+		// transport has already signaled EOF.
+		transportDone = nil
+	}
 	go func() {
 		select {
 		case <-ctx.Done():
 			s.finish(ctx.Err())
-		case <-ts.Done():
+		case <-transportDone:
 			s.finish(ts.Err())
 		case <-s.done:
 		}
@@ -168,6 +201,12 @@ func Run(ctx context.Context, ts transport.Session, o Options) (*Session, error)
 		}
 		s.finish(err)
 		return nil, fmt.Errorf("session: handshake: %w", err)
+	}
+	if o.Center != nil && s.outcome == DigitalPaired {
+		// The peer may close immediately after its decision. The verified outcome
+		// survives that close, including while the client finishes its local check.
+		go s.acceptLoop()
+		return s, nil
 	}
 	select {
 	case <-s.done:
@@ -249,13 +288,16 @@ func (o Options) unsupportedPairing(peer proto.Hello) bool {
 	if o.Role == RoleClient {
 		return peer.Role == string(RoleOperator) && o.DigitalCode != "" && !slices.Contains(peer.Capabilities, o.pairCapability())
 	}
-	requested := slices.Contains(peer.Capabilities, proto.PairDirectCapability) || slices.Contains(peer.Capabilities, proto.PairHubCapability)
-	return peer.Role == string(RoleClient) && requested && (o.DigitalManager == nil || !slices.Contains(peer.Capabilities, o.pairCapability()))
+	requested := slices.Contains(peer.Capabilities, proto.PairCenterCapability) || slices.Contains(peer.Capabilities, proto.PairDirectCapability) || slices.Contains(peer.Capabilities, proto.PairHubCapability)
+	return peer.Role == string(RoleClient) && requested && ((o.Center == nil && o.DigitalManager == nil) || !slices.Contains(peer.Capabilities, o.pairCapability()))
 }
 
 func (s *Session) authorize(ctx context.Context, hello proto.Hello, localHash, peerHash [32]byte) error {
-	if s.opts.Role == RoleClient && s.opts.RequireHubTicket && !slices.Contains(s.NegotiatedCapabilities, proto.HubTicketCapability) {
+	if s.opts.Center == nil && s.opts.Role == RoleClient && s.opts.RequireHubTicket && !slices.Contains(s.NegotiatedCapabilities, proto.HubTicketCapability) {
 		return pairingFailure(ReasonHubTicket)
+	}
+	if s.opts.Center != nil && s.opts.Role == RoleOperator && (slices.Contains(hello.Capabilities, proto.PairDirectCapability) || slices.Contains(hello.Capabilities, proto.PairHubCapability)) {
+		return pairingFailure(ReasonUnsupported)
 	}
 	if slices.Contains(s.NegotiatedCapabilities, s.opts.pairCapability()) {
 		if err := s.digital(ctx, localHash, peerHash); err != nil {
@@ -269,6 +311,12 @@ func (s *Session) authorize(ctx context.Context, hello proto.Hello, localHash, p
 			s.finishRejection()
 		}
 		return pairingFailure(ReasonUnsupported)
+	}
+	if s.opts.Center != nil {
+		if s.opts.Role == RoleOperator && (s.opts.Pinned == nil || !s.opts.Pinned(s.Peer())) {
+			return s.rejectPair(cpace.ReasonNotPaired)
+		}
+		return nil
 	}
 	if s.opts.Role == RoleClient {
 		if s.opts.Token != [16]byte{} {
@@ -350,7 +398,7 @@ func (s *Session) finish(err error) {
 		err = io.EOF
 	}
 	s.once.Do(func() {
-		if transportErr := s.ts.Err(); transportErr != nil {
+		if transportErr := s.ts.Err(); transportErr != nil && !errors.Is(err, cpace.ReasonNotPaired) {
 			err = transportErr
 		}
 		s.mu.Lock()
@@ -364,20 +412,36 @@ func (s *Session) finish(err error) {
 
 // Send serializes complete frames. Writes fail when the session terminates.
 func (s *Session) Send(msg any) error {
+	if s.opts.Center != nil && s.outcome == DigitalPaired {
+		return errors.New("session: center pairing exchange complete")
+	}
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	if err := s.ctx.Err(); err != nil {
 		return err
 	}
 	if err := proto.Write(s.control, msg); err != nil {
-		s.finish(err)
+		s.finishControlIO(err)
 		return err
 	}
 	return nil
 }
+
+// A failed accept or write can race the final buffered decision on a data client.
+func (s *Session) finishControlIO(err error) {
+	if s.opts.Center != nil && s.opts.Role == RoleClient && s.outcome != DigitalPaired {
+		return
+	}
+	s.finish(err)
+}
+
 func (s *Session) readControl() {
+	read := func(r io.Reader) (any, error) { return proto.Read(r, proto.MaxFrameLen) }
+	if s.opts.Center != nil {
+		read = proto.ReadCenterControl
+	}
 	for {
-		msg, err := proto.Read(s.control, proto.MaxFrameLen)
+		msg, err := read(s.control)
 		if err != nil {
 			s.finish(err)
 			return
@@ -386,7 +450,7 @@ func (s *Session) readControl() {
 		case proto.Unknown:
 			s.opts.Logger.Debug("ignoring unknown control message", "type", m.Type)
 		case proto.Ping:
-			if err := s.Send(proto.Pong{Seq: m.Seq, SentAt: m.SentAt}); err != nil {
+			if err := s.Send(proto.Pong{Seq: m.Seq, SentAt: m.SentAt}); err != nil && s.ctx.Err() != nil {
 				return
 			}
 		case proto.Pong:
@@ -404,7 +468,14 @@ func (s *Session) readControl() {
 				s.opts.OnRTT(sample)
 			}
 		case proto.PairToken: // A trusted peer may still send an invitation token.
-		case proto.Hello, proto.HubTicket, proto.PairResult, proto.OpenTunnel, proto.PakeCommit, proto.PairDecision, proto.PakeShareA, proto.PakeShareB, proto.PakeConfirmA, proto.PakeConfirmB:
+		case proto.PairDecision:
+			if s.opts.Center != nil && s.opts.Role == RoleClient && !m.Accepted && m.Reason == string(cpace.ReasonNotPaired) {
+				s.finish(pairingFailure(cpace.ReasonNotPaired))
+			} else {
+				s.finish(fmt.Errorf("session: unexpected control message %T", m))
+			}
+			return
+		case proto.Hello, proto.HubTicket, proto.PairResult, proto.OpenTunnel, proto.PakeCommit, proto.PakeShareA, proto.PakeShareB, proto.PakeConfirmA, proto.PakeConfirmB:
 			s.finish(fmt.Errorf("session: unexpected control message %T", m))
 			return
 		default:
@@ -441,8 +512,12 @@ func (s *Session) acceptLoop() {
 	for {
 		st, err := s.ts.AcceptStream(s.ctx)
 		if err != nil {
-			s.finish(err)
+			s.finishControlIO(err)
 			return
+		}
+		if s.tunnelsHeld.Load() {
+			_ = st.Close()
+			continue
 		}
 		go s.dispatch(st)
 	}
@@ -483,8 +558,21 @@ func (s *Session) validTunnel(h proto.OpenTunnel, outbound bool) bool {
 	return h.Target != "" && ((role == RoleOperator && h.Kind == "tcp") || (role == RoleClient && h.Kind == "reverse"))
 }
 
+// ErrTunnelsHeld signals that center authorization has not released this connection.
+var ErrTunnelsHeld = errors.New("session: tunnels held until the center confirms the session")
+
+// ReleaseTunnels is idempotent. A center pairing connection never carries tunnels.
+func (s *Session) ReleaseTunnels() {
+	if s.opts.Center == nil || s.outcome != DigitalPaired {
+		s.tunnelsHeld.Store(false)
+	}
+}
+
 // OpenTunnel writes only the header; subsequent stream bytes are opaque.
 func (s *Session) OpenTunnel(ctx context.Context, hdr proto.OpenTunnel) (transport.Stream, error) {
+	if s.tunnelsHeld.Load() {
+		return nil, ErrTunnelsHeld
+	}
 	if !s.validTunnel(hdr, true) {
 		return nil, fmt.Errorf("session: invalid tunnel kind %q for role %q", hdr.Kind, s.opts.Role)
 	}

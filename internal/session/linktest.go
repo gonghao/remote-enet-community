@@ -35,6 +35,9 @@ func (s *Session) TestLink(ctx context.Context, o linktest.Options) (result link
 		result.TimedOut = errors.Is(err, context.DeadlineExceeded)
 		result.Interrupted = err != nil && !result.TimedOut
 	}()
+	if s.tunnelsHeld.Load() {
+		return result, ErrTunnelsHeld
+	}
 	if !s.linkTestNegotiated {
 		return result, linktest.ErrUnsupported
 	}

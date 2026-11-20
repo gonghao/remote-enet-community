@@ -575,5 +575,21 @@
   "Switch center": "切換中心",
   "Via center %s · node %s": "經中心 %s · 節點 %s",
   "Switching centers keeps your sign-in and records at the previous center.": "切換中心不會遷移或刪除舊中心的登入與紀錄",
-  "Invitation, address:port and code, or an 8-digit numeric code": "邀請碼、位址:連接埠 + 數字碼，或 8 位數字碼"
+  "Invitation, address:port and code, or an 8-digit numeric code": "邀請碼、位址:連接埠 + 數字碼，或 8 位數字碼",
+  "Signed in": "已登入",
+  "Signed out": "未登入",
+  "Quota: %d/%d": "額度：%d/%d",
+  "This device": "本機",
+  "Start reception": "開始接待",
+  "Retry pairing": "重試配對",
+  "Redeeming code": "正在兌換",
+  "Waiting for redemption": "等待兌換",
+  "Waiting for visitor": "等待來訪裝置",
+  "Session ended": "接待已結束",
+  "Available": "可用",
+  "Full": "已滿",
+  "Short code": "短校驗碼",
+  "Confirm (read to operator)": "確認（已讀給對方）",
+  "Revoke this device and sign out?": "撤銷本機裝置並登出？",
+  "Switch connection mode before clearing the center.": "清除中心前，請先切換連線方式。"
 }

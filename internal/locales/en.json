@@ -575,5 +575,21 @@
   "Switch center": "Switch center",
   "Via center %s · node %s": "Via center %s · node %s",
   "Switching centers keeps your sign-in and records at the previous center.": "Switching centers keeps your sign-in and records at the previous center.",
-  "Invitation, address:port and code, or an 8-digit numeric code": "Invitation, address:port and code, or an 8-digit numeric code"
+  "Invitation, address:port and code, or an 8-digit numeric code": "Invitation, address:port and code, or an 8-digit numeric code",
+  "Signed in": "Signed in",
+  "Signed out": "Signed out",
+  "Quota: %d/%d": "Quota: %d/%d",
+  "This device": "This device",
+  "Start reception": "Start reception",
+  "Retry pairing": "Retry pairing",
+  "Redeeming code": "Redeeming code",
+  "Waiting for redemption": "Waiting for redemption",
+  "Waiting for visitor": "Waiting for visitor",
+  "Session ended": "Session ended",
+  "Available": "Available",
+  "Full": "Full",
+  "Short code": "Short code",
+  "Confirm (read to operator)": "Confirm (read to operator)",
+  "Revoke this device and sign out?": "Revoke this device and sign out?",
+  "Switch connection mode before clearing the center.": "Switch connection mode before clearing the center."
 }

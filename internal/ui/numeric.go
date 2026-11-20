@@ -29,6 +29,8 @@ func (v *View) SetNumericCodeDisplay(display pairing.Display) {
 func (v *View) ClearPairingSecrets() {
 	v.clearPairingInput()
 	v.numericDisplay = pairing.Display{}
+	v.accountCode, v.sasInput = "", ""
+	v.sasMatched = false
 }
 
 func (v *View) clearExpiredNumericCode() {

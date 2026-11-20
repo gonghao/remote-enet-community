@@ -295,10 +295,12 @@ func TestResponsiveSessionAndSettings(t *testing.T) {
 							height = clientHeight
 						}
 						tt := ui.NewTester(v.Render, width, height)
-						for _, hidden := range []string{"Center", "Center ID", "Check center", "Change center…", cfg.Center.ID, cfg.Center.API[0]} {
-							if _, ok := tt.Find(hidden); ok {
-								t.Fatalf("hidden center configuration visible: %s", hidden)
+						if role == settings.RoleClient && p == settingsPage {
+							if !tt.HasText(cfg.Center.ID) {
+								t.Fatal("missing client center settings")
 							}
+						} else if tt.HasText(cfg.Center.ID) {
+							t.Fatal("unexpected center configuration")
 						}
 						left, right := "Numeric code · easy to dictate", "Invitation · easy to copy and paste"
 						if p == settingsPage {

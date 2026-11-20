@@ -16,7 +16,7 @@ func (v *View) clientPage(c *ui.Context) {
 		ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, invitation).FontSize(clientFieldLabelSize).Width(labelWidth).Shrink(0)
 			ui.TextInput(c.Key(v.inputGeneration), &v.invitation).Grow(1).MinWidth(0).Height(32).
-				Label(v.tr("Invite or address:port and code")).Placeholder(v.tr("Invite or address:port and code")).Disabled(v.locked())
+				Label(v.tr("Invite or address:port and code")).Placeholder(v.tr("Invitation, address:port and code, or an 8-digit numeric code")).Tooltip(v.tr("Invitation, address:port and code, or an 8-digit numeric code")).Disabled(v.locked())
 		})
 		v.startControls(c)
 	})

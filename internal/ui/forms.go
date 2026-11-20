@@ -2,10 +2,14 @@ package ui
 
 import (
 	"net/netip"
+	"slices"
+	"strings"
 
 	"github.com/egoist/mygo/ui"
 
 	"remote-enet/internal/carside"
+	"remote-enet/internal/center"
+	"remote-enet/internal/settings"
 )
 
 func (v *View) field(c *ui.Context, label, placeholder string, value *string, disabled bool) {
@@ -105,19 +109,21 @@ func selectChevron(c *ui.Context) {
 }
 
 func (v *View) operatorForm(c *ui.Context) {
-	hubMode := v.draft.Operator.Mode == "hub"
+	modes := []string{"direct", "hub", "center"}
+	labels := []string{v.tr("Direct"), v.tr("Self-hosted hub"), v.tr("Center")}
+	index := max(0, slices.Index(modes, v.draft.Operator.Mode))
+	mode := labels[index]
 	ui.Field(c, v.tr("Connection mode"), func() {
-		labels := []string{v.tr("Direct"), v.tr("Self-hosted hub")}
-		mode := labels[0]
-		if hubMode {
-			mode = labels[1]
-		}
 		if ui.Select(c.Key("hub-mode"), &mode, labels).Label(v.tr("Connection mode")).FillWidth().Height(32).Disabled(v.locked()).Changed() {
-			hubMode = mode == labels[1]
+			v.draft.Operator.Mode = modes[slices.Index(labels, mode)]
 		}
 	}).FillWidth()
-	if hubMode {
-		v.draft.Operator.Mode = "hub"
+	if v.draft.Operator.Mode == "center" {
+		v.centerForm(c)
+		v.accountControls(c)
+		return
+	}
+	if v.draft.Operator.Mode == "hub" {
 		ui.Grid(c).Columns(2).FillWidth().Gap(12).Children(func() {
 			v.field(c, "Hub address", "host.example:47000", &v.draft.Operator.Hub.Addr, v.locked())
 			v.field(c, "Share address", "host.example:47000", &v.draft.Operator.Hub.Share, v.locked())
@@ -125,7 +131,7 @@ func (v *View) operatorForm(c *ui.Context) {
 		v.field(c, "Hub fingerprint", "", &v.draft.Operator.Hub.FP, v.locked())
 		v.issuerControls(c)
 	} else {
-		v.draft.Operator.Mode = "direct"
+
 		ui.Grid(c).Columns(2).FillWidth().Gap(12).Children(func() {
 			v.field(c, "Listen address", "0.0.0.0:47000", &v.draft.Operator.Listen, v.locked())
 			v.field(c, "Public endpoint", "host.example:47000", &v.draft.Operator.Endpoint, v.locked())
@@ -162,6 +168,74 @@ func (v *View) presentationForm(c *ui.Context) {
 
 // SetIssuerEntry accepts only the public entry produced by the local operator.
 func (v *View) SetIssuerEntry(entry string) { v.issuerEntry = entry }
+
+func (v *View) centerForm(c *ui.Context) {
+	v.value(c, "Center ID", v.saved.Center.ID)
+	if len(v.saved.Center.API) == 0 {
+		v.value(c, "Center API", "")
+	}
+	for i, entry := range v.saved.Center.API {
+		v.value(c.Key(i), "Center API", entry)
+	}
+	if ui.Button(c.Key("switch-center"), v.tr("Switch center")).Disabled(v.locked()).Clicked() {
+		v.editCenter = !v.editCenter
+		v.centerID = v.saved.Center.ID
+		v.centerAPI = strings.Join(v.saved.Center.API, "\n")
+	}
+	if v.editCenter {
+		w, _ := c.Size()
+		columns := 2
+		if w < 400 {
+			columns = 1
+		}
+		ui.Grid(c).Columns(columns).FillWidth().Gap(12).Children(func() {
+			v.field(c, "Center ID", "", &v.centerID, v.locked())
+			ui.Field(c, v.tr("Center API URLs"), func() {
+				ui.TextArea(c.Key("center-api"), &v.centerAPI).Label(v.tr("Center API URLs")).FillWidth().Height(64).Disabled(v.locked())
+			}).FillWidth()
+		})
+		cfg := v.saved
+		cfg.Center = settings.Center{ID: v.centerID, API: strings.Fields(v.centerAPI)}
+		err := cfg.Validate()
+		if err != nil {
+			label := "Check the center ID and HTTPS addresses."
+			if cfg.Operator.Mode == "center" && cfg.Center.ID == "" && len(cfg.Center.API) == 0 {
+				label = "Switch connection mode before clearing the center."
+			}
+			ui.Text(c, v.tr(label)).FontSize(11).TextColor(c.Theme().Danger)
+		}
+		ui.Row(c).FillWidth().Gap(8).Children(func() {
+			if ui.Button(c.Key("change-center"), v.tr("Change center…")).Disabled(v.locked() || err != nil || cfg.Equal(v.saved) || v.actions.SetCenter == nil).Clicked() {
+				v.actions.SetCenter(cfg.Center)
+			}
+		})
+	}
+	if ui.Button(c.Key("check-center"), v.tr("Check center")).Disabled(v.saved.Center.ID == "" || v.checkingCenter || v.actions.CheckCenter == nil).Clicked() {
+		v.checkingCenter = true
+		v.centerResults = nil
+		v.actions.CheckCenter()
+	}
+	if v.checkingCenter {
+		ui.Text(c, v.tr("Checking center…")).FontSize(11).TextColor(muted).Role(ui.RoleStatus)
+	}
+	for i, result := range v.centerResults {
+		label := "Center unreachable"
+		switch result.Status {
+		case center.Verified:
+			label = "Center verified"
+		case center.IDMismatch:
+			label = "Center ID mismatch"
+		}
+		v.value(c.Key(i), label, result.Entry)
+	}
+}
+
+// SetCenterResults accepts observations only for the currently saved center.
+func (v *View) SetCenterResults(cfg settings.Center, results []center.EntryResult) {
+	if cfg.ID == v.saved.Center.ID && slices.Equal(cfg.API, v.saved.Center.API) {
+		v.centerResults = slices.Clone(results)
+	}
+}
 
 func (v *View) value(c *ui.Context, label, text string) ui.Element {
 	display := text

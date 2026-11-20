@@ -70,10 +70,15 @@ func (c *setupConn) finish() error {
 	return c.Conn.SetDeadline(time.Time{})
 }
 
-func (a *Connector) wrap(ctx context.Context, conn net.Conn, isClient bool, expect identity.Fingerprint, p transport.PathInfo, onFirstRead func()) (transport.Session, error) {
+type innerSetup struct {
+	waitForTraffic bool
+	onFirstRead    func()
+}
+
+func (a *Connector) wrap(ctx context.Context, conn net.Conn, isClient bool, expect identity.Fingerprint, p transport.PathInfo, setup innerSetup) (transport.Session, error) {
 	wrapCtx, cancel := context.WithCancelCause(ctx)
-	c := &setupConn{Conn: conn, cancel: cancel, onFirstRead: onFirstRead}
-	if onFirstRead == nil {
+	c := &setupConn{Conn: conn, cancel: cancel, onFirstRead: setup.onFirstRead}
+	if !setup.waitForTraffic {
 		c.arm(false)
 	}
 	stop := context.AfterFunc(wrapCtx, func() { _ = conn.Close() })

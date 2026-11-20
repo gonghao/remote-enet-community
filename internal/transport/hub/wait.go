@@ -45,7 +45,7 @@ func (a *Connector) wait(ctx context.Context, ep transport.Endpoint) (transport.
 		conn, err := a.registerWait(attemptCtx, ep)
 		if err == nil {
 			var s transport.Session
-			s, err = a.wrap(attemptCtx, conn, false, identity.Fingerprint{}, path(conn, ep, identity.Fingerprint{}), retire)
+			s, err = a.wrap(attemptCtx, conn, false, identity.Fingerprint{}, path(conn, ep, identity.Fingerprint{}), innerSetup{waitForTraffic: true, onFirstRead: retire})
 			retire()
 			if s != nil {
 				return ownSession(attemptCtx, s, func() { cancel(context.Canceled) }), nil

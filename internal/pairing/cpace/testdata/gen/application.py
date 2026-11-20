@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import itertools
 import json
+from pathlib import Path
 
 
 # Public fixture inputs standing in for the TLS exporter and peer fingerprints.
@@ -126,4 +127,13 @@ def generate(hub: bool) -> dict[str, str | dict[str, str]]:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--hub", action="store_true")
-    print(json.dumps(generate(parser.parse_args().hub), indent=2))
+    parser.add_argument("--check", action="store_true")
+    args = parser.parse_args()
+    if args.check:
+        for hub, name in ((False, "application"), (True, "application-hub")):
+            path = Path(__file__).resolve().parents[1] / (name + ".json")
+            expected = (json.dumps(generate(hub), indent=2) + "\n").encode()
+            if not path.is_file() or path.read_bytes() != expected:
+                raise SystemExit(f"stale or missing: {path}")
+    else:
+        print(json.dumps(generate(args.hub), indent=2))

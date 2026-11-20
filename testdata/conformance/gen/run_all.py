@@ -1,7 +1,6 @@
 """Discover sibling generators in filename order."""
 
 import argparse
-import os
 from pathlib import Path
 import runpy
 import sys
@@ -14,9 +13,6 @@ def main() -> int:
     different = []
     for path in sorted(Path(__file__).resolve().parent.glob("*.py")):
         if path.name in {"common.py", "run_all.py"}:
-            continue
-        if args.check and path.name == "pake.py" and os.getenv("CONFORMANCE_LOCAL_PAKE") == "1":
-            print("PAKE regeneration is local-only for this check")
             continue
         module = runpy.run_path(str(path), run_name=path.stem)
         generate = module.get("generate")

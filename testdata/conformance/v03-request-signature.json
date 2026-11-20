@@ -1,0 +1,296 @@
+{
+  "format": 1,
+  "contract": "CENTER-CONTRACT v1 第八版（2026-11-20）",
+  "vector": "V3",
+  "title": "中心 API 请求签名",
+  "generator": "gen/request.py",
+  "cases": [
+    {
+      "name": "device-request",
+      "input": {
+        "key": "device-operator",
+        "center_id": "center.example",
+        "kind": "device",
+        "principal": "b01a6d5bcafb46f5499121df645baa5b375bce3b96bcc867ce85cbc42ad2043d",
+        "method": "GET",
+        "target": "/v1/sessions/AAECAwQFBgcICQoLDA0ODw?since_version=1&wait_s=3",
+        "timestamp": 1795000000,
+        "renet_client": "operator/1.2.0",
+        "nonce": "",
+        "idempotency_key": "",
+        "body": ""
+      },
+      "expect": {
+        "result": "accept",
+        "signing_input": "8b7772656e65742d63656e7465722f763120726571756573746e63656e7465722e6578616d706c65666465766963655820b01a6d5bcafb46f5499121df645baa5b375bce3b96bcc867ce85cbc42ad2043d63474554583c2f76312f73657373696f6e732f41414543417751464267634943516f4c4441304f44773f73696e63655f76657273696f6e3d3126776169745f733d331a6afd86c06e6f70657261746f722f312e322e3040605820e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "signature": "b3b560b722b60fb921a90df7227efe55618443938cd52332dcf3dd0b172bd4956e55f2d98b3e961d0f6cc8aa5b523081a897816a7fd17b2a15b701d339e9600d",
+        "headers": {
+          "Renet-Device-Key": [
+            "sBptW8r7RvVJkSHfZFuqWzdbzjuWvMhnzoXLxCrSBD0"
+          ],
+          "Renet-Timestamp": [
+            "1795000000"
+          ],
+          "Renet-Client": [
+            "operator/1.2.0"
+          ],
+          "Renet-Signature": [
+            "s7VgtyK2D7khqQ33In7-VWGEQ5OM1SMy3PPdCxcr1JVuVfLZiz6WHQ9syKpbUjCBqJeBan_ReyoVtwHTOelgDQ"
+          ]
+        }
+      }
+    },
+    {
+      "name": "node-request",
+      "input": {
+        "key": "hub-node-1",
+        "center_id": "center.example",
+        "kind": "node",
+        "principal": "000102030405060708090a0b0c0d0e0f",
+        "method": "POST",
+        "target": "/v1/node/activate",
+        "timestamp": 1795000000,
+        "renet_client": "hub/1.2.0",
+        "nonce": "101112131415161718191a1b1c1d1e1f",
+        "idempotency_key": "activate-00000001",
+        "body": "7b226e6f64655f707562223a2257366e4669433134514149576f6d7935717a50746e774b50424a2d39657638527031694946553876687673222c2276657273696f6e223a22312e322e30222c226b696473223a5b5d7d"
+      },
+      "expect": {
+        "result": "accept",
+        "signing_input": "8b7772656e65742d63656e7465722f763120726571756573746e63656e7465722e6578616d706c65646e6f646550000102030405060708090a0b0c0d0e0f64504f5354512f76312f6e6f64652f61637469766174651a6afd86c0696875622f312e322e3050101112131415161718191a1b1c1d1e1f7161637469766174652d303030303030303158208d312fcc58e2c9834b37c335366d8bd6ed5532af9b0eb22963969f10e221a30c",
+        "signature": "d1b2c1c56aceb6b1a27cdd67ebd4d97b7d4390fd49d8da22bb10a6556068957cd96e0eedbdd85ade4a5c93aad076c624bb579ee951037909313a1f190ec0960a",
+        "headers": {
+          "Renet-Node-Id": [
+            "AAECAwQFBgcICQoLDA0ODw"
+          ],
+          "Renet-Timestamp": [
+            "1795000000"
+          ],
+          "Renet-Client": [
+            "hub/1.2.0"
+          ],
+          "Renet-Signature": [
+            "0bLBxWrOtrGifN1n69TZe31DkP1J2NoiuxCmVWBolXzZbg7tvdha3kpck6rQdsYku1ee6VEDeQkxOh8ZDsCWCg"
+          ],
+          "Renet-Nonce": [
+            "EBESExQVFhcYGRobHB0eHw"
+          ],
+          "Idempotency-Key": [
+            "activate-00000001"
+          ]
+        }
+      }
+    },
+    {
+      "name": "target-escaped",
+      "input": {
+        "raw_url": "/v1/a%2fb/%41?q=%2F&q=%2f"
+      },
+      "expect": {
+        "result": "accept",
+        "canonical_target": "/v1/a%2fb/%41?q=%2F&q=%2f"
+      }
+    },
+    {
+      "name": "target-bare-query",
+      "input": {
+        "raw_url": "/v1/nodes?"
+      },
+      "expect": {
+        "result": "accept",
+        "canonical_target": "/v1/nodes"
+      }
+    },
+    {
+      "name": "target-fragment",
+      "input": {
+        "raw_url": "https://center.example/v1/nodes?a=1#local"
+      },
+      "expect": {
+        "result": "accept",
+        "canonical_target": "/v1/nodes?a=1"
+      }
+    },
+    {
+      "name": "target-dot-segments",
+      "input": {
+        "raw_url": "/v1/./node/../nodes"
+      },
+      "expect": {
+        "result": "accept",
+        "canonical_target": "/v1/nodes"
+      }
+    },
+    {
+      "name": "changed-client",
+      "input": {
+        "key": "device-operator",
+        "center_id": "center.example",
+        "kind": "device",
+        "principal": "b01a6d5bcafb46f5499121df645baa5b375bce3b96bcc867ce85cbc42ad2043d",
+        "method": "GET",
+        "target": "/v1/sessions/AAECAwQFBgcICQoLDA0ODw?since_version=1&wait_s=3",
+        "timestamp": 1795000000,
+        "renet_client": "operator/1.2.0",
+        "nonce": "",
+        "idempotency_key": "",
+        "body": "",
+        "headers": {
+          "Renet-Device-Key": [
+            "sBptW8r7RvVJkSHfZFuqWzdbzjuWvMhnzoXLxCrSBD0"
+          ],
+          "Renet-Timestamp": [
+            "1795000000"
+          ],
+          "Renet-Client": [
+            "operator/1.2.1"
+          ],
+          "Renet-Signature": [
+            "s7VgtyK2D7khqQ33In7-VWGEQ5OM1SMy3PPdCxcr1JVuVfLZiz6WHQ9syKpbUjCBqJeBan_ReyoVtwHTOelgDQ"
+          ]
+        }
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "unauthenticated"
+      }
+    },
+    {
+      "name": "signed-dot-segments",
+      "input": {
+        "key": "device-operator",
+        "center_id": "center.example",
+        "kind": "device",
+        "principal": "b01a6d5bcafb46f5499121df645baa5b375bce3b96bcc867ce85cbc42ad2043d",
+        "method": "GET",
+        "target": "/v1/./node/../nodes",
+        "timestamp": 1795000000,
+        "renet_client": "operator/1.2.0",
+        "nonce": "",
+        "idempotency_key": "",
+        "body": "",
+        "headers": {
+          "Renet-Device-Key": [
+            "sBptW8r7RvVJkSHfZFuqWzdbzjuWvMhnzoXLxCrSBD0"
+          ],
+          "Renet-Timestamp": [
+            "1795000000"
+          ],
+          "Renet-Client": [
+            "operator/1.2.0"
+          ],
+          "Renet-Signature": [
+            "uZ2_ukvSKLM4gBqYSCvqS-YHnOLkJEIN8spUS0jiIUXOIQIRUA_FUtZoOyiqpnGhhoKwI5iKPnfcCet0zlsXCA"
+          ]
+        }
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "unauthenticated"
+      }
+    },
+    {
+      "name": "signed-bare-query",
+      "input": {
+        "key": "device-operator",
+        "center_id": "center.example",
+        "kind": "device",
+        "principal": "b01a6d5bcafb46f5499121df645baa5b375bce3b96bcc867ce85cbc42ad2043d",
+        "method": "GET",
+        "target": "/v1/nodes?",
+        "timestamp": 1795000000,
+        "renet_client": "operator/1.2.0",
+        "nonce": "",
+        "idempotency_key": "",
+        "body": "",
+        "headers": {
+          "Renet-Device-Key": [
+            "sBptW8r7RvVJkSHfZFuqWzdbzjuWvMhnzoXLxCrSBD0"
+          ],
+          "Renet-Timestamp": [
+            "1795000000"
+          ],
+          "Renet-Client": [
+            "operator/1.2.0"
+          ],
+          "Renet-Signature": [
+            "RDgGaFQIuTvnNrgDL3S42_iPb97TkH2P7u-s_gjG1BW0sNzqUsY_i7a5gEphVo_sGQJ3DXsUQJC9q5oJz6SiCw"
+          ]
+        }
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "unauthenticated"
+      }
+    },
+    {
+      "name": "repeated-client",
+      "input": {
+        "key": "device-operator",
+        "center_id": "center.example",
+        "kind": "device",
+        "principal": "b01a6d5bcafb46f5499121df645baa5b375bce3b96bcc867ce85cbc42ad2043d",
+        "method": "GET",
+        "target": "/v1/sessions/AAECAwQFBgcICQoLDA0ODw?since_version=1&wait_s=3",
+        "timestamp": 1795000000,
+        "renet_client": "operator/1.2.0",
+        "nonce": "",
+        "idempotency_key": "",
+        "body": "",
+        "headers": {
+          "Renet-Device-Key": [
+            "sBptW8r7RvVJkSHfZFuqWzdbzjuWvMhnzoXLxCrSBD0"
+          ],
+          "Renet-Timestamp": [
+            "1795000000"
+          ],
+          "Renet-Client": [
+            "operator/1.2.0",
+            "operator/1.2.0"
+          ],
+          "Renet-Signature": [
+            "s7VgtyK2D7khqQ33In7-VWGEQ5OM1SMy3PPdCxcr1JVuVfLZiz6WHQ9syKpbUjCBqJeBan_ReyoVtwHTOelgDQ"
+          ]
+        }
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "bad_request"
+      }
+    },
+    {
+      "name": "comma-client",
+      "input": {
+        "key": "device-operator",
+        "center_id": "center.example",
+        "kind": "device",
+        "principal": "b01a6d5bcafb46f5499121df645baa5b375bce3b96bcc867ce85cbc42ad2043d",
+        "method": "GET",
+        "target": "/v1/sessions/AAECAwQFBgcICQoLDA0ODw?since_version=1&wait_s=3",
+        "timestamp": 1795000000,
+        "renet_client": "operator/1.2.0",
+        "nonce": "",
+        "idempotency_key": "",
+        "body": "",
+        "headers": {
+          "Renet-Device-Key": [
+            "sBptW8r7RvVJkSHfZFuqWzdbzjuWvMhnzoXLxCrSBD0"
+          ],
+          "Renet-Timestamp": [
+            "1795000000"
+          ],
+          "Renet-Client": [
+            "operator/1.2.0, operator/1.2.0"
+          ],
+          "Renet-Signature": [
+            "s7VgtyK2D7khqQ33In7-VWGEQ5OM1SMy3PPdCxcr1JVuVfLZiz6WHQ9syKpbUjCBqJeBan_ReyoVtwHTOelgDQ"
+          ]
+        }
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "bad_request"
+      }
+    }
+  ]
+}

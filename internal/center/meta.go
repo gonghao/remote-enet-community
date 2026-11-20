@@ -1,4 +1,4 @@
-// Package center checks public metadata without authenticating to a center.
+// Package center implements center metadata checks and signed API requests.
 package center
 
 import (

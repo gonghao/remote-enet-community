@@ -6,12 +6,13 @@
 |---|---|
 | [v01-account-code.json](v01-account-code.json) | 对原始输入按 §4.1 规范化，比对 `normalized` 和 `display`。四个 `alphabet-*` 用例合计覆盖全部 32 个合法符号。 |
 | [v02-numeric-code.json](v02-numeric-code.json) | 对原始输入按 §4.2 规范化，按字符串比对 `normalized`，保留前导零。 |
+| [v03-request-signature.json](v03-request-signature.json) | 重算设备和节点请求的签名输入、签名及请求头，核对请求目标规范化与验签拒绝用例。 |
 | [v06-pake-ci.json](v06-pake-ci.json) | 分别重算直连、自建 Hub、中心模式的 CI。对完整的 `hc`、`ho`（含四字节帧长）做 SHA-256，按协商能力追加绑定字段。中心的 `center_id` 取 ASCII 字节。 |
 | [v07-pairing-messages.json](v07-pairing-messages.json) | 直连与自建 Hub 各一轮。将 `ya`、`yb` 作为小端私有标量，由 `prs`、`sid`、`ci` 推导双方 share、承诺、ISK、确认标签与 SAS。`cbor11` 到 `cbor16` 仅含 CBOR 信封；消息 16 表示接受。 |
 | [V16 自建票据](../../internal/ticket/testdata/) | wait、dial 与 bootstrap 三份 COSE 票据及独立生成器。 |
 | [gen/](gen/) | 公共编码与签名工具、各组生成器、统一入口与 Python 单测。 |
 
-V3–V5、V8–V15 的发布文件规划见[目录约定](../../docs/CONFORMANCE.md#2-目录)。
+V4、V5、V8–V15 的发布文件规划见[目录约定](../../docs/CONFORMANCE.md#2-目录)。
 
 ## 测试密钥
 

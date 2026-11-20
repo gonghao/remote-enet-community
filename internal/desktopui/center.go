@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/egoist/mygo"
+	"remote-enet/internal/centerflow"
 	"remote-enet/internal/settings"
 	renetui "remote-enet/internal/ui"
 )
@@ -16,6 +17,12 @@ func (s *shell) centerActions(a *renetui.Actions) {
 		s.submit(renetui.ActionAnswerSAS, func(ctx context.Context) error { return c.AnswerSAS(ctx, id, match) })
 	}
 	if s.product.role == settings.RoleClient {
+		a.CenterSessionCandidates = func() []centerflow.SessionCandidate {
+			if choice := c.CenterSessionChoice(); choice != nil {
+				return choice.Candidates()
+			}
+			return nil
+		}
 		a.RetryPairing = func() { s.submit(renetui.ActionRetryPairing, c.RetryPairing) }
 		return
 	}

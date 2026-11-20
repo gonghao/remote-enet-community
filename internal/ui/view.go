@@ -49,16 +49,18 @@ type Permission struct {
 // Actions run synchronously on the UI thread and must return promptly. The
 // integrator queues controller work and handles explicit clipboard requests.
 type Actions struct {
-	CenterLogin        func(accountCode, deviceName string)
-	CenterLogout       func()
-	RefreshCenter      func()
-	EndReception       func()
-	RetryPairing       func()
-	RevokeCenterDevice func(fingerprint string)
-	StartReception     func(nodeID string)
-	CenterDisplay      func() (string, centerflow.SASPrompt)
-	MatchSAS           func(id uint64, input string) bool
-	AnswerSAS          func(id uint64, match bool)
+	CenterSessionCandidates func() []centerflow.SessionCandidate
+	ResumeCenterSession     func(center.SessionID)
+	CenterLogin             func(accountCode, deviceName string)
+	CenterLogout            func()
+	RefreshCenter           func()
+	EndReception            func()
+	RetryPairing            func()
+	RevokeCenterDevice      func(fingerprint string)
+	StartReception          func(nodeID string)
+	CenterDisplay           func() (string, centerflow.SASPrompt)
+	MatchSAS                func(id uint64, input string) bool
+	AnswerSAS               func(id uint64, match bool)
 
 	Save              func(settings.Config)
 	Refresh           func()

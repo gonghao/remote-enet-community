@@ -289,13 +289,15 @@ func (v *View) sasDialog(c *ui.Context) {
 		enabled := false
 		if client {
 			ui.Text(c, v.tr("Read these 6 digits to the operator."))
-			if len(prompt.Code) == 6 {
-				ui.Text(c, prompt.Code[:3]+" "+prompt.Code[3:]).Font(metricFontFamily).FontSize(24).FontWeight(700)
-				enabled = true
-			}
 			confirm = "Confirm (read to operator)"
 		} else {
 			ui.Text(c, v.tr("Ask the customer to read the 6 digits on their screen and enter them below. You can confirm only when they match.")).FillWidth()
+		}
+		if len(prompt.Code) == 6 {
+			ui.Text(c, prompt.Code[:3]+" "+prompt.Code[3:]).Font(metricFontFamily).FontSize(24).FontWeight(700)
+			enabled = client
+		}
+		if !client {
 			input := v.sasInput
 			ui.TextInput(c.Key("sas"), &input).Label(v.tr("Short code")).Font(metricFontFamily).FontSize(24).FillWidth()
 			if input != v.sasInput {

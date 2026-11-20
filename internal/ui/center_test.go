@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -63,10 +64,7 @@ func TestCenterSASDialog(t *testing.T) {
 		t.Run(role, func(t *testing.T) {
 			cfg := centerConfig()
 			cfg.Role = role
-			prompt := centerflow.SASPrompt{ID: 1, Deadline: time.Now().Add(time.Minute)}
-			if role == settings.RoleClient {
-				prompt.Code = "001234"
-			}
+			prompt := centerflow.SASPrompt{ID: 1, Code: "001234", Deadline: time.Now().Add(time.Minute)}
 			var answers []bool
 			v := New(cfg, Actions{CenterDisplay: func() (string, centerflow.SASPrompt) { return "", prompt }, MatchSAS: func(id uint64, input string) bool {
 				digits, ok := sasDigits(input)
@@ -81,6 +79,9 @@ func TestCenterSASDialog(t *testing.T) {
 			s.Center.SASID, s.Center.SASDeadline = prompt.ID, prompt.Deadline
 			v.SetState(s)
 			tt := ui.NewTester(v.Render, 440, 700)
+			if !tt.HasText("001 234") {
+				t.Fatal("missing local SAS")
+			}
 			label := "Confirm"
 			if role == settings.RoleOperator {
 				for _, val := range []string{"", "123", "123456"} {
@@ -101,9 +102,6 @@ func TestCenterSASDialog(t *testing.T) {
 				input(t, tt, "Short code", "００１ ２３４")
 			} else {
 				label = "Confirm (read to operator)"
-				if !tt.HasText("001 234") {
-					t.Fatal("missing client digits")
-				}
 			}
 			click(t, tt, label)
 			if len(answers) != 1 || !answers[0] {
@@ -287,5 +285,51 @@ func TestCenterReceptionActions(t *testing.T) {
 	click(t, tt, "End reception")
 	if ends != 1 {
 		t.Fatal("end not sent")
+	}
+}
+
+func TestClientSessionRecovery(t *testing.T) {
+	for _, lang := range []string{"en", "zh-Hans", "zh-Hant"} {
+		t.Run(lang, func(t *testing.T) {
+			cfg := centerConfig()
+			cfg.Role = settings.RoleClient
+			now := time.Date(2026, 11, 20, 8, 0, 0, 0, time.Local)
+			older := centerflow.SessionCandidate{ID: center.SessionID{1}, ShortID: "010000", RedeemedAt: now}
+			newer := centerflow.SessionCandidate{ID: center.SessionID{2}, ShortID: "020000", RedeemedAt: now.Add(time.Minute)}
+			items := []centerflow.SessionCandidate{older, newer}
+			var selected center.SessionID
+			v := New(cfg, Actions{
+				CenterSessionCandidates: func() []centerflow.SessionCandidate { return slices.Clone(items) },
+				ResumeCenterSession:     func(id center.SessionID) { selected = id },
+			})
+			v.SetLanguage(lang)
+			tt := ui.NewTester(v.Render, 440, 700)
+			title := v.tr("Choose a session to recover")
+			first := "020000 · 2026-11-20 08:01:00"
+			second := "010000 · 2026-11-20 08:00:00"
+			a, okA := tt.Find(first)
+			b, okB := tt.Find(second)
+			if !tt.HasText(title) || !okA || !okB || a.Y >= b.Y || tt.HasText(older.ID.String()) || tt.HasText(newer.ID.String()) {
+				t.Fatal("expected only short IDs and redemption times, newest first")
+			}
+			tt.Scroll(220, 590, 0, 600)
+			if after, _ := tt.Find(second); after != b {
+				t.Fatal("default recovery page scrolled")
+			}
+			click(t, tt, second)
+			if selected != older.ID {
+				t.Fatal("wrong recovery selection")
+			}
+			v.actions.ResumeCenterSession = nil
+			tt.Frame()
+			if action, ok := tt.AccessByRole(ui.RoleButton, first); !ok || !action.Disabled {
+				t.Fatal("recovery action should require a controller handler")
+			}
+			items = nil
+			tt.Frame()
+			if tt.HasText(title) || tt.HasText(first) {
+				t.Fatal("stale recovery list")
+			}
+		})
 	}
 }

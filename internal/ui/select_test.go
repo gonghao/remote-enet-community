@@ -1,66 +1,63 @@
 package ui
 
 import (
-	"image/color"
+	"embed"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"go/types"
 	"slices"
 	"testing"
-
-	"github.com/egoist/mygo/ui"
-
-	"remote-enet/internal/settings"
 )
 
-// Sample the trailing interior, excluding the field's label and border.
-func dropdownIcon(tt *ui.Tester, bounds ui.Rect) []color.RGBA {
-	frame := tt.Image()
-	right, mid := int(bounds.X+bounds.W), int(bounds.Y+bounds.H/2)
-	var pixels []color.RGBA
-	for y := mid - 8; y < mid+8; y++ {
-		for x := right - 32; x < right-2; x++ {
-			pixels = append(pixels, frame.RGBAAt(x, y))
-		}
-	}
-	return pixels
-}
+//go:embed capture.go forms.go language.go
+var dropdownSources embed.FS
 
+// Select's chevron is private to MyGo. Check the construction paths before
+// rasterization: the same vector can cover different pixels at different origins.
 func TestDropdownsUseThemedChevron(t *testing.T) {
 	for _, tc := range []struct {
-		role  string
-		page  page
-		label string
-		width int
+		file, function string
+		want           []string
 	}{
-		{settings.RoleClient, settingsPage, "Interface language", clientWidth},
-		{settings.RoleClient, sessionPage, "Adapter selection", clientWidth},
-		{settings.RoleOperator, settingsPage, "Interface language", 1080},
-		{settings.RoleOperator, settingsPage, "Connection mode", 1080},
-		{settings.RoleOperator, capturePage, "Capture direction filter", 1080},
+		{"language.go", "languageSelect", []string{"ui.Select"}},
+		{"forms.go", "operatorForm", []string{"ui.Select"}},
+		{"capture.go", "capturePage", []string{"ui.Select"}},
+		{"forms.go", "nicSelect", []string{"ui.SelectBase", "selectChevron"}},
+		{"forms.go", "selectChevron", []string{"StrokePath"}},
 	} {
-		t.Run(tc.role+"/"+tc.label, func(t *testing.T) {
-			cfg := operatorConfig()
-			cfg.Role = tc.role
-			v := New(cfg, Actions{SetLanguage: func(string) {}, Save: func(settings.Config) {}})
-			v.page = tc.page
-			tt := ui.NewTester(v.Render, tc.width, 900)
-			field, ok := tt.AccessByRole(ui.RolePopUpButton, tc.label)
-			if !ok {
-				t.Fatalf("missing dropdown %q", tc.label)
+		t.Run(tc.function, func(t *testing.T) {
+			src, err := dropdownSources.ReadFile(tc.file)
+			if err != nil {
+				t.Fatal(err)
 			}
-			reference := ui.NewTester(func(c *ui.Context) {
-				c.SetTheme(Theme())
-				value := "Option"
-				ui.Select(c, &value, []string{value}).Label("Reference").Width(240).Height(field.Bounds.H)
-			}, 300, 100)
-			standard, ok := reference.AccessByRole(ui.RolePopUpButton, "Reference")
-			if !ok {
-				t.Fatal("missing reference dropdown")
+			file, err := parser.ParseFile(token.NewFileSet(), tc.file, src, parser.SkipObjectResolution)
+			if err != nil {
+				t.Fatal(err)
 			}
-			want := dropdownIcon(reference, standard.Bounds)
-			if !slices.ContainsFunc(want, func(p color.RGBA) bool { return p != want[0] }) {
-				t.Fatal("reference arrow is blank")
+			var got []string
+			for _, decl := range file.Decls {
+				fn, ok := decl.(*ast.FuncDecl)
+				if !ok || fn.Name.Name != tc.function {
+					continue
+				}
+				for node := range ast.Preorder(fn.Body) {
+					call, ok := node.(*ast.CallExpr)
+					if !ok {
+						continue
+					}
+					if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "StrokePath" {
+						got = append(got, "StrokePath")
+						continue
+					}
+					switch name := types.ExprString(call.Fun); name {
+					case "ui.Select", "ui.SelectBase", "selectChevron":
+						got = append(got, name)
+					}
+				}
 			}
-			if !slices.Equal(dropdownIcon(tt, field.Bounds), want) {
-				t.Fatal("arrow differs from the theme Select")
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("dropdown construction in %s: got %v, want %v", tc.file, got, tc.want)
 			}
 		})
 	}

@@ -52,13 +52,20 @@ func (r *Runtime) RunClient(ctx context.Context, cfg ClientConfig) (err error) {
 	if err != nil {
 		return err
 	}
-	peer, token, err := clientPeer(ctx, cfg, store)
-	if err != nil {
-		return err
+	var peer transport.PeerInfo
+	var token [16]byte
+	if cfg.Center == nil {
+		peer, token, err = clientPeer(ctx, cfg, store)
+		if err != nil {
+			return err
+		}
 	}
 	id, err := store.LoadIdentity(ctx)
 	if err != nil {
 		return err
+	}
+	if cfg.Center != nil {
+		return centerError(r.runCenterClient(ctx, cfg, id))
 	}
 	connector, _, err := hubtransport.New(hubtransport.Options{Local: id, Wrap: wrap(id)})
 	if err != nil {
@@ -157,69 +164,13 @@ func (r *Runtime) clientLoop(ctx context.Context, cfg ClientConfig, connector cl
 				return err
 			}
 		}
-		nic, err := selectNIC(ctx, cfg)
-		if errors.Is(err, carside.ErrNICUnavailable) {
-			r.update(func(s *Snapshot) {
-				s.NIC, s.Gateway, s.VIN = carside.NIC{}, netip.Addr{}, ""
-			})
-			if err := r.clientWait(ctx, cfg, PhaseWaitingNIC, err.Error(), cfg.NICCheckInterval); err != nil {
-				return err
-			}
-			continue
-		}
+		nic, gateway, err := r.discoverVehicle(ctx, cfg, &delay)
 		if err != nil {
-			if !errors.Is(err, errEnumeration) {
-				return fmt.Errorf("select vehicle interface; specify --nic and --nic-addr if ambiguous: %w", err)
-			}
-			if err := r.clientWait(ctx, cfg, PhaseBackoff, err.Error(), delay); err != nil {
-				return err
-			}
-			delay = nextDelay(delay, cfg.RetryMax)
+			return err
+		}
+		if !gateway.Address.IsValid() {
 			continue
 		}
-		r.update(func(s *Snapshot) {
-			s.Phase, s.NIC, s.Gateway, s.VIN = PhaseDiscovering, nic, netip.Addr{}, ""
-			s.NextRetry = time.Time{}
-		})
-		gateways, err := cfg.Hooks.Discover(ctx, carside.DiscoverOptions{NIC: nic, Destinations: cfg.DiscoveryDestinations, Timeout: cfg.DiscoveryTimeout, Logger: cfg.Logger})
-		if err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			if err := r.clientWait(ctx, cfg, PhaseBackoff, fmt.Sprintf("discover vehicle: %v", err), delay); err != nil {
-				return err
-			}
-			delay = nextDelay(delay, cfg.RetryMax)
-			continue
-		}
-		if len(gateways) > 1 {
-			return fmt.Errorf("found %d gateways; isolate one vehicle or use a unicast --discovery-target", len(gateways))
-		}
-		if len(gateways) == 0 {
-			if err := r.clientWait(ctx, cfg, PhaseWaitingVehicle, "no gateway found; waiting for vehicle", cfg.DiscoveryRetryInterval); err != nil {
-				return err
-			}
-			continue
-		}
-		// Discovery may outlive an address change. Never dial using its stale source.
-		fresh, err := selectNIC(ctx, cfg)
-		if errors.Is(err, carside.ErrNICUnavailable) || err == nil && fresh != nic {
-			continue
-		}
-		if err != nil {
-			if !errors.Is(err, errEnumeration) {
-				return err
-			}
-			if err := r.clientWait(ctx, cfg, PhaseBackoff, err.Error(), delay); err != nil {
-				return err
-			}
-			delay = nextDelay(delay, cfg.RetryMax)
-			continue
-		}
-		gateway := gateways[0]
-		r.update(func(s *Snapshot) {
-			s.Phase, s.Gateway, s.VIN = PhaseConnecting, gateway.Address, gateway.Identification.VIN
-		})
 		saved, connected, fatal, err := r.clientConnection(ctx, connector, peer, token, store, nic, gateway, cfg)
 		if saved != nil {
 			peer, cfg.DirectPair, cfg.Peer = *saved, nil, saved.ID
@@ -255,6 +206,77 @@ func (r *Runtime) clientLoop(ctx context.Context, cfg ClientConfig, connector cl
 		}
 		delay = nextDelay(delay, cfg.RetryMax)
 	}
+}
+
+// An empty gateway schedules another discovery pass after the caller rechecks its credentials.
+func (r *Runtime) discoverVehicle(ctx context.Context, cfg ClientConfig, delay *time.Duration) (carside.NIC, carside.Gateway, error) {
+	if err := ctx.Err(); err != nil {
+		return carside.NIC{}, carside.Gateway{}, err
+	}
+	nic, err := selectNIC(ctx, cfg)
+	if errors.Is(err, carside.ErrNICUnavailable) {
+		r.update(func(s *Snapshot) {
+			s.NIC, s.Gateway, s.VIN = carside.NIC{}, netip.Addr{}, ""
+		})
+		if err := r.clientWait(ctx, cfg, PhaseWaitingNIC, err.Error(), cfg.NICCheckInterval); err != nil {
+			return carside.NIC{}, carside.Gateway{}, err
+		}
+		return carside.NIC{}, carside.Gateway{}, nil
+	}
+	if err != nil {
+		if !errors.Is(err, errEnumeration) {
+			return carside.NIC{}, carside.Gateway{}, fmt.Errorf("select vehicle interface; specify --nic and --nic-addr if ambiguous: %w", err)
+		}
+		if err := r.clientWait(ctx, cfg, PhaseBackoff, err.Error(), *delay); err != nil {
+			return carside.NIC{}, carside.Gateway{}, err
+		}
+		*delay = nextDelay(*delay, cfg.RetryMax)
+		return carside.NIC{}, carside.Gateway{}, nil
+	}
+	r.update(func(s *Snapshot) {
+		s.Phase, s.NIC, s.Gateway, s.VIN = PhaseDiscovering, nic, netip.Addr{}, ""
+		s.NextRetry = time.Time{}
+	})
+	gateways, err := cfg.Hooks.Discover(ctx, carside.DiscoverOptions{NIC: nic, Destinations: cfg.DiscoveryDestinations, Timeout: cfg.DiscoveryTimeout, Logger: cfg.Logger})
+	if err != nil {
+		if ctx.Err() != nil {
+			return carside.NIC{}, carside.Gateway{}, ctx.Err()
+		}
+		if err := r.clientWait(ctx, cfg, PhaseBackoff, fmt.Sprintf("discover vehicle: %v", err), *delay); err != nil {
+			return carside.NIC{}, carside.Gateway{}, err
+		}
+		*delay = nextDelay(*delay, cfg.RetryMax)
+		return carside.NIC{}, carside.Gateway{}, nil
+	}
+	if len(gateways) > 1 {
+		return carside.NIC{}, carside.Gateway{}, fmt.Errorf("found %d gateways; isolate one vehicle or use a unicast --discovery-target", len(gateways))
+	}
+	if len(gateways) == 0 {
+		if err := r.clientWait(ctx, cfg, PhaseWaitingVehicle, "no gateway found; waiting for vehicle", cfg.DiscoveryRetryInterval); err != nil {
+			return carside.NIC{}, carside.Gateway{}, err
+		}
+		return carside.NIC{}, carside.Gateway{}, nil
+	}
+	// Discovery may outlive an address change. Never dial using its stale source.
+	fresh, err := selectNIC(ctx, cfg)
+	if errors.Is(err, carside.ErrNICUnavailable) || err == nil && fresh != nic {
+		return carside.NIC{}, carside.Gateway{}, nil
+	}
+	if err != nil {
+		if !errors.Is(err, errEnumeration) {
+			return carside.NIC{}, carside.Gateway{}, err
+		}
+		if err := r.clientWait(ctx, cfg, PhaseBackoff, err.Error(), *delay); err != nil {
+			return carside.NIC{}, carside.Gateway{}, err
+		}
+		*delay = nextDelay(*delay, cfg.RetryMax)
+		return carside.NIC{}, carside.Gateway{}, nil
+	}
+	gateway := gateways[0]
+	r.update(func(s *Snapshot) {
+		s.Phase, s.Gateway, s.VIN = PhaseConnecting, gateway.Address, gateway.Identification.VIN
+	})
+	return nic, gateway, nil
 }
 
 func ticketDialError(err error) (fatal bool, classified error) {

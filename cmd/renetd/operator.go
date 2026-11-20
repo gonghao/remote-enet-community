@@ -11,13 +11,16 @@ import (
 	"strconv"
 
 	"remote-enet/internal/app"
+	"remote-enet/internal/centerstate"
 	"remote-enet/internal/hsfzcapture"
 	"remote-enet/internal/operator"
 )
 
-func runOperator(ctx context.Context, args []string, stderr io.Writer, logger *slog.Logger) (runErr error) {
+func runOperator(ctx context.Context, args []string, stdout, stderr io.Writer, logger *slog.Logger) (runErr error) {
 	fs := flags("operator", stderr)
 	stateDir := fs.String("state-dir", "", "operator state directory (required)")
+	node := fs.String("center-node", "", "center node ID")
+	config := fs.String("config", "", "center settings file (defaults to operator GUI settings)")
 	hubFlags := addHubFlags(fs)
 	share := fs.String("share-address", "", "address shared with clients (defaults to --hub in hub mode)")
 	listen := fs.String("listen", "0.0.0.0:47000", "embedded hub listen host:port")
@@ -49,7 +52,32 @@ func runOperator(ctx context.Context, args []string, stderr io.Writer, logger *s
 	if err != nil {
 		return err
 	}
-	if hub != nil {
+	if wasSet(fs, "config") && !wasSet(fs, "center-node") {
+		return fmt.Errorf("--config requires --center-node")
+	}
+	var cc *app.CenterConfig
+	if wasSet(fs, "center-node") {
+		if *node == "" || hub != nil || wasSet(fs, "listen") || wasSet(fs, "share-address") {
+			return fmt.Errorf("--center-node requires an ID and is mutually exclusive with --hub, --listen and --share-address")
+		}
+		centerCfg, err := loadCenter(*config, "operator")
+		if err != nil {
+			return err
+		}
+		cc = &app.CenterConfig{Center: *centerCfg, Node: *node, AppVersion: version}
+		store, err := centerstate.Open(*stateDir, centerCfg.ID)
+		if err != nil {
+			return err
+		}
+		_, ok, err := store.Login()
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("operator is not logged in; log in using the operator GUI with the same state directory")
+		}
+	}
+	if hub != nil || cc != nil {
 		*listen = ""
 	} else {
 		_, listenPort, err := net.SplitHostPort(*listen)
@@ -85,9 +113,12 @@ func runOperator(ctx context.Context, args []string, stderr io.Writer, logger *s
 		}()
 	}
 	r := app.New()
-	return runRuntime(ctx, r, func(ctx context.Context) error {
+	if cc != nil {
+		opts.centerOutput = stdout
+	}
+	err = runRuntime(ctx, r, func(ctx context.Context) error {
 		return r.RunOperator(ctx, app.OperatorConfig{
-			StateDir: *stateDir, Listen: *listen, Hub: hub, ShareAddress: *share, Bind: bindAddr, Exclusive: *exclusive, AllowLinkTest: opts.allowLinkTest,
+			StateDir: *stateDir, Listen: *listen, Hub: hub, Center: cc, ShareAddress: *share, Bind: bindAddr, Exclusive: *exclusive, AllowLinkTest: opts.allowLinkTest,
 			AutoMGU:              *autoMGU,
 			AutoEVO:              *autoEVO,
 			Capture:              capture,
@@ -95,4 +126,8 @@ func runOperator(ctx context.Context, args []string, stderr io.Writer, logger *s
 			RemoteDiagnosticPort: uint16(*remoteDiag), RemoteControlPort: uint16(*remoteCtrl), Logger: logger,
 		})
 	}, *opts, logger)
+	if cc != nil && errors.Is(err, app.PairingErrorKind("unauthenticated")) {
+		return fmt.Errorf("log in using the operator GUI with the same state directory: %w", err)
+	}
+	return err
 }

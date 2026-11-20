@@ -35,7 +35,7 @@ func TestClientInvitationFileUTF8(t *testing.T) {
 			defer cancel()
 			var logs bytes.Buffer
 			logger := slog.New(slog.NewTextHandler(&logs, nil))
-			err := runClient(ctx, []string{"--state-dir", filepath.Join(dir, "state"), "--invite-file", path, "--nic", "remote-enet-test-interface-absent"}, io.Discard, logger)
+			err := runClient(ctx, []string{"--state-dir", filepath.Join(dir, "state"), "--invite-file", path, "--nic", "remote-enet-test-interface-absent"}, io.Discard, io.Discard, logger)
 			if !errors.Is(err, context.DeadlineExceeded) || !bytes.Contains(logs.Bytes(), []byte("client ready")) {
 				t.Fatalf("UTF-8 invitation did not reach NIC waiting: %v", err)
 			}

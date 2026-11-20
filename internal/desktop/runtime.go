@@ -194,7 +194,10 @@ func (c *Controller) runtimeConfigs(cfg settings.Config, code string) (app.Clien
 		}
 	} else {
 		share := cfg.Operator.Endpoint
-		if cfg.Operator.Mode == "hub" {
+		if cfg.Operator.Mode == "center" {
+			op.Center = &app.CenterConfig{Center: cfg.Center}
+			op.Listen, share = "", ""
+		} else if cfg.Operator.Mode == "hub" {
 			fp, _ := identity.ParseFingerprint(cfg.Operator.Hub.FP) // cfg.Validate checked the pin.
 			op.Listen, op.Hub = "", &app.HubConfig{Addr: cfg.Operator.Hub.Addr, FP: fp}
 			share = cfg.Operator.Hub.Share
@@ -202,7 +205,7 @@ func (c *Controller) runtimeConfigs(cfg settings.Config, code string) (app.Clien
 				share = op.Hub.Addr
 			}
 		}
-		if share == "" || cfg.Operator.Bind == "" {
+		if op.Center == nil && share == "" || cfg.Operator.Bind == "" {
 			return client, op, pairing, fmt.Errorf("desktop: operator endpoint and presentation IP required")
 		}
 		if cfg.Operator.Exclusive && runtime.GOOS != "windows" {

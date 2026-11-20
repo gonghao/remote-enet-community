@@ -33,6 +33,7 @@ import (
 type OperatorConfig struct {
 	StateDir             string
 	Listen               string
+	Center               *CenterConfig
 	Hub                  *HubConfig
 	ShareAddress         string
 	Bind                 netip.Addr
@@ -63,7 +64,11 @@ func (cfg OperatorConfig) validate() error {
 	if !unicastIPv4(cfg.Bind) {
 		return fmt.Errorf("app: operator bind must be unicast IPv4")
 	}
-	if cfg.Hub != nil {
+	if cfg.Center != nil {
+		if cfg.Listen != "" || cfg.Hub != nil || cfg.ShareAddress != "" {
+			return fmt.Errorf("app: center, hub and direct listener are mutually exclusive")
+		}
+	} else if cfg.Hub != nil {
 		if cfg.Listen != "" {
 			return fmt.Errorf("app: listen and hub are mutually exclusive")
 		}
@@ -120,6 +125,9 @@ func (r *Runtime) RunOperator(ctx context.Context, cfg OperatorConfig) (err erro
 	id, err := store.LoadIdentity(ctx)
 	if err != nil {
 		return err
+	}
+	if cfg.Center != nil {
+		return centerError(r.runCenterOperator(ctx, cfg, id))
 	}
 	opts := hubtransport.Options{Local: id, Wrap: wrap(id), Listen: cfg.Listen}
 	if cfg.Hub != nil {
@@ -251,7 +259,7 @@ func (r *Runtime) operatorConnection(ctx context.Context, ts transport.Session, 
 			}
 		}
 	}()
-	states := make(chan proto.VehicleState, 1)
+	states := make(vehicleStates, 1)
 	var authErr error
 	var responder session.DigitalResponder
 	var grant func(identity.Fingerprint) ([]byte, error)
@@ -288,23 +296,7 @@ func (r *Runtime) operatorConnection(ctx context.Context, ts transport.Session, 
 			}
 			return err == nil && ok
 		},
-		OnMessage: func(msg any) {
-			if state, ok := msg.(proto.VehicleState); ok {
-				state.IdentRaw = bytes.Clone(state.IdentRaw)
-				select {
-				case states <- state:
-				default:
-					select {
-					case <-states:
-					default:
-					}
-					select {
-					case states <- state:
-					default:
-					}
-				}
-			}
-		},
+		OnMessage: states.receive,
 	})
 	if authErr != nil {
 		return true, fmt.Errorf("operator authentication state: %w", authErr)
@@ -316,6 +308,35 @@ func (r *Runtime) operatorConnection(ctx context.Context, ts transport.Session, 
 		}
 		return false, err
 	}
+	peer = s.Peer()
+	cfg.Logger = logger
+	return r.presentVehicle(connectionCtx, s, ts.Path(), cfg, metrics, states)
+}
+
+type vehicleStates chan proto.VehicleState
+
+func (states vehicleStates) receive(msg any) {
+	if state, ok := msg.(proto.VehicleState); ok {
+		state.IdentRaw = bytes.Clone(state.IdentRaw)
+		select {
+		case states <- state:
+		default:
+			select {
+			case <-states:
+			default:
+			}
+			select {
+			case states <- state:
+			default:
+			}
+		}
+	}
+}
+
+func (r *Runtime) presentVehicle(ctx context.Context, s *session.Session, path transport.PathInfo, cfg OperatorConfig, metrics *measurements, states vehicleStates) (bool, error) {
+	connectionCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	logger := cfg.Logger
 	captureGeneration := metrics.start()
 	var first proto.VehicleState
 	timer := time.NewTimer(10 * time.Second)
@@ -346,7 +367,7 @@ func (r *Runtime) operatorConnection(ctx context.Context, ts transport.Session, 
 	if err != nil {
 		return true, fmt.Errorf("start diagnostic listeners: %w", err)
 	}
-	defer func() { cancel(); ts.Close(err); p.Close() }()
+	defer func() { cancel(); p.Close() }()
 	r.mu.Lock()
 	r.exclusiveState = p.ExclusiveState
 	r.mu.Unlock()
@@ -384,8 +405,7 @@ func (r *Runtime) operatorConnection(ctx context.Context, ts transport.Session, 
 		r.mu.Unlock()
 	}
 	install()
-	generation := r.activate(connectionCtx, s, ts.Path())
-	peer = s.Peer()
+	generation := r.activate(connectionCtx, s, path)
 	autoDone := make(chan struct{})
 	if cfg.AutoMGU || cfg.AutoEVO {
 		initial := manager
@@ -406,7 +426,7 @@ func (r *Runtime) operatorConnection(ctx context.Context, ts transport.Session, 
 
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
-	logger.Info("operator presenting vehicle", "peer", ts.Peer().String(), "vin", first.VIN, "diagnostic", diag.String(), "control", ctrl.String(), "discovery", disc.String(), "generation", generation)
+	logger.Info("operator presenting vehicle", "peer", s.Peer().String(), "vin", first.VIN, "diagnostic", diag.String(), "control", ctrl.String(), "discovery", disc.String(), "generation", generation)
 	for {
 		select {
 		case <-ctx.Done():

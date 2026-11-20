@@ -140,7 +140,13 @@ func TestCenterDeadline(t *testing.T) {
 		if len(s.Usage()) != 0 {
 			t.Fatal("expired session still active")
 		}
+		s.SetSessionRetention(time.Hour)
 		advance(time.Second)
+		if s.sessions[sid] == nil {
+			t.Fatal("old retention timer retired idle record")
+		}
+		s.SetSessionRetention(time.Second)
+		synctest.Wait()
 		if s.Renew(sid, time.Now()) {
 			t.Fatal("idle record survived retention")
 		}

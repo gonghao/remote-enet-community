@@ -130,6 +130,21 @@ func (s *Server) SetAdmitting(open bool) {
 	s.admitting = open
 }
 
+// SetSessionRetention updates the cleanup deadline of already idle sessions as well.
+func (s *Server) SetSessionRetention(retention time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.o.SessionRetention == retention {
+		return
+	}
+	s.o.SessionRetention = retention
+	for _, r := range s.sessions {
+		if len(r.routes) == 0 {
+			s.scheduleLocked(r)
+		}
+	}
+}
+
 func (s *Server) commitSessionLocked(w *waiter, c *connection, g Grant, now time.Time) {
 	if g.Session == (SessionID{}) {
 		return

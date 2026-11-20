@@ -71,7 +71,7 @@ func TestConformanceCI(t *testing.T) {
 }
 
 func TestConformancePairingMessages(t *testing.T) {
-	for _, tc := range conformanceCases(t, "v07-pairing-messages", 2) {
+	for _, tc := range conformanceCases(t, "v07-pairing-messages", 3) {
 		t.Run(tc.Name, func(t *testing.T) {
 			v, w := tc.Input, tc.Expect
 			sid := v.bytes(t, "sid")

@@ -23,11 +23,10 @@ def generate(check: bool) -> list[Path]:
         ci_cases.append(dict(name=mode, input=inputs, expect=dict(
             result="accept", hc_sha256=sha256(bytes.fromhex(v["HC"])).hexdigest(),
             ho_sha256=sha256(bytes.fromhex(v["HO"])).hexdigest(), ci=v["CI"])))
-        if mode != "center":
-            expected = dict(result="accept", commit=v["commit"], isk=v["ISK_IR"],
-                            tb=v["Tb"], ta=v["Ta"], sas=v["SAS"])
-            expected.update({f"cbor{n}": v[f"CBOR{n}"] for n in range(11, 17)})
-            messages.append(dict(name=mode, input=dict(prs=v["PRS"], ci=v["CI"],
-                                 sid=v["sid"], ya=v["ya"], yb=v["yb"]), expect=expected))
+        expected = dict(result="accept", commit=v["commit"], isk=v["ISK_IR"],
+                        tb=v["Tb"], ta=v["Ta"], sas=v["SAS"])
+        expected.update({f"cbor{n}": v[f"CBOR{n}"] for n in range(11, 17)})
+        messages.append(dict(name=mode, input=dict(prs=v["PRS"], ci=v["CI"],
+                             sid=v["sid"], ya=v["ya"], yb=v["yb"]), expect=expected))
     return (write_vector("v06-pake-ci.json", "V6", "配对通道绑定", "gen/pake.py", ci_cases, check)
             + write_vector("v07-pairing-messages.json", "V7", "配对消息", "gen/pake.py", messages, check))

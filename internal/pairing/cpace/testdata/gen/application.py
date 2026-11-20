@@ -64,7 +64,7 @@ def hex_fields(**fields: bytes) -> dict[str, str]:
     return {name: value.hex() for name, value in fields.items()}
 
 
-def generate(hub: bool) -> dict[str, str | dict[str, str]]:
+def transcript(hc: bytes, ho: bytes, ci: bytes) -> dict[str, str]:
     library = ctypes.util.find_library("sodium")
     if library is None:
         raise RuntimeError("libsodium was not found")
@@ -73,8 +73,6 @@ def generate(hub: bool) -> dict[str, str | dict[str, str]]:
         raise RuntimeError("libsodium initialization failed")
 
     prs = b"00001234"
-    hub_fp = hashlib.sha256(b"vector hub").digest()
-    hc, ho, ci = binding(b"pair-hub/1", hub_fp) if hub else binding(b"pair-direct/1")
     prefix = lv_cat(DSI, prs)
     padding = bytes(127 - len(prefix))
     digest = hashlib.sha512(prefix + lv_cat(padding, ci, SID)).digest()
@@ -109,12 +107,19 @@ def generate(hub: bool) -> dict[str, str | dict[str, str]]:
         vector[f"CBOR{number}"] = (bytes([0xa2, 1, number, 2]) + body).hex()
     vector["CBOR16"] = (bytes.fromhex("a2011002a201f50268") + b"accepted").hex()
 
+    return vector
+
+
+def generate(hub: bool) -> dict[str, str | dict[str, str]]:
+    hub_fp = hashlib.sha256(b"vector hub").digest()
+    hc, ho, ci = binding(b"pair-hub/1", hub_fp) if hub else binding(b"pair-direct/1")
+    vector = transcript(hc, ho, ci)
     if hub:
         return {**vector, "hub_fp": hub_fp.hex()}
 
     center_id, session_id = b"vector.example", bytes(range(16))
     hc, ho, ci = binding(b"pair-center/1", hub_fp, center_id, session_id)
-    center = hex_fields(HC=hc, HO=ho, hub_fp=hub_fp, center_id=center_id, session_id=session_id, CI=ci)
+    center = transcript(hc, ho, ci) | hex_fields(hub_fp=hub_fp, center_id=center_id, session_id=session_id)
     return {**vector, "center": center}
 
 

@@ -127,4 +127,4 @@ Client 角色也在 Windows Limited token 实测：选择 `以太网 4 · 192.0.
 
 验证边界：仅模拟网关与只读 fixture，不代表完整车辆识别、FA/SVT/coding 或刷写通过；未执行 macOS 实机运行。Windows 独占继续拒绝无法确认 owner 的来源：SSH 会话下的诊断探针未通过，同一交互桌面的普通用户探针通过；尚未进一步归因权限与登录会话差异，未放宽未知 owner 策略。
 
-清理已完成：Windows 无 GUI 后台进程，Hub/诊断/控制 TCP 与发现 UDP 均不再监听，Wave5 的三个临时计划任务和两个限定来源的 Private 防火墙规则已移除，测试邀请码文件与自有剪贴板内容已清除。保留可再次运行的 Native 构建、已配对测试身份和已有桌面自动化辅助；SSH、虚拟显示器与 EDIABAS 配置没有为本轮功能作永久变更。Windows 可执行文件留在 `C:\Users\ghSky\remote-enet-test\wave5\renet.exe`，默认保存角色已恢复为 Operator。
+清理已完成：Windows 无 GUI 后台进程，Hub/诊断/控制 TCP 与发现 UDP 均不再监听，Wave5 的三个临时计划任务和两个限定来源的 Private 防火墙规则已移除，测试邀请码文件与自有剪贴板内容已清除。保留可再次运行的 Native 构建、已配对测试身份和已有桌面自动化辅助；SSH、虚拟显示器与 EDIABAS 配置没有为本轮功能作永久变更。Windows 可执行文件留在 `C:\Users\<user>\remote-enet-test\wave5\renet.exe`，默认保存角色已恢复为 Operator。

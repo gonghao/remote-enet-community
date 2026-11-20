@@ -72,4 +72,4 @@ Windows/macOS 分别构建 Client 与 Operator，CI 更新入口与共享包；W
 
 本轮两端和原始假车同处一个测试 LAN，广播探针会同时收到原始假车与 Operator 的回包。台架脚本因此定向探测 Operator 的单播地址，避免把不同来源的测试回包混为一处；生产发现逻辑未修改。真实实车、WAN 弱网和 macOS 原生窗口/托盘仍待独立验收。
 
-测试结束已停止两个 GUI 与 Linux 假网关/广播 fixture，移除 Wave6 的四个临时计划任务和两个限定来源的 Private 防火墙规则，并清除测试剪贴板邀请码。SSH 和既有桌面自动化仍可用；测试构建保留在 Windows `C:\Users\ghSky\remote-enet-test\wave6\renet-client.exe` 与 `renet-operator.exe`。最终变更由整合提交统一记录。
+测试结束已停止两个 GUI 与 Linux 假网关/广播 fixture，移除 Wave6 的四个临时计划任务和两个限定来源的 Private 防火墙规则，并清除测试剪贴板邀请码。SSH 和既有桌面自动化仍可用；测试构建保留在 Windows `C:\Users\<user>\remote-enet-test\wave6\renet-client.exe` 与 `renet-operator.exe`。最终变更由整合提交统一记录。

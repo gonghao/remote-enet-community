@@ -31,7 +31,7 @@ func (n *Node) report(ctx context.Context, gen uint32, seq uint64, last, current
 	live := n.o.Server.Usage()
 	slices.SortFunc(live, func(a, b hub.Usage) int { return bytes.Compare(a.Session[:], b.Session[:]) })
 	h := center.Heartbeat{Gen: gen, Seq: seq, Version: n.o.Version, Kids: n.kids(), Closed: closed[:min(len(closed), maxEntries)]}
-	if len(live) > maxEntries || len(closed) > maxEntries {
+	if len(live) > maxEntries {
 		n.o.Logger.ErrorContext(ctx, "Heartbeat entry limit exceeded", "sessions", len(live), "closed", len(closed))
 	}
 	h.Load.Sessions = uint64(len(live))
@@ -54,17 +54,31 @@ func (n *Node) report(ctx context.Context, gen uint32, seq uint64, last, current
 }
 
 func (n *Node) revoke(revocations []center.Revocation, previous []center.ClosedUsage) []center.ClosedUsage {
-	closed := make([]center.ClosedUsage, 0, len(revocations))
+	// Revoke the full set before advertising any closed session. Rotate the
+	// previously sent batch to the back so persistent revocations cannot starve
+	// pending reports, even when the hub's seal cache has already expired.
+	current := make(map[center.SessionID]center.ClosedUsage, len(revocations))
 	for _, r := range revocations {
-		final := usage(n.o.Server.Revoke(hub.SessionID(r.SessionID)))
-		// A prolonged outage can outlast the server seal cache. Keep the
-		// original final totals until the center acknowledges this session.
-		i, found := slices.BinarySearchFunc(previous, r.SessionID, func(u center.ClosedUsage, id center.SessionID) int { return bytes.Compare(u.SessionID[:], id[:]) })
-		if found {
-			final = previous[i]
-		}
-		closed = append(closed, final)
+		current[r.SessionID] = usage(n.o.Server.Revoke(hub.SessionID(r.SessionID)))
 	}
-	slices.SortFunc(closed, func(a, b center.ClosedUsage) int { return bytes.Compare(a.SessionID[:], b.SessionID[:]) })
+	closed := make([]center.ClosedUsage, 0, len(current))
+	sent := min(len(previous), maxEntries)
+	retain := func(batch []center.ClosedUsage) {
+		for _, u := range batch {
+			if _, ok := current[u.SessionID]; ok {
+				closed = append(closed, u)
+				delete(current, u.SessionID)
+			}
+		}
+	}
+	retain(previous[sent:])
+	// Previously unsent sessions go first, then outstanding retries, then
+	// new arrivals. A steady stream of arrivals cannot displace retries.
+	retain(previous[:sent])
+	added := len(closed)
+	for _, u := range current {
+		closed = append(closed, u)
+	}
+	slices.SortFunc(closed[added:], func(a, b center.ClosedUsage) int { return bytes.Compare(a.SessionID[:], b.SessionID[:]) })
 	return closed
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"encoding/binary"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -552,4 +553,39 @@ func TestPartialHeartbeatResponse(t *testing.T) {
 		}
 		f.connect(f.op, f.token(1, 2, 2), hub.ErrPeerBusy)
 	})
+}
+
+func TestClosedBatchesRetainFinalUsage(t *testing.T) {
+	f := newFixture(t, nil)
+	// Model a lost heartbeat after the seal cache expired: only the pending
+	// snapshot still has the original final counters.
+	var pending []center.ClosedUsage
+	var revoke []center.Revocation
+	for i := 1; i <= 2*maxEntries+1; i++ {
+		var id center.SessionID
+		binary.BigEndian.PutUint64(id[8:], uint64(i))
+		pending = append(pending, center.ClosedUsage{SessionID: id, RxBytes: uint64(i), TxBytes: uint64(i + 1)})
+		revoke = append(revoke, center.Revocation{SessionID: id})
+	}
+	seen := map[center.SessionID]bool{}
+	for seq := uint64(1); seq <= 3; seq++ {
+		req := f.report(t.Context(), 1, seq, trafficSample{}, trafficSample{}, pending)
+		if len(req.Closed) != maxEntries {
+			t.Fatal(len(req.Closed))
+		}
+		for _, u := range req.Closed {
+			i := binary.BigEndian.Uint64(u.SessionID[8:])
+			if u.RxBytes != i || u.TxBytes != i+1 {
+				t.Fatal(u)
+			}
+			seen[u.SessionID] = true
+		}
+		pending = f.revoke(revoke, pending)
+	}
+	if len(seen) != len(revoke) {
+		t.Fatalf("reported %d/%d", len(seen), len(revoke))
+	}
+	if remaining := f.revoke(revoke[:1], pending); len(remaining) != 1 || remaining[0].RxBytes != 1 {
+		t.Fatal(remaining)
+	}
 }

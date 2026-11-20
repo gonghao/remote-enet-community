@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -40,6 +41,28 @@ func TestCodeConformance(t *testing.T) {
 			}
 			if doc.Format != 1 || doc.Vector != vector.id || len(doc.Cases) == 0 {
 				t.Fatal("invalid vector document")
+			}
+			// Both published vectors must exercise the White_Space boundaries.
+			var accepted, rejected strings.Builder
+			for _, tc := range doc.Cases {
+				switch tc.Expect.Result {
+				case "accept":
+					accepted.WriteString(tc.Input)
+				case "reject":
+					if tc.Expect.Reason == vector.section+"/character" {
+						rejected.WriteString(tc.Input)
+					}
+				}
+			}
+			for _, r := range "\u0085\u3000" {
+				if !strings.ContainsRune(accepted.String(), r) {
+					t.Errorf("missing accepted separator %U", r)
+				}
+			}
+			for _, r := range "\ufeff\u200b\x1c\x1d\x1e\x1f" {
+				if !strings.ContainsRune(rejected.String(), r) {
+					t.Errorf("missing rejected symbol %U", r)
+				}
 			}
 			for _, tc := range doc.Cases {
 				t.Run(tc.Name, func(t *testing.T) {

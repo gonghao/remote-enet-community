@@ -1,3 +1,5 @@
+// Package centercode treats Unicode White_Space as code separators.
+// BOM, zero-width space and U+001C through U+001F are invalid symbols.
 package centercode
 
 import (

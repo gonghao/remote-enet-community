@@ -95,8 +95,24 @@
       }
     },
     {
+      "name": "unicode-separators",
+      "input": "0123　4567",
+      "expect": {
+        "result": "accept",
+        "normalized": "01234567"
+      }
+    },
+    {
       "name": "zero-width-space",
       "input": "0123​4567",
+      "expect": {
+        "result": "reject",
+        "reason": "4.2/character"
+      }
+    },
+    {
+      "name": "leading-bom",
+      "input": "﻿01234567",
       "expect": {
         "result": "reject",
         "reason": "4.2/character"
@@ -111,8 +127,24 @@
       }
     },
     {
-      "name": "leading-bom",
-      "input": "﻿01234567",
+      "name": "group-separator",
+      "input": "0123\u001d4567",
+      "expect": {
+        "result": "reject",
+        "reason": "4.2/character"
+      }
+    },
+    {
+      "name": "record-separator",
+      "input": "0123\u001e4567",
+      "expect": {
+        "result": "reject",
+        "reason": "4.2/character"
+      }
+    },
+    {
+      "name": "unit-separator",
+      "input": "0123\u001f4567",
       "expect": {
         "result": "reject",
         "reason": "4.2/character"

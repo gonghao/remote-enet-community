@@ -50,6 +50,15 @@ def make_cases(examples: dict[str, str], normalize: Callable[[str], str],
 
 
 def generate(check: bool) -> list[Path]:
+    whitespace_cases = {
+        "unicode-separators": "0123\u300045\u008567",
+        "zero-width-space": "0123\u200b4567",
+        "leading-bom": "\ufeff01234567",
+        "control-separator": "0123\x1c4567",
+        "group-separator": "0123\x1d4567",
+        "record-separator": "0123\x1e4567",
+        "unit-separator": "0123\x1f4567",
+    }
     account_cases = make_cases({
         "alphabet-digits-first": "01234567",
         "alphabet-digits-and-letters": "89ABCDEF",
@@ -67,6 +76,7 @@ def generate(check: bool) -> list[Path]:
         "punctuation": "ABC*EFGH",
         "full-width-letter": "ＡBCDEFGH",
         "non-ascii-case-fold": "ABCDſFGH",
+        **whitespace_cases,
     }, normalize_account_code, "4.1")
     for case in account_cases:
         expect = case["expect"]
@@ -86,9 +96,7 @@ def generate(check: bool) -> list[Path]:
         "invalid-after-nine-digits": "123456789A",
         "mixed-letter": "0123A567",
         "other-decimal-digits": "٠١٢٣٤٥٦٧",
-        "zero-width-space": "0123\u200b4567",
-        "control-separator": "0123\x1c4567",
-        "leading-bom": "\ufeff01234567",
+        **whitespace_cases,
     }, normalize_numeric_code, "4.2")
     return (
         write_vector("v01-account-code.json", "V1", "账号码规范化",

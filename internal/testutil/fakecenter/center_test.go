@@ -177,7 +177,8 @@ func TestSignedLifecycle(t *testing.T) {
 	if b := f.send(f.request(1, "operator", sessionPath+"/established", randomID(), "", establish), 200, ""); b["state"] != "active" {
 		t.Fatal(b)
 	}
-	beat := object{"version": "1.0.0", "gen": 1, "seq": 1, "sessions": []object{{"state": "paired", "session_id": id, "rx_bytes": 7}}}
+	load := object{"conns": 2, "sessions": 1, "waiting": 0, "rx_bps": 0, "tx_bps": 0}
+	beat := object{"closed": nil, "kids": nil, "load": load, "version": "1.0.0", "gen": 1, "seq": 1, "sessions": []object{{"state": "paired", "session_id": id, "rx_bytes": 7, "tx_bytes": 0, "paired_s": 0}}}
 	heartbeat := func() *http.Request { return f.request(0, "hub", "/v1/node/heartbeat", "", "", beat) }
 	if b := f.send(heartbeat(), 200, ""); len(b["renew"].([]any)) != 1 {
 		t.Fatal(b)
@@ -188,11 +189,12 @@ func TestSignedLifecycle(t *testing.T) {
 	f.send(f.request(0, "operator", path, next, "", create), 409, "quota_releasing")
 	beat["seq"] = 2
 	beat["sessions"] = nil
+	load["sessions"], load["conns"] = 0, 0
 	if b := f.send(heartbeat(), 200, ""); len(b["revoke"].([]any)) != 1 {
 		t.Fatal(b)
 	}
 	beat["seq"] = 3
-	beat["closed"] = []object{{"session_id": id, "rx_bytes": 5, "paired_s": 3}}
+	beat["closed"] = []object{{"session_id": id, "rx_bytes": 5, "tx_bytes": 0, "paired_s": 3}}
 	f.send(heartbeat(), 200, "")
 	s := f.c.Snapshot()[id]
 	if !s.Released || s.Reason != "client_ended" || s.Usage.RX != 7 || s.Usage.Paired != 3 || s.Tickets != 1 {
@@ -258,6 +260,39 @@ func TestLazyDeadlinesAndRevocation(t *testing.T) {
 				t.Fatal(s)
 			}
 			f.send(f.request(1, "client", "/v1/redeem", randomID(), "", object{"code": b["code"], "salt": randomID()}), 404, "code_invalid")
+		})
+	}
+}
+
+func TestNodeRequestPresence(t *testing.T) {
+	f := newFixture(t)
+	activation := f.activate()
+	delete(activation, "kids")
+	activate := func() *http.Request { return f.request(0, "hub", "/v1/node/activate", randomID(), "", activation) }
+	f.send(activate(), 400, "bad_request")
+	activation["kids"] = nil
+	f.send(activate(), 200, "")
+
+	for _, field := range []string{"load", "load_null", "tx_bps", "sessions_count", "waiting_count", "kids", "sessions", "closed", "paired_s"} {
+		t.Run(field, func(t *testing.T) {
+			load := object{"conns": 1, "sessions": 1, "waiting": 1, "rx_bps": 0, "tx_bps": 0}
+			item := object{"state": "waiting", "session_id": randomID(), "rx_bytes": 0, "tx_bytes": 0, "paired_s": 0}
+			beat := object{"gen": 1, "seq": 1, "version": "1.0.0", "load": load, "kids": nil, "sessions": []object{item}, "closed": nil}
+			switch field {
+			case "load_null":
+				beat["load"] = nil
+			case "tx_bps":
+				delete(load, field)
+			case "sessions_count":
+				load["sessions"] = 0
+			case "waiting_count":
+				load["waiting"] = 0
+			case "paired_s":
+				delete(item, field)
+			default:
+				delete(beat, field)
+			}
+			f.send(f.request(0, "hub", "/v1/node/heartbeat", "", "", beat), 400, "bad_request")
 		})
 	}
 }

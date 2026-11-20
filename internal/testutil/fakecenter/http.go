@@ -2,6 +2,7 @@ package fakecenter
 
 import (
 	"crypto/sha256"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"io"
@@ -59,6 +60,42 @@ type heartbeatInput struct {
 	Sessions []report `json:"sessions"`
 	Closed   []report `json:"closed"`
 }
+
+// Value decoding alone cannot distinguish missing counters from genuine zeros.
+func nodeBodyFields(body []byte, heartbeat bool) bool {
+	var fields map[string]jsontext.Value
+	if json.Unmarshal(body, &fields) != nil || fields["kids"] == nil {
+		return false
+	}
+	if !heartbeat {
+		return true
+	}
+	var load map[string]jsontext.Value
+	if json.Unmarshal(fields["load"], &load) != nil || !hasValues(load, "conns", "sessions", "waiting", "rx_bps", "tx_bps") {
+		return false
+	}
+	for _, name := range []string{"sessions", "closed"} {
+		var items []map[string]jsontext.Value
+		if json.Unmarshal(fields[name], &items) != nil {
+			return false
+		}
+		for _, item := range items {
+			if !hasValues(item, "rx_bytes", "tx_bytes", "paired_s") {
+				return false
+			}
+		}
+	}
+	return true
+}
+func hasValues(fields map[string]jsontext.Value, names ...string) bool {
+	for _, name := range names {
+		if v := fields[name]; v == nil || v.Kind() == 'n' {
+			return false
+		}
+	}
+	return true
+}
+
 type call struct {
 	loginInput                    loginInput
 	redeemInput                   redeemInput
@@ -252,6 +289,9 @@ func (c *Center) handle(r *http.Request, path string, f Fault) (result, bool) {
 		dest = &struct{}{}
 	}
 	if len(body) > 0 && (json.Unmarshal(body, dest) != nil || strings.TrimSpace(string(body)) == "null") {
+		return failure("bad_request"), false
+	}
+	if hub && !nodeBodyFields(body, a.op == "heartbeat") {
 		return failure("bad_request"), false
 	}
 	if code := validate(&a); code != "" {

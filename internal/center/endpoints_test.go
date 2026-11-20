@@ -153,6 +153,7 @@ func TestEndpointLifecycle(t *testing.T) {
 	wantCode(t, err, "quota_releasing")
 	hb.Seq++
 	hb.Sessions = nil
+	hb.Load = center.Load{}
 	reply, err = hub.Heartbeat(ctx, hb)
 	if err != nil || len(reply.Revoke) != 1 || reply.Revoke[0].SessionID != id || reply.Revoke[0].Reason != *ended.EndReason {
 		t.Fatal(reply, err)

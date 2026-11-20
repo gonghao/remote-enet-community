@@ -38,14 +38,21 @@ func validateNode(a *call) string {
 	if a.heartbeatInput.Gen == 0 || a.heartbeatInput.Seq == 0 || len(a.heartbeatInput.Sessions) > 1000 || len(a.heartbeatInput.Closed) > 1000 {
 		return "bad_request"
 	}
+	var waiting uint64
 	seen := map[string]bool{}
 	for i, list := range [][]report{a.heartbeatInput.Sessions, a.heartbeatInput.Closed} {
 		for _, u := range list {
 			if !validBytes(u.ID, 16) || seen[u.ID] || max(u.RX, u.TX, u.Paired) > 1<<53-1 || i == 0 && (u.State != "waiting" && u.State != "paired") {
 				return "bad_request"
 			}
+			if i == 0 && u.State == "waiting" {
+				waiting++
+			}
 			seen[u.ID] = true
 		}
+	}
+	if load.Sessions != uint64(len(a.heartbeatInput.Sessions)) || load.Waiting != waiting {
+		return "bad_request"
 	}
 	return ""
 }

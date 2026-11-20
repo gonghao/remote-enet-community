@@ -33,18 +33,17 @@ func (n *Node) report(ctx context.Context, gen uint32, seq uint64, last, current
 	h := center.Heartbeat{Gen: gen, Seq: seq, Version: n.o.Version, Kids: n.kids(), Closed: closed[:min(len(closed), maxEntries)]}
 	if len(live) > maxEntries {
 		n.o.Logger.ErrorContext(ctx, "Heartbeat entry limit exceeded", "sessions", len(live), "closed", len(closed))
+		live = live[:maxEntries]
 	}
 	h.Load.Sessions = uint64(len(live))
-	for i, u := range live {
+	for _, u := range live {
 		state := "paired"
 		h.Load.Conns += uint64(u.Conns)
 		if !u.Paired {
 			state = "waiting"
 			h.Load.Waiting++
 		}
-		if i < maxEntries {
-			h.Sessions = append(h.Sessions, center.SessionUsage{ClosedUsage: usage(u), State: state})
-		}
+		h.Sessions = append(h.Sessions, center.SessionUsage{ClosedUsage: usage(u), State: state})
 	}
 	if elapsed := current.at.Sub(last.at).Seconds(); elapsed > 0 {
 		h.Load.RxBps = uint64(min(float64(maxCount), float64(current.rx-last.rx)/elapsed))

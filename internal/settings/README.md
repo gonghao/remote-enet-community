@@ -11,8 +11,8 @@ GUI 配置独立于身份、信任和邀请码。公开类型与函数签名遵�
 
 测试覆盖默认值、两种角色的未完成配置、端点/IP/指纹/端口校验、固定 JSON 向量、严格解码、体积边界、保存往返与替换、失败保留原文件、符号链接和平台路径。测试不访问网络。
 
-版本 1 只包含直连设置。读取时自动在内存中升级为版本 2，补入 `operator.mode = "direct"`、空 Hub 和构建期缺省中心。原文件在调用 `Save` 时才更新，保存统一写版本 2。
+版本 1 只包含直连设置。读取时自动在内存中升级为版本 2，补入 `operator.mode = "direct"`、三个字段均为空字符串的 Hub 和构建期缺省中心。原文件在调用 `Save` 时才更新，保存统一写版本 2。
 
-版本 2 必须包含 `operator.mode`、`operator.hub` 和顶层 `center`。直连模式要求 Hub 的 `addr`、`fp` 都为空；Hub 模式要求填写 Hub 的主机与端口和完整非零身份指纹。中心由 `id` 和 HTTPS 基址数组 `api` 组成，两者均为空表示未配置。版本 2 中显式保存的空中心优先于构建期缺省值。
+版本 2 必须包含 `operator.mode`、`operator.hub` 和顶层 `center`。直连模式使用 `operator.endpoint` 作为公开地址，可保留 Hub 配置，各非空字段仍需通过校验。Hub 模式要求 `hub.addr` 为实际连接的 host:port、`hub.fp` 为完整非零指纹。邀请码与数字配对使用 `hub.share` 指定的 host:port，空字符串表示使用 `hub.addr`。切换模式会保留另一种模式的地址。中心由 `id` 和 HTTPS 基址数组 `api` 组成，两者均为空表示未配置。版本 2 中显式保存的空中心优先于构建期缺省值。
 
 构建时可通过 Go 链接器注入缺省中心，例如 `go build -ldflags '-X remote-enet/internal/settings.defaultCenterJSON={"id":"official","api":["https://center.example"]}' ./cmd/renetd`。缺省值用于新配置和版本 1 的升级。

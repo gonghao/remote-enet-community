@@ -172,7 +172,7 @@ Client ──出站 TLS（dial，target=Operator 指纹，token=票据）──�
 
 重载在路由锁内原子地替换策略，并关闭新策略不再认可的已登记 wait 和已建立的转发（判定只看撤销相关的条件，不看时间，所以重载不会顺带切断票据已到期的正常连接）。传播上限就是重载的那一刻；不重载就不生效。界面与文档不得宣称即时吊销。
 
-撤销设备 dial 票后，Client 再连时得到 `unauthorized`，并且无法续期。要恢复访问，需要 Operator 发新码重新配对，同时把设备从 `deny.devices` 移除。Operator 一侧对 Client 的信任（`trusted_peers`）是内层的事，R3 不改变它。
+设备指纹在 `deny.devices` 中时，Client 再连会得到 `unauthorized`。移除指纹并重载后即解除设备撤销，Client 可立即用仍有效的设备票重连。若要求重新配对，应在同一次重载中把该设备仍有效的设备票 `jti` 加入 `deny.jtis`，或轮换签发密钥并移除旧公钥。移除旧公钥会同时作废该密钥签发的其他票据。Operator 一侧对 Client 的信任（`trusted_peers`）是内层的事，R3 不改变它。
 
 **签发密钥轮换。** Operator 生成新密钥，自建者把新公钥加进配置并重载；新密钥签发的设备票随每次会话下发，30 天后旧公钥签的票据都已过期，再删除旧条目。如果提前删除旧公钥，期间没有连过的 Client 需要重新配对。
 
@@ -261,14 +261,15 @@ JSON 格式，UTF-8，至多 64 KiB，按 `settings` 的严格规则解码：未
 
 ### 6.1 配置
 
-`settings.Operator` 新增 `mode`（`"direct"` / `"hub"`）和 `hub`（`addr`、`fp`），schema 升为版本 2，见第 8 节。
+`settings.Operator` 新增 `mode`（`"direct"` / `"hub"`）和 `hub`（`addr`、`fp`、`share`），schema 升为版本 2，见第 8 节。
 
 | 字段 | direct | hub |
 |---|---|---|
 | `listen` | 必需（现状） | 不监听任何端口；CLI 与 `app.OperatorConfig` 要求 `Listen` 为空 |
-| `hub.addr` | **必须为空**（版本 2 校验拒绝非空，不是「忽略」） | 必需；Operator 实际连接的 Hub 地址 |
-| `hub.fp` | **必须为空** | 必需；外层钉扎用，来自 `renet-hub init` 的输出。不做首次连接时信任（TOFU） |
-| `endpoint` | 分享地址（现状） | 分享给 Client 的 Hub 公网地址；为空时用 `hub.addr`。例如 Operator 在内网用局域网地址连 Hub，Client 用 DDNS 名 |
+| `hub.addr` | 可保留；非空时校验，运行时忽略 | 必需；Operator 实际连接的 Hub 地址 |
+| `hub.fp` | 可保留；非空时校验，运行时忽略 | 必需；外层钉扎用，来自 `renet-hub init` 的输出。不做首次连接时信任（TOFU） |
+| `hub.share` | 可保留；非空时校验，运行时忽略 | 分享给 Client 的 Hub 地址（host:port），空字符串表示使用 `hub.addr`。例如 Operator 通过局域网连接 Hub，而 Client 使用 DDNS 名 |
+| `endpoint` | Operator 的直连公开地址 | 保留，运行时忽略 |
 | `bind`、各端口、`exclusive` | 不变 | 不变 |
 
 CLI：`renetd operator --hub HOST:PORT --hub-fp FP [--share-address HOST:PORT]`，与显式给出的 `--listen` 互斥。`app.OperatorConfig` 新增 `Hub *HubConfig`：为 nil 时是直连；非 nil 时 `Listen` 必须为空。
@@ -343,7 +344,7 @@ Client 的流程：外层钉住邀请码里的 Hub 指纹，dial 的 target = Op
 
 **R3 交付：**
 
-1. **配置。** `settings` 升为版本 2。顶层新增 `center: {"id": "", "api": []}`，两种角色共用。`id` 符合契约 §1 的 `[a-z0-9.-]{1,32}`；`api` 为 1–4 个绝对 `https://` URL，不含用户信息、查询和片段，每个至多 256 字节；`id` 为空当且仅当 `api` 为空。同一次升级加入 6.1 的 `operator.mode` 与 `operator.hub`。`Load` 读入版本 1 时在内存中补齐缺省值（`mode = "direct"`、`hub` 为空、`center` 取构建期缺省中心，社区构建为空）；读入版本 2 时按严格规则解码，其中显式保存的空中心优先于构建期缺省值。`Save` 总是写版本 2；旧版程序读版本 2 会报未知字段而拒绝加载（结果同样是拒绝，不会误读）。社区构建的缺省中心为空；官方发行版通过构建参数注入缺省值（`-ldflags -X`，只在发行层配置，代码不分叉）。
+1. **配置。** `settings` 升为版本 2。顶层新增 `center: {"id": "", "api": []}`，两种角色共用。`id` 符合契约 §1 的 `[a-z0-9.-]{1,32}`；`api` 为 1–4 个绝对 `https://` URL，不含用户信息、查询和片段，每个至多 256 字节；`id` 为空当且仅当 `api` 为空。同一次升级加入 6.1 的 `operator.mode` 与 `operator.hub`。`Load` 读入版本 1 时在内存中补齐缺省值（`mode = "direct"`、`hub.addr`、`hub.fp`、`hub.share` 均为空字符串、`center` 取构建期缺省中心，社区构建为空）；读入版本 2 时按严格规则解码，其中显式保存的空中心优先于构建期缺省值。`Save` 总是写版本 2；旧版程序读版本 2 会报未知字段而拒绝加载（结果同样是拒绝，不会误读）。社区构建的缺省中心为空；官方发行版通过构建参数注入缺省值（`-ldflags -X`，只在发行层配置，代码不分叉）。
 2. **显式切换。** 中心与 `Client.Peer` 一样由控制器管理：`Save` 始终合入当前已保存的中心，表单不能顺带修改它；切换只能通过 `Controller.SetCenter(ctx, center)`，界面上经过确认对话框，并且只能在空闲时执行。
 3. **显示。** Client 与 Operator 的状态区显示「中心：未配置」或中心 ID，连接详情另外显示「连接方式：直连 / 经 Hub（地址、短指纹）」。自建 Hub 不是中心，两者分开显示。
 4. **核对。** 新包 `internal/center` 只实现无需签名的 `GET /v1/meta`。界面提供「检查中心」：逐个入口请求，单次超时 10 秒（契约 §14 的 `fallback_attempt_timeout`，逐入口各自计时），核对返回的 `center_id` 与配置一致，结果按入口显示为已验证、不可达或标识不一致。请求携带 `Renet-Client: <role>/<app_version>` 头（非 SemVer 的构建发送 `0.0.0-dev`），拒绝重定向，要求校验证书的 TLS，不带任何凭据。只读，不发送任何身份信息，不保存结果。
@@ -362,6 +363,8 @@ Client 的流程：外层钉住邀请码里的 Hub 指纹，dial 的 target = Op
 | 无法连接 Hub | 两端 | 退避重试 | Cannot reach hub | 无法连接 Hub | 無法連線 Hub |
 | wait 被拒 | Operator | 30 秒重试，显示授权条目 | Hub has not authorized this device. Check the entry and the system time. | Hub 未授权本机，请检查授权条目与系统时间 | Hub 未授權本機，請檢查授權條目與系統時間 |
 | 带窗口的注册被拒 | Operator | 撤销码，注册无窗口的 wait | Hub numeric pairing is not enabled for this device | Hub 未为本机开放数字配对 | Hub 未為本機開放數字配對 |
+| 正在注册 wait | Operator | 状态标题 | Connecting to hub | 正在连接 Hub | 正在連線至 Hub |
+| wait 被拒 | Operator | 状态标题 | Hub has not authorized this device | Hub 未授权本机 | Hub 未授權本機 |
 | 已在 Hub 等待 | Operator | 状态 | Waiting on hub | 已在 Hub 等待 | 已在 Hub 等待 |
 | 设备票被拒，或本地判断已过期 | Client | 停止，提示索取新码 | Hub authorization expired or revoked | Hub 授权已到期或被撤销 | Hub 授權已到期或遭撤銷 |
 | 配对入口被拒（窗口未开或已过） | Client | 停止 | Code unavailable（R2 已有） | 数字码不可用 | 數字碼無法使用 |
@@ -420,7 +423,7 @@ R3 不改变中心模式的任何字段、步骤或参数。以下修订已于 2
 | T7 | `feat(invite): 邀请码版本 2 携带端点票据`，`internal/invite` | `Invite.Version` 可为 2；`Encode` 在有票据时要求版本 2、无票据时要求版本 1；`Decode` 接受 1 和 2 | T5 | 已完成：`42b242c` |
 | T8 | `feat(cpace): pair-hub/1 的 CI 绑定 Hub 指纹`，`internal/pairing/cpace`、`internal/proto` | `cpace.Binding` 增加 `Capability string` 与 `HubFP [32]byte`（`pair-direct/1` 时必须为零，`pair-hub/1` 时必须非零）；`proto.PairHubCapability = "pair-hub/1"`、`proto.HubTicketCapability = "hub-ticket/1"`、`TypeHubTicket = 17`、`HubTicket{Ticket []byte}`，严格读取，上限 1100 字节；补充应用向量 | 无 | 已完成：`e3ee91d` |
 | T9 | `feat(session): 经 Hub 的数字配对与设备票下发`，`internal/session` | `Options.HubFP identity.Fingerprint`（非零时数字配对只用 `pair-hub/1`）；`Options.GrantTicket func(client identity.Fingerprint) ([]byte, error)`（Operator；非 nil 时声明 `hub-ticket/1`）；Client 总是声明 `hub-ticket/1`；`(*Session).HubTicket() []byte`；17 的校验按 6.4 进行，失败归类为新的 `ReasonHubTicket` | T1、T8 | 已完成：`b4b07e6`；后续 `2b56ef2`（先签后提交） |
-| T10 | `feat(settings): 配置版本 2，加入 Hub 模式与中心`，`internal/settings` | `Operator.Mode`、`Operator.Hub{Addr, FP}`；顶层 `Center{ID string; API []string}`；`Load` 升级版本 1；`Save` 写版本 2；缺省中心来自构建期变量 | 无 | 已完成：`d50c84f` |
+| T10 | `feat(settings): 配置版本 2，加入 Hub 模式与中心`，`internal/settings` | `Operator.Mode`、`Operator.Hub{Addr, FP, Share}`；顶层 `Center{ID string; API []string}`；`Load` 升级版本 1；`Save` 写版本 2；缺省中心来自构建期变量 | 无 | 已完成：`d50c84f` |
 | T11 | `feat(app): Operator Hub 模式与 Client 经 Hub 配对`，`internal/app`、`cmd/renetd` | `type HubConfig struct{ Addr string; FP identity.Fingerprint }`；`OperatorConfig.Hub *HubConfig`；`InviteConfig.Hub *HubConfig`；`IssuerEntry(ctx context.Context, stateDir, name string) (string, error)`；Operator 发码、撤销与兑换后调用 `Refresh`，并处理窗口被拒；Client 改用 `DialBootstrap` 并按 7.2 选择能力，保存、续期票据，本地检查到期，并分类错误；删除 `DialDirectPair`；`renetd operator --hub/--hub-fp/--share-address`、`renetd issuer`、`renetd invite --hub/--hub-fp` | T5、T6、T7、T9 | 已完成：`1421e7f`；后续 `3fb3fb8`、`abd565c`。`DialDirectPair` 在本项删除 |
 | T12 | `feat(desktop): Hub 模式设置、授权条目与中心显示`，`internal/desktop`、`internal/desktopui`、`internal/locales`、`internal/checkup` | `Controller.SetCenter(ctx context.Context, c settings.Center) error`；`Controller.IssuerEntry(ctx context.Context) (string, error)`；State 增加 Hub 等待状态与路径；补全第 9 节文案和错误映射；数字配对持久化的核对改为匹配 Hub 端点（`Hub != ID`，带 Ticket）；自检只做 Hub 外层钉扎检查 | T10、T11 | 已完成：`25d44e6`；文案 `e7a7955` |
 | T13 | `feat(center): 中心 meta 核对`，新包 `internal/center`，加上 desktop 的「检查中心」 | `type Meta struct{ CenterID string; APIVersions []string; ServerTime time.Time }`；`FetchMeta(ctx context.Context, client *http.Client, entry string) (Meta, error)`；`Check(ctx context.Context, c settings.Center) []EntryResult`；响应体上限 16 KiB。可以独立推迟，不阻塞 T1–T12 | T10、T12 | 已完成：`bd6f7c0`；后续 `37ae4db`（`Renet-Client` 头） |
@@ -450,7 +453,7 @@ R3 不改变中心模式的任何字段、步骤或参数。以下修订已于 2
 | 3.4 末尾 | 新增配对后首字节期限（`setup_limits.timeout`，缺省 10 秒） |
 | 4.2 / 4.3 | 重载时 `setup_limits` 也需重启；`ticket inspect` 新增 `--hub-fp`、先验签、逐项注明跳过的步骤；身份用 `identity.LoadExisting` 只读加载 |
 | 5 | 签发密钥的发布方式（硬链接独占发布，不支持时回退 `O_EXCL`）与权限检查 |
-| 6.1 | 直连模式下 `hub` 字段必须为空 |
+| 6.1 | 两种模式分别保存地址；直连模式可保留已校验的 Hub 字段 |
 | 6.3 / 6.4 | `OnRegister` 异步通知；先预签设备票再提交配对；`EndpointHub`、`RequireHubTicket`；Client 总是声明 `hub-ticket/1` |
 | 7.1 / 7.3 | 多端点邀请只持久化换得的设备票；续期按 `PathInfo.Hub` + `PathInfo.Via` 定位；全部候选端点都被拒才判定授权失效 |
 | 8 | 版本 1 升级使用构建期缺省中心；`Renet-Client` 头、拒绝重定向、逐入口 10 秒 |

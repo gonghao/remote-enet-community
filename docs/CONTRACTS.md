@@ -410,7 +410,7 @@ func (a *Connector) DialBootstrap(ctx context.Context, addr string) (transport.S
 |---|---|
 | `internal/trust` | 文件版本 2：端点记录可带 `ticket`；读取接受版本 1 与 2，版本 1 带 `ticket` 判为损坏；有任一端点带票据时写版本 2，否则写版本 1。`SavePeer` / `Peer` / `ReadPeer` 透传 `Endpoint.Ticket`。`(*Store).UpdateEndpointTicket(ctx context.Context, peer, hub identity.Fingerprint, addr, ticket string) error`：按 peer、Hub 指纹与地址唯一定位端点，原子替换票据 |
 | `internal/invite` | `Invite.Version` 可为 2：每个端点的 `hub` 之后附 `ticket length:u16 + ticket`（0–1024）；有票据必须编码为版本 2，无票据为版本 1（字节不变）；`Decode` 接受 1 与 2；旧解码器拒绝版本 2 |
-| `internal/settings` | `Version = 2`；`Operator.Mode`（`"direct"` / `"hub"`）、`Operator.Hub{Addr, FP string}`、顶层 `Center{ID string; API []string}`；`Load` 将版本 1 在内存中升级（缺省中心取构建期 `-ldflags -X remote-enet/internal/settings.defaultCenterJSON=...`）；`Save` 总是写版本 2；直连模式要求 `Hub` 为空；`Config.Equal` |
+| `internal/settings` | `Version = 2`；`Operator.Mode`（`"direct"` / `"hub"`）、`Operator.Hub{Addr, FP, Share string}`、顶层 `Center{ID string; API []string}`；`Load` 将版本 1 在内存中升级（缺省中心取构建期 `-ldflags -X remote-enet/internal/settings.defaultCenterJSON=...`）；`Save` 总是写版本 2；版本 1 升级时三个 Hub 字段均为空字符串。直连模式使用 `Endpoint`，允许保留任意已填写且合法的 Hub 字段；Hub 模式要求 `Addr`、`FP`，分享地址取 `Share`，为空则用 `Addr`；`Config.Equal` |
 | `internal/identity` | `LoadExisting(dir string) (*Local, error)`：只读，私钥必须存在，证书缺失或不符时在内存中重建、不落盘；`Create(dir string) (*Local, error)`：仅当私钥路径未被占用时创建 |
 
 ### `internal/center`（新增，只做无需签名的 `GET /v1/meta`）

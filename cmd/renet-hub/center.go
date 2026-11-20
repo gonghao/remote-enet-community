@@ -112,7 +112,7 @@ func serveCenter(ctx context.Context, path string, cfg hubcenter.Config, local *
 		return err
 	}
 	limits := cfg.SetupLimits
-	s := hub.NewServer(hub.Options{
+	s := hub.NewServer(hub.Options{CenterMode: true,
 		Local: local, Policy: p, Logger: logger,
 		SetupLimits: hub.SetupLimits{
 			Concurrent: limits.Concurrent, PerSecond: limits.PerSecond, Burst: limits.Burst,

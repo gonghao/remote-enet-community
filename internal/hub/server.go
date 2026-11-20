@@ -38,6 +38,7 @@ type Policy interface {
 
 // Options.Now and AfterFunc share a clock. Socket deadlines use real time.
 type Options struct {
+	CenterMode  bool // Every admitted grant must identify a leased session.
 	Local       *identity.Local
 	Policy      Policy
 	Now         func() time.Time
@@ -316,6 +317,10 @@ func (s *Server) register(conn *connection, dev identity.Fingerprint, req Reques
 			return nil, statusUnauthorized
 		}
 	} else if !selfDial || s.o.Embedded == nil {
+		return nil, statusUnauthorized
+	}
+	if s.o.CenterMode && g.Session == (SessionID{}) {
+		s.o.Logger.Error("Center policy admitted a grant without a session")
 		return nil, statusUnauthorized
 	}
 	now := s.o.Now()

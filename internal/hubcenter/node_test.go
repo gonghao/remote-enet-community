@@ -72,7 +72,7 @@ func newFixture(t *testing.T, after func(time.Duration, func()) func() bool) *fi
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := hub.NewServer(hub.Options{Local: h, Policy: p, Now: f.now, AfterFunc: after})
+	s := hub.NewServer(hub.Options{CenterMode: true, Local: h, Policy: p, Now: f.now, AfterFunc: after})
 	// fakecenter exposes accepted seq and kids, but not raw retry keys,
 	// heartbeat bodies or response transit time. Observe its real TLS traffic.
 	client := *f.fc.HTTPClient()
@@ -265,7 +265,7 @@ func TestSuperseded(t *testing.T) {
 			t.Fatal(err)
 		}
 		o.Policy = p
-		o.Server = hub.NewServer(hub.Options{Local: o.Local, Policy: p})
+		o.Server = hub.NewServer(hub.Options{CenterMode: true, Local: o.Local, Policy: p})
 		second := NewNode(o)
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()

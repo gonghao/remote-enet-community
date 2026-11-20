@@ -294,3 +294,17 @@ func TestCenterStatusWriteFailure(t *testing.T) {
 	}
 	s.stopSessionTimers()
 }
+
+func TestZeroSessionGrantByMode(t *testing.T) {
+	for _, center := range []bool{false, true} {
+		s := NewServer(Options{Policy: testPolicy{}, CenterMode: center})
+		_, status := s.register(pipeConnection(t), identity.Fingerprint{1}, Request{Role: RoleWait}, Grant{}, true, false, time.Second)
+		want := byte(statusOK)
+		if center {
+			want = statusUnauthorized
+		}
+		if status != want {
+			t.Fatalf("center=%t: status %d, want %d", center, status, want)
+		}
+	}
+}

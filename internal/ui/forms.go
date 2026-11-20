@@ -113,11 +113,10 @@ func (v *View) operatorForm(c *ui.Context) {
 		v.draft.Operator.Mode = "hub"
 		v.field(c, "Hub address", "host.example:47000", &v.draft.Operator.Hub.Addr, v.locked())
 		v.field(c, "Hub fingerprint", "", &v.draft.Operator.Hub.FP, v.locked())
-		v.field(c, "Share address", "host.example:47000", &v.draft.Operator.Endpoint, v.locked())
+		v.field(c, "Share address", "host.example:47000", &v.draft.Operator.Hub.Share, v.locked())
 		v.issuerControls(c)
 	} else {
 		v.draft.Operator.Mode = "direct"
-		v.draft.Operator.Hub = settings.Hub{}
 		ui.Grid(c).Columns(2).FillWidth().Gap(12).Children(func() {
 			v.field(c, "Listen address", "0.0.0.0:47000", &v.draft.Operator.Listen, v.locked())
 			v.field(c, "Public endpoint", "host.example:47000", &v.draft.Operator.Endpoint, v.locked())

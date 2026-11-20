@@ -47,10 +47,12 @@ func TestCenterSurvivesStaleForm(t *testing.T) {
 
 func TestHubInvitationAndSubscription(t *testing.T) {
 	cfg := operatorSettings()
+	c := testController(t, cfg, func(*dependencies) {})
 	cfg.Operator.Mode = "hub"
 	cfg.Operator.Hub = settings.Hub{Addr: "hub.invalid:443", FP: identity.Fingerprint{7}.String()}
-	cfg.Operator.Endpoint = ""
-	c := testController(t, cfg, func(*dependencies) {})
+	if err := c.Save(t.Context(), cfg); err != nil {
+		t.Fatal(err)
+	}
 	states := c.Subscribe(t.Context())
 	var logs bytes.Buffer
 	previous := slog.Default()

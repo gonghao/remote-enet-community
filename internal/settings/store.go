@@ -100,7 +100,7 @@ func decodeConfig(data []byte) (Config, error) {
 	}
 	if cfg.Version == Version {
 		operator["mode"] = &cfg.Operator.Mode
-		operator["hub"] = map[string]any{"addr": &cfg.Operator.Hub.Addr, "fp": &cfg.Operator.Hub.FP}
+		operator["hub"] = map[string]any{"addr": &cfg.Operator.Hub.Addr, "fp": &cfg.Operator.Hub.FP, "share": &cfg.Operator.Hub.Share}
 		fields["center"] = centerFields(&cfg.Center)
 	}
 	if err := decodeFields(object, name, fields); err != nil {

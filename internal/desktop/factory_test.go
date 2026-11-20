@@ -47,7 +47,7 @@ func TestHubRuntimeConfig(t *testing.T) {
 	cfg.Operator.Mode = "hub"
 	cfg.Operator.Hub.Addr, cfg.Operator.Hub.FP = "localhost:47001", fp.String()
 	for _, share := range []string{"", "public.example:47002"} {
-		cfg.Operator.Endpoint = share
+		cfg.Operator.Hub.Share = share
 		_, op, _, err := c.runtimeConfigs(cfg, "")
 		if share == "" {
 			share = cfg.Operator.Hub.Addr

@@ -23,8 +23,10 @@ func TestValidateHubMode(t *testing.T) {
 		{"hub", "hub.example:443", "", "operator.hub.fp"},
 		{"hub", "hub.example:443", identity.Fingerprint{1}.Short(), "operator.hub.fp"},
 		{"hub", "hub.example:443", identity.Fingerprint{}.String(), "operator.hub.fp"},
-		{"direct", "hub.example:443", "", "operator.hub.addr"},
-		{"direct", "", fp, "operator.hub.fp"},
+		{"direct", "hub.example:443", "", ""},
+		{"direct", "invalid", "", "operator.hub.addr"},
+		{"direct", "", fp, ""},
+		{"direct", "", "invalid", "operator.hub.fp"},
 		{"", "", "", "operator.mode"},
 	} {
 		cfg := Default()
@@ -84,7 +86,7 @@ func TestV2StrictDecodingAndRoundTrip(t *testing.T) {
 	cfg.Role = RoleOperator
 	cfg.Operator.Mode = "hub"
 	cfg.Operator.Listen = ""
-	cfg.Operator.Hub = Hub{Addr: "hub.example:443", FP: identity.Fingerprint{1}.String()}
+	cfg.Operator.Hub = Hub{Addr: "hub.example:443", FP: identity.Fingerprint{1}.String(), Share: "public.example:444"}
 	cfg.Center = Center{ID: "primary", API: []string{"https://center.example", "https://backup.example"}}
 	if err := Save(path, cfg); err != nil {
 		t.Fatal(err)
@@ -103,6 +105,7 @@ func TestV2StrictDecodingAndRoundTrip(t *testing.T) {
 		{`"addr": "hub.example:443",`, "", "operator.hub.addr"},
 		{`"addr":`, `"Addr":`, "operator.hub"},
 		{`"addr":`, `"addr": "", "addr":`, "operator.hub"},
+		{`"public.example:444"`, `"invalid"`, "operator.hub.share"},
 		{`"id": "primary",`, "", "center.id"},
 		{`"id":`, `"id": "", "id":`, "center"},
 		{`"api": [`, `"api": null, "extra": [`, "center"},

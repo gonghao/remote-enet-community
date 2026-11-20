@@ -59,6 +59,7 @@ func (c *Controller) IssueInvite(ctx context.Context) (string, error) {
 			c.mu.Unlock()
 			return "", err
 		}
+		cfg.Endpoint = op.Hub.Share
 		cfg.Hub = &app.HubConfig{Addr: op.Hub.Addr, FP: fp}
 	}
 	inviteCtx, cancel := context.WithCancel(ctx)

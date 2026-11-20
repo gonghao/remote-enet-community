@@ -757,6 +757,17 @@ func TestOperatorHubSettingsAndPath(t *testing.T) {
 	if v.draft.Operator.Mode != "hub" || !tt.HasText("Hub fingerprint") {
 		t.Fatal("mode selection did not expose hub fields")
 	}
+	input(t, tt, "Hub address", "hub.example:47000")
+	input(t, tt, "Hub fingerprint", identity.Fingerprint{7}.String())
+	input(t, tt, "Share address", "public.example:443")
+	hub := v.draft.Operator.Hub
+	click(t, tt, "Connection mode")
+	click(t, tt, "Direct")
+	click(t, tt, "Connection mode")
+	click(t, tt, "Self-hosted hub")
+	if v.draft.Operator.Hub != hub || hub.Share != "public.example:443" {
+		t.Fatal("hub fields lost across mode switch")
+	}
 	v.SetIssuerEntry("public entry")
 	tt.Frame()
 	click(t, tt, "Copy entry")

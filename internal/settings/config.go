@@ -51,8 +51,9 @@ type Operator struct {
 
 // Hub stores the dial address and full outer TLS pin for Hub mode.
 type Hub struct {
-	Addr string `json:"addr"`
-	FP   string `json:"fp"`
+	Addr  string `json:"addr"`
+	FP    string `json:"fp"`
+	Share string `json:"share"`
 }
 
 // Center is unconfigured when both ID and API are empty.
@@ -126,12 +127,6 @@ func (c Config) Validate() error {
 	}
 	switch c.Operator.Mode {
 	case "direct":
-		if c.Operator.Hub.Addr != "" {
-			return fmt.Errorf("settings: operator.hub.addr must be empty in direct mode")
-		}
-		if c.Operator.Hub.FP != "" {
-			return fmt.Errorf("settings: operator.hub.fp must be empty in direct mode")
-		}
 		if c.Operator.Listen == "" {
 			if c.Role == RoleOperator {
 				return fmt.Errorf("settings: operator.listen is required for the operator role")
@@ -140,15 +135,24 @@ func (c Config) Validate() error {
 			return fmt.Errorf("settings: operator.listen: %w", err)
 		}
 	case "hub":
+	default:
+		return fmt.Errorf("settings: operator.mode must be direct or hub")
+	}
+	if c.Operator.Mode == "hub" || c.Operator.Hub.Addr != "" {
 		if err := address(c.Operator.Hub.Addr, false); err != nil {
 			return fmt.Errorf("settings: operator.hub.addr: %w", err)
 		}
+	}
+	if c.Operator.Mode == "hub" || c.Operator.Hub.FP != "" {
 		fp, err := identity.ParseFingerprint(c.Operator.Hub.FP)
 		if err != nil || fp.IsZero() {
 			return fmt.Errorf("settings: operator.hub.fp must be a nonzero device fingerprint")
 		}
-	default:
-		return fmt.Errorf("settings: operator.mode must be direct or hub")
+	}
+	if c.Operator.Hub.Share != "" {
+		if err := address(c.Operator.Hub.Share, false); err != nil {
+			return fmt.Errorf("settings: operator.hub.share: %w", err)
+		}
 	}
 	if c.Operator.Endpoint != "" {
 		if err := address(c.Operator.Endpoint, false); err != nil {

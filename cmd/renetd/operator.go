@@ -19,7 +19,7 @@ func runOperator(ctx context.Context, args []string, stderr io.Writer, logger *s
 	fs := flags("operator", stderr)
 	stateDir := fs.String("state-dir", "", "operator state directory (required)")
 	hubFlags := addHubFlags(fs)
-	share := fs.String("share-address", "", "address shared with clients")
+	share := fs.String("share-address", "", "address shared with clients (defaults to --hub in hub mode)")
 	listen := fs.String("listen", "0.0.0.0:47000", "embedded hub listen host:port")
 	bind := fs.String("bind", "", "local IPv4 address presented to diagnostic tools (required)")
 	diagPort := fs.Int("diag-port", 6801, "local diagnostic TCP port; 0 chooses an ephemeral port")

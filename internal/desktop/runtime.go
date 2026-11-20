@@ -197,6 +197,7 @@ func (c *Controller) runtimeConfigs(cfg settings.Config, code string) (app.Clien
 		if cfg.Operator.Mode == "hub" {
 			fp, _ := identity.ParseFingerprint(cfg.Operator.Hub.FP) // cfg.Validate checked the pin.
 			op.Listen, op.Hub = "", &app.HubConfig{Addr: cfg.Operator.Hub.Addr, FP: fp}
+			share = cfg.Operator.Hub.Share
 			if share == "" {
 				share = op.Hub.Addr
 			}

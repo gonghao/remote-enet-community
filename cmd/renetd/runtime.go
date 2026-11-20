@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"sync"
 	"time"
@@ -14,6 +15,7 @@ import (
 )
 
 type runtimeFlags struct {
+	centerOutput   io.Writer
 	allowLinkTest  bool
 	connectionTest bool
 	testTimeout    time.Duration
@@ -45,7 +47,7 @@ func (o runtimeFlags) validate() error {
 // runRuntime joins both workers before returning, including on configuration
 // errors. The bounded test queue replaces obsolete generations, never sessions.
 func runRuntime(ctx context.Context, r *app.Runtime, run func(context.Context) error, opts runtimeFlags, logger *slog.Logger) error {
-	if opts.statusInterval == 0 && !opts.connectionTest {
+	if opts.statusInterval == 0 && !opts.connectionTest && opts.centerOutput == nil {
 		return run(ctx)
 	}
 	workerCtx, cancel := context.WithCancel(ctx)
@@ -53,6 +55,10 @@ func runRuntime(ctx context.Context, r *app.Runtime, run func(context.Context) e
 	states := r.Subscribe(workerCtx)
 	tests := make(chan uint64, 1)
 	var wg sync.WaitGroup
+	if opts.centerOutput != nil {
+		updates := r.Subscribe(workerCtx)
+		wg.Go(func() { centerConsole(workerCtx, r, updates, opts.centerOutput) })
+	}
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -99,8 +105,20 @@ func runRuntime(ctx context.Context, r *app.Runtime, run func(context.Context) e
 		}()
 	}
 	err := run(ctx)
+	if opts.centerOutput != nil && ctx.Err() != nil && r.Snapshot().Center.SessionShort != "" {
+		endCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		endErr := r.EndReception(endCtx)
+		stop()
+		if endErr != nil {
+			err = fmt.Errorf("could not end center reception: %w", endErr)
+		}
+	}
 	cancel()
 	wg.Wait()
+	if opts.centerOutput != nil {
+		s := r.Snapshot().Center
+		logger.Info("center reception finished", "phase", s.Phase, "session", s.SessionShort, "reason", s.Reason)
+	}
 	if opts.statusInterval > 0 {
 		logStatus(logger, r.Snapshot())
 	}

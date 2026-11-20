@@ -54,11 +54,11 @@ func (e *HTTPError) Error() string {
 	return fmt.Sprintf("center: meta returned HTTP %d", e.StatusCode)
 }
 
-// FetchMeta requires a TLS-verifying transport without credentials and a client or operator role.
+// FetchMeta requires a TLS-verifying transport without credentials and a valid Renet-Client role.
 // The caller controls the deadline. Non-SemVer builds advertise 0.0.0-dev.
 func FetchMeta(ctx context.Context, client *http.Client, entry, role, appVersion string) (Meta, error) {
-	if role != settings.RoleClient && role != settings.RoleOperator {
-		return Meta{}, fmt.Errorf("center: meta requires a client or operator role")
+	if role != settings.RoleClient && role != settings.RoleOperator && role != "hub" {
+		return Meta{}, fmt.Errorf("center: meta requires a client, operator or hub role")
 	}
 	if !semverPattern.MatchString(appVersion) {
 		appVersion = devVersion
@@ -90,16 +90,8 @@ func FetchMeta(ctx context.Context, client *http.Client, entry, role, appVersion
 		return Meta{}, fmt.Errorf("center: meta response exceeds %d bytes", maxMetaBody)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		var envelope struct {
-			Error struct {
-				Code string `json:"code"`
-			} `json:"error"`
-		}
-		httpErr := &HTTPError{StatusCode: resp.StatusCode}
-		if json.Unmarshal(body, &envelope) == nil {
-			httpErr.Code = envelope.Error.Code
-		}
-		return Meta{}, httpErr
+		api := responseError(resp.StatusCode, body)
+		return Meta{}, fmt.Errorf("%w: %w", &HTTPError{StatusCode: api.Status, Code: api.Code}, api)
 	}
 	return decodeMeta(body)
 }

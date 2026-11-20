@@ -2,6 +2,7 @@ package cpace
 
 import (
 	"testing"
+	"testing/cryptotest"
 
 	"remote-enet/internal/proto"
 )
@@ -205,5 +206,41 @@ func TestHubFingerprintMismatch(t *testing.T) {
 	}
 	if _, err := r.Verify(ta); err != ReasonConfirmation {
 		t.Fatalf("Verify: %v", err)
+	}
+}
+
+func TestCenterSASIndependentExchanges(t *testing.T) {
+	cryptotest.SetGlobalRandom(t, 1)
+	b := testBinding()
+	b.Capability = proto.PairCenterCapability
+	b.HubFP[0], b.SessionID[0], b.CenterID = 9, 8, "center"
+	exchange := func(b Binding) string {
+		i, c := startTest(t, b)
+		r, y, err := Respond(exampleCode, b, c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		a, err := i.Reveal(y)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tb, err := r.Open(a)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ta, sas, err := i.Finish(tb)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, err := r.Verify(ta); err != nil || got != sas {
+			t.Fatalf("SAS %q and %q: %v", sas, got, err)
+		}
+		return sas
+	}
+	left := exchange(b)
+	b.Exporter[0]++
+	b.ClientFP, b.OperatorFP = b.OperatorFP, b.ClientFP
+	if right := exchange(b); left == right {
+		t.Fatalf("same SAS on independent links: %s", left)
 	}
 }

@@ -83,9 +83,18 @@ func (c Config) Equal(other Config) bool {
 // Default leaves addresses that require a user's choice unconfigured.
 // Use Load to report a malformed build-time center.
 func Default() Config {
-	cfg := baseConfig()
-	cfg.Center, _ = loadDefaultCenter()
+	cfg, _ := defaultConfig()
 	return cfg
+}
+
+func defaultConfig() (Config, error) {
+	cfg := baseConfig()
+	center, err := loadDefaultCenter()
+	cfg.Center = center
+	if center.ID != "" {
+		cfg.Operator.Mode = "center"
+	}
+	return cfg, err
 }
 
 func baseConfig() Config {
@@ -126,9 +135,9 @@ func (c Config) Validate() error {
 		}
 	}
 	switch c.Operator.Mode {
-	case "direct":
+	case "direct", "center":
 		if c.Operator.Listen == "" {
-			if c.Role == RoleOperator {
+			if c.Operator.Mode == "direct" && c.Role == RoleOperator {
 				return fmt.Errorf("settings: operator.listen is required for the operator role")
 			}
 		} else if err := address(c.Operator.Listen, true); err != nil {
@@ -136,7 +145,7 @@ func (c Config) Validate() error {
 		}
 	case "hub":
 	default:
-		return fmt.Errorf("settings: operator.mode must be direct or hub")
+		return fmt.Errorf("settings: operator.mode must be direct, hub or center")
 	}
 	if c.Operator.Mode == "hub" || c.Operator.Hub.Addr != "" {
 		if err := address(c.Operator.Hub.Addr, false); err != nil {
@@ -176,6 +185,9 @@ func (c Config) Validate() error {
 	}
 	if c.Operator.DiagnosticPort == c.Operator.ControlPort {
 		return fmt.Errorf("settings: operator.diagnostic_port and operator.control_port must differ")
+	}
+	if c.Operator.Mode == "center" && c.Center.ID == "" && len(c.Center.API) == 0 {
+		return fmt.Errorf("settings: center.id and center.api are required for operator.mode center")
 	}
 	return c.Center.validate()
 }

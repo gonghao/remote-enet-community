@@ -22,7 +22,7 @@ func TestNetworkFactoryIsDeferredUntilExplicitDirectSetup(t *testing.T) {
 		return nil, denied
 	}
 	c := &Controller{opts: Options{StateDir: t.TempDir(), DirectFactory: factory}}
-	_, operator, _, err := c.runtimeConfigs(operatorSettings(), "")
+	_, operator, _, err := c.runtimeConfigs(operatorSettings(), "", nil)
 	if err != nil || called != 0 || operator.DirectFactory == nil {
 		t.Fatalf("configuration triggered authorization or lost factory: %d %v", called, err)
 	}
@@ -30,7 +30,7 @@ func TestNetworkFactoryIsDeferredUntilExplicitDirectSetup(t *testing.T) {
 	if device != nil || !errors.Is(err, denied) || called != 1 {
 		t.Fatalf("direct setup did not use the injected factory: %v %v", device, err)
 	}
-	_, _, _, err = c.runtimeConfigs(clientSettings(), "")
+	_, _, _, err = c.runtimeConfigs(clientSettings(), "", nil)
 	if err != nil || called != 1 {
 		t.Fatalf("Client configuration triggered network authorization: %d %v", called, err)
 	}
@@ -39,7 +39,7 @@ func TestNetworkFactoryIsDeferredUntilExplicitDirectSetup(t *testing.T) {
 func TestHubRuntimeConfig(t *testing.T) {
 	c := &Controller{opts: Options{StateDir: t.TempDir()}}
 	cfg := operatorSettings()
-	_, op, _, err := c.runtimeConfigs(cfg, "")
+	_, op, _, err := c.runtimeConfigs(cfg, "", nil)
 	if err != nil || op.Hub != nil || op.Listen != cfg.Operator.Listen {
 		t.Fatal("direct configuration", err)
 	}
@@ -48,7 +48,7 @@ func TestHubRuntimeConfig(t *testing.T) {
 	cfg.Operator.Hub.Addr, cfg.Operator.Hub.FP = "localhost:47001", fp.String()
 	for _, share := range []string{"", "public.example:47002"} {
 		cfg.Operator.Hub.Share = share
-		_, op, _, err := c.runtimeConfigs(cfg, "")
+		_, op, _, err := c.runtimeConfigs(cfg, "", nil)
 		if share == "" {
 			share = cfg.Operator.Hub.Addr
 		}

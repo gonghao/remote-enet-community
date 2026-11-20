@@ -46,13 +46,20 @@ func TestLocalizedMarkerReceiptAndRawErrorFallback(t *testing.T) {
 	}
 }
 
-func TestBareCodeDisplaysDirectAddressHint(t *testing.T) {
+func TestBareCodeSelectsConfiguredCenter(t *testing.T) {
 	s, _ := testShell(t)
-	for _, center := range []settings.Center{{}, {ID: "garage", API: []string{"https://garage.invalid"}}} {
+	for _, center := range []settings.Center{{}, {ID: "garage", API: []string{"https://127.0.0.1:1"}}} {
 		if err := s.controller.SetCenter(t.Context(), center); err != nil {
 			t.Fatal(err)
 		}
-		if err := s.controller.StartClient(t.Context(), "12345678"); err == nil {
+		err := s.controller.StartClient(t.Context(), "12345678")
+		if center.ID != "" {
+			if err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if err == nil {
 			t.Fatal("bare code started the client")
 		}
 		s.state = s.controller.Snapshot()
@@ -60,7 +67,7 @@ func TestBareCodeDisplaysDirectAddressHint(t *testing.T) {
 			s.language = language
 			s.applyState()
 			tt := ui.NewTester(s.view.Render, 440, 700)
-			if !tt.HasText(s.tr("Enter the direct address and port")) {
+			if !tt.HasText(s.tr("No center is configured. Set one in Settings, or enter a direct address and code.")) {
 				t.Fatalf("missing address hint for %q in %s", center.ID, language)
 			}
 		}

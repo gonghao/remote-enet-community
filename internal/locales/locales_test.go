@@ -140,3 +140,18 @@ func TestLiteralDisplayMessagesAreCataloged(t *testing.T) {
 		}
 	}
 }
+
+func TestCenterMessages(t *testing.T) {
+	for reason, key := range centerMessages {
+		for _, tag := range []string{"en", "zh-Hans", "zh-Hant"} {
+			if catalogs[tag][key] == "" {
+				t.Fatalf("missing %s message for %s", tag, reason)
+			}
+		}
+	}
+	if CenterMessage("unauthenticated", "operator") == CenterMessage("unauthenticated", "client") ||
+		CenterMessage("server-supplied detail", "operator") != "" ||
+		CenterMessage("rate_limited", "client") == PairingMessage("rate_limited") {
+		t.Fatal("center reason classification lost its role or mode boundary")
+	}
+}

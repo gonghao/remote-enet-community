@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"net/http"
 	"net/netip"
 	"sync"
 	"syscall"
@@ -14,6 +15,7 @@ import (
 	"github.com/hashicorp/yamux"
 
 	"remote-enet/internal/carside"
+	"remote-enet/internal/centerflow"
 	"remote-enet/internal/exclusive"
 	"remote-enet/internal/identity"
 	"remote-enet/internal/observe"
@@ -46,6 +48,7 @@ var (
 // bytes. Generation identifies a successfully handshaken session. RTTValid
 // distinguishes an unmeasured RTT from a measured duration, including zero.
 type Snapshot struct {
+	Center     CenterSnapshot
 	Role       session.Role
 	Phase      Phase
 	Device     identity.Fingerprint
@@ -83,6 +86,11 @@ type activeSession struct {
 // Runtime is single-use. RunClient or RunOperator owns all network resources;
 // Snapshot, Subscribe and WithSession may run concurrently with it.
 type Runtime struct {
+	centerEnding   chan struct{} // Final publication waits for an in-flight end request.
+	stopCenter     context.CancelFunc
+	reception      centerReception
+	pending        *sasAnswer
+	centerHTTP     *http.Client
 	mu             sync.Mutex
 	state          Snapshot
 	started        bool
@@ -109,6 +117,7 @@ func (r *Runtime) Snapshot() Snapshot {
 
 func (r *Runtime) snapshotLocked() Snapshot {
 	s := r.state
+	s.Center = r.centerSnapshotLocked()
 	if r.metrics != nil {
 		s.Metrics = r.metrics.Snapshot()
 		if r.active != nil && s.Metrics.Session.Active {
@@ -200,6 +209,12 @@ func (r *Runtime) begin(role session.Role) error {
 
 func (r *Runtime) finish(err error) {
 	r.mu.Lock()
+	for r.centerEnding != nil {
+		ended := r.centerEnding
+		r.mu.Unlock()
+		<-ended
+		r.mu.Lock()
+	}
 	defer r.mu.Unlock()
 	r.state.HubWaiting = false
 	r.state.Phase, r.state.NextRetry = PhaseStopped, time.Time{}
@@ -208,6 +223,10 @@ func (r *Runtime) finish(err error) {
 		if r.state.LastError == "" {
 			r.state.LastError = "Runtime stopped with an error. Check runtime diagnostics."
 		}
+	}
+	var failure centerFailure
+	if r.reception == nil && errors.As(err, &failure) {
+		r.state.Center.Phase, r.state.Center.Reason = "idle", centerflow.Reason(failure.PairingErrorKind)
 	}
 	r.stopped = true
 	r.publishLocked()

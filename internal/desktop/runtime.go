@@ -14,6 +14,9 @@ import (
 	"time"
 
 	"remote-enet/internal/app"
+	"remote-enet/internal/center"
+	"remote-enet/internal/centercode"
+	"remote-enet/internal/centerflow"
 	"remote-enet/internal/checkup"
 	"remote-enet/internal/exclusive"
 	"remote-enet/internal/hsfzcapture"
@@ -29,6 +32,7 @@ import (
 )
 
 type running struct {
+	center         bool
 	runtime        appRuntime
 	ctx            context.Context
 	cancel         context.CancelFunc
@@ -55,15 +59,15 @@ type running struct {
 func (c *Controller) StartClient(ctx context.Context, input string) error {
 	// The app also decodes raw invitations, so pass it the legacy trimmed text.
 	input = strings.TrimSpace(input)
-	return c.start(ctx, settings.RoleClient, strings.TrimSpace(strings.TrimPrefix(input, "\uFEFF")))
+	return c.start(ctx, settings.RoleClient, strings.TrimSpace(strings.TrimPrefix(input, "\uFEFF")), "", nil)
 }
 
 // StartOperator stops listening only when Stop, Close or the parent context ends.
 func (c *Controller) StartOperator(ctx context.Context) error {
-	return c.start(ctx, settings.RoleOperator, "")
+	return c.start(ctx, settings.RoleOperator, "", "", nil)
 }
 
-func (c *Controller) start(ctx context.Context, role, input string) error {
+func (c *Controller) start(ctx context.Context, role, input, node string, resume *center.SessionID) error {
 	ctx, finish, epoch, err := c.operation(ctx, true)
 	if err != nil {
 		c.failure("Runtime could not be started.", err)
@@ -93,12 +97,22 @@ func (c *Controller) start(ctx context.Context, role, input string) error {
 		c.failureLocked("Save the selected role before starting.", ErrRole)
 		return ErrRole
 	}
-	client, op, peer, err := c.runtimeConfigs(cfg, input)
+	if resume != nil {
+		if cfg.Center.ID == "" {
+			return centerflow.CenterUnconfigured
+		}
+		if c.sessionChoice == nil || !slices.ContainsFunc(c.sessionChoice.Candidates(), func(item centerflow.SessionCandidate) bool { return item.ID == *resume }) {
+			return centerflow.NotFound
+		}
+	}
+	client, op, peer, err := c.runtimeConfigs(cfg, input, resume)
 	if err != nil {
 		message := "Check the saved settings and invitation before starting."
 		switch err {
-		case invite.ErrInvalidInvite, invite.ErrInviteExpired, invite.ErrInvalidHost, invite.ErrInvalidPort, invite.ErrInvalidCode, errDirectAddressRequired, errCenterCode:
+		case invite.ErrInvalidInvite, invite.ErrInviteExpired, invite.ErrInvalidHost, invite.ErrInvalidPort, invite.ErrInvalidCode:
 			message = err.Error()
+		case centerflow.CenterUnconfigured:
+			message = locales.CenterMessage(string(centerflow.CenterUnconfigured), role)
 		}
 		c.failureLocked(message, err)
 		return err
@@ -106,8 +120,20 @@ func (c *Controller) start(ctx context.Context, role, input string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if node != "" {
+		if op.Center == nil {
+			return ErrRole
+		}
+		if !c.state.Center.LoggedIn {
+			return centerflow.Unauthenticated
+		}
+		if !slices.ContainsFunc(c.state.Center.Nodes, func(n centerflow.NodeLatency) bool { return n.NodeID.String() == node && n.State == "available" }) {
+			return centerflow.NodeUnavailable
+		}
+		op.Center.Node = node
+	}
 	runCtx, cancel := context.WithCancel(c.ctx)
-	g := &running{runtime: c.deps.newRuntime(), ctx: runCtx, cancel: cancel, done: make(chan struct{}), pairing: peer}
+	g := &running{center: client.Center != nil || op.Center != nil, runtime: c.deps.newRuntime(), ctx: runCtx, cancel: cancel, done: make(chan struct{}), pairing: peer}
 	logger := slog.New(runtimeLogHandler{controller: c, run: g})
 	client.Logger, op.Logger = logger, logger
 	if client.DirectPair != nil {
@@ -128,6 +154,7 @@ func (c *Controller) start(ctx context.Context, role, input string) error {
 		g.capture = hsfzcapture.New(hsfzcapture.Options{})
 		op.Capture = g.capture
 	}
+	c.sessionChoice = nil
 	c.run = g
 	c.state.Checkup = checkup.Report{}
 	c.state.Capture = hsfzcapture.Snapshot{}
@@ -151,7 +178,7 @@ func pairedEndpoint(ep transport.Endpoint, peer identity.Fingerprint, address st
 	return ep.Ticket != ""
 }
 
-func (c *Controller) runtimeConfigs(cfg settings.Config, code string) (app.ClientConfig, app.OperatorConfig, transport.PeerInfo, error) {
+func (c *Controller) runtimeConfigs(cfg settings.Config, code string, resume *center.SessionID) (app.ClientConfig, app.OperatorConfig, transport.PeerInfo, error) {
 	var pairing transport.PeerInfo
 	client := app.ClientConfig{StateDir: c.roleDir(settings.RoleClient), NICName: cfg.Client.NICName,
 		AllowLinkTest: cfg.AllowLinkTest}
@@ -166,7 +193,10 @@ func (c *Controller) runtimeConfigs(cfg settings.Config, code string) (app.Clien
 		if cfg.Client.NICAddr != "" {
 			client.NICAddr, _ = netip.ParseAddr(cfg.Client.NICAddr)
 		}
-		if code != "" {
+		if resume != nil {
+			client.CenterResume = *resume
+			client.Center, client.AppVersion = &cfg.Center, c.opts.AppVersion
+		} else if code != "" {
 			input, err := invite.ParseInput(code)
 			if err != nil {
 				return client, op, pairing, err
@@ -182,10 +212,12 @@ func (c *Controller) runtimeConfigs(cfg settings.Config, code string) (app.Clien
 			case invite.Direct:
 				client.DirectPair = &app.DirectPair{Address: input.Address, Code: input.Code}
 			case invite.Center:
-				if cfg.Center.ID != "" {
-					return client, op, pairing, errCenterCode
+				if cfg.Center.ID == "" {
+					return client, op, pairing, centerflow.CenterUnconfigured
 				}
-				return client, op, pairing, errDirectAddressRequired
+				// ParseInput classifies bare codes without retaining their digits.
+				client.CenterCode, _ = centercode.NormalizeNumericCode(strings.TrimSpace(strings.TrimPrefix(code, "\uFEFF")))
+				client.Center, client.AppVersion = &cfg.Center, c.opts.AppVersion
 			}
 		} else if cfg.Client.Peer != "" {
 			client.Peer, _ = identity.ParseFingerprint(cfg.Client.Peer)
@@ -194,7 +226,10 @@ func (c *Controller) runtimeConfigs(cfg settings.Config, code string) (app.Clien
 		}
 	} else {
 		share := cfg.Operator.Endpoint
-		if cfg.Operator.Mode == "hub" {
+		if cfg.Operator.Mode == "center" {
+			op.Center = &app.CenterConfig{Center: cfg.Center, AppVersion: c.opts.AppVersion}
+			op.Listen, share = "", ""
+		} else if cfg.Operator.Mode == "hub" {
 			fp, _ := identity.ParseFingerprint(cfg.Operator.Hub.FP) // cfg.Validate checked the pin.
 			op.Listen, op.Hub = "", &app.HubConfig{Addr: cfg.Operator.Hub.Addr, FP: fp}
 			share = cfg.Operator.Hub.Share
@@ -202,7 +237,7 @@ func (c *Controller) runtimeConfigs(cfg settings.Config, code string) (app.Clien
 				share = op.Hub.Addr
 			}
 		}
-		if share == "" || cfg.Operator.Bind == "" {
+		if op.Center == nil && share == "" || cfg.Operator.Bind == "" {
 			return client, op, pairing, fmt.Errorf("desktop: operator endpoint and presentation IP required")
 		}
 		if cfg.Operator.Exclusive && runtime.GOOS != "windows" {
@@ -291,6 +326,12 @@ func (c *Controller) serve(g *running, role string, client app.ClientConfig, op 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.run == g {
+		if !wasStopping && g.center {
+			errors.As(err, &c.sessionChoice)
+		}
+		if final.Center.Reason == centerflow.Unauthenticated || final.Center.Reason == centerflow.DeviceRevoked {
+			c.state.Center = CenterView{}
+		}
 		c.state.Runtime = final
 		c.state.Runtime.Phase = app.PhaseStopped
 		c.state.Running, c.state.Stopping, c.state.Testing = false, false, false
@@ -302,7 +343,11 @@ func (c *Controller) serve(g *running, role string, client app.ClientConfig, op 
 		var pairingErr app.PairingErrorKind
 		var pairingText string
 		if errors.As(err, &pairingErr) {
-			pairingText = locales.PairingMessage(string(pairingErr))
+			if g.center {
+				pairingText = locales.CenterMessage(string(pairingErr), role)
+			} else {
+				pairingText = locales.PairingMessage(string(pairingErr))
+			}
 		}
 		switch {
 		case !wasStopping && pairingText != "":
@@ -363,7 +408,7 @@ func (c *Controller) acceptSnapshot(g *running, s app.Snapshot) {
 			c.eventLocked(message)
 		}
 	}
-	remember := s.Role == session.RoleClient && s.Phase == app.PhaseConnected && s.Generation != 0 &&
+	remember := !g.center && s.Role == session.RoleClient && s.Phase == app.PhaseConnected && s.Generation != 0 &&
 		!s.Peer.IsZero() && s.Peer != g.peerAttempt && c.state.Config.Client.Peer != s.Peer.String()
 	if g.digitalPair {
 		remember = remember && g.pairing.ID == s.Peer

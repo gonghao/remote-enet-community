@@ -413,7 +413,7 @@ func TestInnerSetupTimerAndLifetime(t *testing.T) {
 				context.AfterFunc(ctx, func() { _ = s.Close(ctx.Err()) })
 				return s, nil
 			}}}
-			s, err := adapter.wrap(t.Context(), a, true, identity.Fingerprint{1}, transport.PathInfo{}, nil)
+			s, err := adapter.wrap(t.Context(), a, true, identity.Fingerprint{1}, transport.PathInfo{}, innerSetup{})
 			if !succeed {
 				if !errors.Is(err, context.DeadlineExceeded) {
 					t.Fatalf("setup timeout: %v", err)
@@ -457,7 +457,7 @@ func TestIdleWaitHasNoSetupDeadline(t *testing.T) {
 	}}}
 	done := make(chan error, 1)
 	go func() {
-		_, err := adapter.wrap(ctx, a, false, identity.Fingerprint{}, transport.PathInfo{}, func() {})
+		_, err := adapter.wrap(ctx, a, false, identity.Fingerprint{}, transport.PathInfo{}, innerSetup{waitForTraffic: true})
 		done <- err
 	}()
 	<-started

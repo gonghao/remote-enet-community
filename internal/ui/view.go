@@ -3,12 +3,16 @@ package ui
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
 	"remote-enet/internal/app"
 	"remote-enet/internal/carside"
+	"remote-enet/internal/center"
+	"remote-enet/internal/centerflow"
 	"remote-enet/internal/checkup"
+	"remote-enet/internal/desktop"
 	"remote-enet/internal/hsfzcapture"
 	"remote-enet/internal/identity"
 	"remote-enet/internal/linktest"
@@ -18,6 +22,7 @@ import (
 
 // State contains display data only; invitation codes must stay out of Events.
 type State struct {
+	Center                           desktop.CenterView
 	Capture                          hsfzcapture.Snapshot
 	Runtime                          app.Snapshot
 	Running, Stopping, Testing       bool
@@ -44,6 +49,19 @@ type Permission struct {
 // Actions run synchronously on the UI thread and must return promptly. The
 // integrator queues controller work and handles explicit clipboard requests.
 type Actions struct {
+	CenterSessionCandidates func() []centerflow.SessionCandidate
+	ResumeCenterSession     func(center.SessionID)
+	CenterLogin             func(accountCode, deviceName string)
+	CenterLogout            func()
+	RefreshCenter           func()
+	EndReception            func()
+	RetryPairing            func()
+	RevokeCenterDevice      func(fingerprint string)
+	StartReception          func(nodeID string)
+	CenterDisplay           func() (string, centerflow.SASPrompt)
+	MatchSAS                func(id uint64, input string) bool
+	AnswerSAS               func(id uint64, match bool)
+
 	Save              func(settings.Config)
 	Refresh           func()
 	Connect           func(string)
@@ -51,6 +69,8 @@ type Actions struct {
 	Stop              func()
 	IssueInvite       func()
 	LoadIssuerEntry   func()
+	SetCenter         func(settings.Center)
+	CheckCenter       func()
 	IssueNumericCode  func()
 	CopyNumericCode   func(uint64)
 	RevokeNumericCode func(uint64)
@@ -90,12 +110,27 @@ const (
 	ActionCopyNumericCode
 	ActionRevokeNumericCode
 	ActionIssuerEntry
+	ActionSetCenter
+	ActionCheckCenter
+	ActionAccount
+	ActionRefreshCenter
+	ActionAnswerSAS
+	ActionRetryPairing
+	ActionEndReception
 )
 
 // View and all of its methods belong to the UI thread.
 type View struct {
-	issuerEntry     string
-	issuerRequested bool
+	lastCenterPage                                                     page
+	accountCode, deviceName, node, sasInput                            string
+	sasMatched, showDevices, editCenter, enteredCenter, accountPending bool
+	sasPending, retryPending                                           bool
+
+	issuerEntry         string
+	issuerRequested     bool
+	centerID, centerAPI string
+	checkingCenter      bool
+	centerResults       []center.EntryResult
 
 	actions                             Actions
 	role                                string
@@ -135,9 +170,10 @@ type View struct {
 func New(initial settings.Config, actions Actions) *View {
 	v := &View{actions: actions, role: initial.Role, saved: initial}
 	v.resetDraft(initial)
-	if initial.Role == settings.RoleOperator && (initial.Operator.Mode != "hub" && initial.Operator.Endpoint == "" || initial.Operator.Bind == "") {
+	if initial.Role == settings.RoleOperator && (initial.Operator.Mode == "direct" && initial.Operator.Endpoint == "" || initial.Operator.Bind == "") {
 		v.page = settingsPage
 	}
+	v.centerID, v.centerAPI = initial.Center.ID, strings.Join(initial.Center.API, "\n")
 	return v
 }
 
@@ -148,6 +184,13 @@ func New(initial settings.Config, actions Actions) *View {
 func (v *View) SetConfig(cfg settings.Config) {
 	if cfg.Role != v.role {
 		return
+	}
+	if cfg.Center.ID != v.saved.Center.ID || !slices.Equal(cfg.Center.API, v.saved.Center.API) {
+		v.centerID, v.centerAPI = cfg.Center.ID, strings.Join(cfg.Center.API, "\n")
+		v.centerResults = nil
+		v.enteredCenter = false
+		v.editCenter = false
+		v.accountCode, v.deviceName, v.node = "", "", ""
 	}
 	clean := !v.dirty()
 	v.draft.Center = cfg.Center
@@ -200,6 +243,13 @@ func (v *View) SetState(state State) {
 			v.page = sessionPage
 		}
 	}
+	if state.Center.SASID != v.state.Center.SASID || state.Runtime.Generation != v.state.Runtime.Generation {
+		v.sasInput, v.sasMatched, v.sasPending = "", false, false
+	}
+	if state.Center.LoggedIn != v.state.Center.LoggedIn {
+		v.accountCode, v.deviceName = "", ""
+		v.showDevices = false
+	}
 	v.state = state
 	v.clearExpiredNumericCode()
 }
@@ -239,6 +289,19 @@ func (v *View) Complete(action Action) {
 		v.captureStopping = false
 	case ActionCheckConnection:
 		v.checking = false
+	case ActionRefreshCenter:
+		v.node = ""
+		v.accountPending = false
+	case ActionAccount:
+		v.accountPending = false
+	case ActionAnswerSAS:
+		v.sasPending = false
+	case ActionRetryPairing:
+		v.retryPending = false
+	case ActionEndReception:
+		v.stopping = false
+	case ActionCheckCenter:
+		v.checkingCenter = false
 	case ActionCancelChecks:
 		v.cancelingChecks = false
 	case ActionIssueNumericCode, ActionCopyNumericCode, ActionRevokeNumericCode:

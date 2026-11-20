@@ -2,7 +2,6 @@ package desktop
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"log/slog"
 	"runtime"
@@ -35,8 +34,8 @@ func TestCenterSurvivesStaleForm(t *testing.T) {
 	if !persisted.Equal(old) || !c.Snapshot().Config.Equal(old) {
 		t.Fatal("stale form replaced center or lost preferences")
 	}
-	if err := c.StartClient(t.Context(), "12345678"); !errors.Is(err, errCenterCode) {
-		t.Fatal("configured center allowed unqualified numeric input")
+	if client, _, _, err := c.runtimeConfigs(old, "12345678", nil); err != nil || client.Center == nil || client.CenterCode != "12345678" {
+		t.Fatal("configured center did not select numeric redemption")
 	}
 	snapshot := c.Snapshot()
 	snapshot.Config.Center.API[0] = "mutated"

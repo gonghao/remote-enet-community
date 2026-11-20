@@ -19,6 +19,9 @@ const (
 	ReasonRateLimited     Reason = "rate_limited"
 	ReasonBusy            Reason = "busy"
 	ReasonConfirmation    Reason = "confirmation"
+	ReasonRejected        Reason = "rejected"
+	ReasonConfirmTimeout  Reason = "confirm_timeout"
+	ReasonNotPaired       Reason = "not_paired"
 	ReasonStoreFailed     Reason = "store_failed"
 )
 

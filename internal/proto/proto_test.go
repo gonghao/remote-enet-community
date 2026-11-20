@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"reflect"
+	"strings"
 	"testing"
 	"testing/iotest"
 )
@@ -221,5 +222,20 @@ func TestHubTicketRejectsMalformedBody(t *testing.T) {
 		if _, err := Read(&frame, MaxFrameLen); err == nil {
 			t.Errorf("accepted invalid ticket body (length %d)", len(body))
 		}
+	}
+}
+
+func TestCenterMixedControlLimits(t *testing.T) {
+	var b bytes.Buffer
+	if err := Write(&b, Log{Msg: strings.Repeat("l", 500)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadCenterControl(&b); err != nil {
+		t.Fatal(err)
+	}
+	// Only the envelope header arrives. Reject without waiting for the body.
+	b.Write([]byte{0, 1, 0, 0, 0xa2, 1, byte(TypePairDecision), 2, 0xa2})
+	if _, err := ReadCenterControl(&b); err == nil || !strings.Contains(err.Error(), "pairing frame too large") {
+		t.Fatal(err)
 	}
 }

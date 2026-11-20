@@ -19,6 +19,8 @@ import (
 // admission deadline (exp + skew); zero means no ticket deadline. PairingUntil
 // is inclusive and includes skew; zero keeps the pairing window closed.
 type Grant struct {
+	Session               SessionID
+	JTI                   [16]byte
 	Ref                   any
 	Expires, PairingUntil time.Time
 }
@@ -34,23 +36,32 @@ type Policy interface {
 	PairingOperator() identity.Fingerprint
 }
 
-// Options.Now controls grant deadlines only; socket deadlines use real time.
+// Options.Now and AfterFunc share a clock. Socket deadlines use real time.
 type Options struct {
+	CenterMode  bool // Every admitted grant must identify a leased session.
 	Local       *identity.Local
 	Policy      Policy
 	Now         func() time.Time
 	Embedded    *Embedded
 	Logger      *slog.Logger
 	SetupLimits SetupLimits
+	AfterFunc   func(time.Duration, func()) (stop func() bool)
+	// Nonpositive values use the center contract defaults (330 seconds each).
+	SealTTL, SessionRetention time.Duration
 }
 
 // Server owns its listener and all accepted connections until Serve returns.
 // A server can be served only once, including after shutdown.
 type Server struct {
-	o       Options
-	started atomic.Bool
-	mu      sync.Mutex
-	waits   map[identity.Fingerprint]*waiter
+	o                    Options
+	started              atomic.Bool
+	mu                   sync.Mutex
+	waits                map[identity.Fingerprint]*waiter
+	admitting            bool
+	sessions             map[SessionID]*sessionRecord
+	sealed               expiryCache[Usage]
+	consumed             expiryCache[struct{}]
+	retiredRx, retiredTx uint64
 }
 
 type waiter struct {
@@ -73,6 +84,7 @@ type connection struct {
 	once         sync.Once
 	done         chan struct{}
 	releaseSetup func()
+	meter        *relayMeter
 }
 
 func (c *connection) Close() error {
@@ -122,7 +134,20 @@ func NewServer(o Options) *Server {
 	if o.Now == nil {
 		o.Now = time.Now
 	}
-	return &Server{o: o, waits: make(map[identity.Fingerprint]*waiter)}
+	if o.AfterFunc == nil {
+		o.AfterFunc = func(d time.Duration, f func()) func() bool { return time.AfterFunc(d, f).Stop }
+	}
+	if o.SealTTL <= 0 {
+		o.SealTTL = 330 * time.Second
+	}
+	if o.SessionRetention <= 0 {
+		o.SessionRetention = 330 * time.Second
+	}
+	return &Server{
+		o: o, admitting: true,
+		waits:    make(map[identity.Fingerprint]*waiter),
+		sessions: make(map[SessionID]*sessionRecord),
+	}
 }
 
 // SetPolicy atomically replaces the policy and closes revoked routes. Counts
@@ -185,6 +210,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 		}
 		connsMu.Unlock()
 		wg.Wait()
+		s.stopSessionTimers()
 	}()
 	admission := newSetupAdmission(s.o.SetupLimits, s.o.Embedded != nil)
 	timeout := admission.Timeout
@@ -293,9 +319,21 @@ func (s *Server) register(conn *connection, dev identity.Fingerprint, req Reques
 	} else if !selfDial || s.o.Embedded == nil {
 		return nil, statusUnauthorized
 	}
+	if s.o.CenterMode && g.Session == (SessionID{}) {
+		s.o.Logger.Error("Center policy admitted a grant without a session")
+		return nil, statusUnauthorized
+	}
 	now := s.o.Now()
 	if !g.Expires.IsZero() && now.After(g.Expires) {
 		return nil, statusUnauthorized
+	}
+	if g.Session != (SessionID{}) {
+		_, sealed := s.sealed.get(g.Session, now)
+		_, used := s.consumed.get(g.JTI, now)
+		if !s.admitting || sealed || used || g.Expires.IsZero() || selfDial {
+			return nil, statusUnauthorized
+		}
+		s.expireRoutesLocked(s.sessions[g.Session], now)
 	}
 	if selfDial && s.o.Embedded != nil {
 		if !s.o.Embedded.reserve(conn, timeout) {
@@ -310,6 +348,7 @@ func (s *Server) register(conn *connection, dev identity.Fingerprint, req Reques
 		r, w := io.Pipe()
 		wait := &waiter{dev: dev, conn: conn, target: req.Target, grant: g, reader: r, writer: w, ready: make(chan struct{})}
 		s.waits[dev] = wait
+		s.commitSessionLocked(wait, conn, g, now)
 		return wait, statusOK
 	}
 	target := req.Target
@@ -325,12 +364,15 @@ func (s *Server) register(conn *connection, dev identity.Fingerprint, req Reques
 		return nil, statusUnknownPeer
 	case wait.dial != nil:
 		return nil, statusBusy
+	case wait.grant.Session != g.Session:
+		return nil, statusUnauthorized
 	case selfDial && (wait.grant.PairingUntil.IsZero() || now.After(wait.grant.PairingUntil)):
 		return nil, statusUnauthorized
 	case !wait.target.IsZero() && wait.target != dev:
 		return nil, statusUnauthorized
 	}
 	wait.dial, wait.dialDev, wait.dialGrant = conn, dev, g
+	s.commitSessionLocked(wait, conn, g, now)
 	return wait, statusOK
 }
 
@@ -351,6 +393,7 @@ func (s *Server) removeWaitLocked(wait *waiter) {
 	}
 	_ = wait.reader.Close()
 	_ = wait.writer.Close()
+	s.detachSessionLocked(wait)
 }
 
 func (s *Server) wait(wait *waiter) {
@@ -358,8 +401,9 @@ func (s *Server) wait(wait *waiter) {
 	// Only this handler reads the wait socket. Before pairing, waiters must be
 	// silent; rejecting eager data avoids an unbounded pre-pair buffer.
 	buf := make([]byte, 32*1024)
+	source := wait.conn.relay()
 	for {
-		n, err := wait.conn.Read(buf)
+		n, err := source.Read(buf)
 		if n > 0 {
 			s.mu.Lock()
 			paired := wait.dial != nil
@@ -378,22 +422,23 @@ func (s *Server) wait(wait *waiter) {
 }
 
 func (s *Server) dial(conn *connection, wait *waiter, timeout time.Duration) {
+	dialIO, waitIO := conn.relay(), wait.conn.relay()
 	done := make(chan struct{})
 	go func() {
 		// Only the first dial byte is timed. Clear the deadline before
 		// forwarding it so wait-side backpressure cannot expire the relay.
 		var first [1]byte
 		if err := conn.SetReadDeadline(time.Now().Add(timeout)); err == nil {
-			if _, err := io.ReadFull(conn, first[:]); err == nil && conn.SetReadDeadline(time.Time{}) == nil {
-				if err := writeAll(wait.conn, first[:]); err == nil {
-					_, _ = io.Copy(wait.conn, conn)
+			if _, err := io.ReadFull(dialIO, first[:]); err == nil && conn.SetReadDeadline(time.Time{}) == nil {
+				if err := writeAll(waitIO, first[:]); err == nil {
+					_, _ = io.Copy(waitIO, dialIO)
 				}
 			}
 		}
 		s.removeWait(wait)
 		close(done)
 	}()
-	_, _ = io.Copy(conn, wait.reader)
+	_, _ = io.Copy(dialIO, wait.reader)
 	s.removeWait(wait)
 	<-done
 }

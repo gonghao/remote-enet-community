@@ -20,6 +20,8 @@ func (v *View) tr(source string, args ...any) string {
 func (v *View) validationMessage(err error) string {
 	message := err.Error()
 	switch {
+	case strings.HasPrefix(message, "settings: center."):
+		return v.tr("Check the center ID and HTTPS addresses.")
 	case strings.HasPrefix(message, "settings: operator.hub.addr:"):
 		return v.tr("Hub address must include a host and port.")
 	case strings.HasPrefix(message, "settings: operator.hub.fp"):

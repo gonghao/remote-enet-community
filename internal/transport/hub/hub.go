@@ -118,7 +118,7 @@ func (a *Connector) DialBootstrap(ctx context.Context, addr string) (transport.S
 		return nil, identity.Fingerprint{}, err
 	}
 	p := path(conn, transport.Endpoint{Addr: addr, Hub: h}, identity.Fingerprint{})
-	s, err := a.wrap(ctx, conn, true, identity.Fingerprint{}, p, nil)
+	s, err := a.wrap(ctx, conn, true, identity.Fingerprint{}, p, innerSetup{})
 	if err != nil {
 		return nil, identity.Fingerprint{}, err
 	}
@@ -137,7 +137,7 @@ func (a *Connector) Dial(ctx context.Context, peer transport.PeerInfo) (transpor
 		if err != nil {
 			return nil, err
 		}
-		return a.wrap(ctx, conn, true, peer.ID, path(conn, ep, peer.ID), nil)
+		return a.wrap(ctx, conn, true, peer.ID, path(conn, ep, peer.ID), innerSetup{})
 	})
 }
 
@@ -247,7 +247,7 @@ func (a *Connector) Accept(ctx context.Context) (transport.Session, error) {
 		conn, peer, err = a.o.Embedded.Accept(ctx)
 		if err == nil {
 			p := transport.PathInfo{Kind: transport.PathDirect, Hub: a.o.Local.Fingerprint(), LocalAddr: conn.LocalAddr().String(), RemoteAddr: conn.RemoteAddr().String()}
-			session, err = a.wrap(ctx, conn, false, peer, p, nil)
+			session, err = a.wrap(ctx, conn, false, peer, p, innerSetup{})
 		}
 	} else {
 		session, err = race(ctx, a.o.Endpoints, func(ctx context.Context, ep transport.Endpoint) (transport.Session, error) {

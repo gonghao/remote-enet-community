@@ -2,6 +2,7 @@ package ui
 
 import (
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -33,6 +34,15 @@ const (
 // Render builds native controls; the host owns window sizing and invalidation.
 func (v *View) Render(c *ui.Context) {
 	c.SetTheme(Theme())
+	accountPage := (v.page == sessionPage || v.page == settingsPage && v.draft.Operator.Mode == "center") && v.role == settings.RoleOperator && v.saved.Operator.Mode == "center"
+	if accountPage && (!v.enteredCenter || v.lastCenterPage != v.page) && !v.locked() && !v.accountPending && v.actions.RefreshCenter != nil {
+		v.enteredCenter = true
+		v.lastCenterPage = v.page
+		v.refreshCenter()
+	}
+	if !accountPage {
+		v.enteredCenter = false
+	}
 	ui.Column(c).Fill().Border(1, line).Radius(0).Children(func() {
 		v.header(c)
 		v.captureMarkerBar(c)
@@ -88,6 +98,7 @@ func (v *View) Render(c *ui.Context) {
 			})
 		})
 	})
+	v.sasDialog(c)
 }
 
 func (v *View) roleTitle() string {
@@ -183,6 +194,9 @@ func (v *View) pageTitle(c *ui.Context, title, subtitle string) {
 
 func (v *View) messages(c *ui.Context) {
 	errText := v.tr(v.state.Error)
+	if s := v.state.Center; s.SASID != 0 && !time.Now().Before(s.SASDeadline) {
+		errText = v.tr("Short code was not confirmed in time")
+	}
 	runtimeError := locales.RuntimeErrorText(v.language, v.state.Runtime.LastError)
 	updates := func() {
 		if errText != "" {
@@ -239,7 +253,12 @@ func (v *View) startControls(c *ui.Context) {
 		height = 32
 	}
 	ui.Row(c).FillWidth().Gap(8).Children(func() {
-		if client {
+		if client && v.state.Center.Phase == "retry" {
+			if ui.PrimaryButton(c.Key("retry"), v.tr("Retry pairing")).Grow(1).Height(height).Disabled(v.actions.RetryPairing == nil || v.retryPending || v.state.Stopping).Clicked() {
+				v.retryPending = true
+				v.actions.RetryPairing()
+			}
+		} else if client {
 			label := "Connect"
 			if v.connecting {
 				label = "Starting…"
@@ -273,7 +292,11 @@ func (v *View) startControls(c *ui.Context) {
 		if ui.Button(c.Key("stop"), v.tr(label)).Label(v.tr("Stop runtime")).Grow(1).Height(height).TextColor(c.Theme().Danger).Disabled(!v.canStop()).Clicked() {
 			v.stopping = true
 			v.ClearPairingSecrets()
-			v.actions.Stop()
+			if client && v.state.Center.Phase != "" && v.actions.EndReception != nil {
+				v.actions.EndReception()
+			} else {
+				v.actions.Stop()
+			}
 		}
 	})
 	message := v.tr("Ready to start with saved settings.")
@@ -350,6 +373,7 @@ func (v *View) settingsPage(c *ui.Context) {
 		})
 	})
 	if v.role == settings.RoleClient {
+		v.card(c.Key("client-center"), "Center", "", func() { v.centerForm(c) })
 		v.linkTest(c)
 	}
 	v.saveControls(c)

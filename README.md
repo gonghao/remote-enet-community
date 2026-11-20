@@ -49,6 +49,8 @@ Operator 在 Settings 填写公开的 `DDNS:端口` 与本机呈现 IPv4 并保�
 
 默认配置分别是系统用户配置目录下的 `remote-enet/client/settings.json` 和 `remote-enet/operator/settings.json`，身份与信任分别位于 `remote-enet/state/client`、`operator`。两端可同时启动，默认配置互不覆盖；邀请码不持久化。`--config PATH --state-dir PATH` 可用于隔离测试或显式复用角色匹配的旧数据；错角色或损坏配置直接报错，旧 shared `settings.json` 不自动迁移或删除。原来的统一 GUI 入口已移除，headless `cmd/renetd` 保留。
 
+Operator 配置支持直连（`direct`）、Hub（`hub`）和中心（`center`）三种模式。没有配置文件时，内置有效缺省中心的官方构建默认使用 `center`，社区构建默认使用 `direct`。已有配置保留原模式，版本 1 升级使用 `direct`。旧版程序会拒绝加载含中心模式的配置。详见 [settings 说明](internal/settings/README.md)。
+
 点击窗口关闭按钮或 Quit 都会完整退出，取消并汇合转发与后台任务，释放监听端口。运行中再次启动对应程序会唤回原实例。生产构建使用 `mygo_nowebview`，Windows 产物排除 WebView2；macOS arm64 `.app` 预览可用 `tools/build-macos-client.sh` 生成。自动启动安装、更新发布和签名仍独立处理。范围与验证见 [Wave 5](docs/WAVE5.md)、[Wave 6](docs/WAVE6.md)、[Wave 7](docs/WAVE7.md)。
 
 双端预览包统一使用 `tools/build-desktop.py` 构建，生成ZIP、SHA256及独立manifest。Mac Operator包内附带受限网络助手；Windows Operator包要求提供固定摘要的官方amd64 Wintun DLL。构建不启动程序或安装驱动，参数及签名边界见 [打包说明](docs/PACKAGING.md)。

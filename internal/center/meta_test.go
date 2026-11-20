@@ -18,6 +18,7 @@ const validMeta = `{"center_id":"garage","api_versions":["v1"],"server_time":179
 
 func TestFetchMetaAnonymous(t *testing.T) {
 	cases := []struct{ role, version, want string }{
+		{"hub", "1.2.3", "hub/1.2.3"},
 		{"client", "1.2.3", "client/1.2.3"},
 		{"operator", "0.1.0-preview.wave14.3-worktree+001", "operator/0.1.0-preview.wave14.3-worktree+001"},
 		{"operator", "dev", "operator/0.0.0-dev"},
@@ -145,7 +146,7 @@ func TestFetchMetaRejectsRedirectAndHTTP(t *testing.T) {
 	if _, err := FetchMeta(t.Context(), client, "http:"+strings.TrimPrefix(server.URL, "https:"), "client", "dev"); err == nil || !strings.Contains(err.Error(), "invalid HTTPS entry") {
 		t.Fatalf("expected HTTPS validation error, got %v", err)
 	}
-	if _, err := FetchMeta(t.Context(), client, server.URL, "hub", "1.2.3"); err == nil || !strings.Contains(err.Error(), "requires a client or operator role") {
+	if _, err := FetchMeta(t.Context(), client, server.URL, "unknown", "1.2.3"); err == nil || !strings.Contains(err.Error(), "requires a client, operator or hub role") {
 		t.Fatalf("expected role validation error, got %v", err)
 	}
 }

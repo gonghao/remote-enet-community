@@ -34,6 +34,7 @@ type testCall struct {
 }
 
 type controlledRuntime struct {
+	*app.Runtime
 	mu         sync.Mutex
 	state      app.Snapshot
 	states     chan app.Snapshot
@@ -48,7 +49,7 @@ type controlledRuntime struct {
 }
 
 func newRuntime() *controlledRuntime {
-	f := &controlledRuntime{state: app.Snapshot{Phase: app.PhaseIdle}, states: make(chan app.Snapshot, 32),
+	f := &controlledRuntime{Runtime: app.New(), state: app.Snapshot{Phase: app.PhaseIdle}, states: make(chan app.Snapshot, 32),
 		subContext: make(chan context.Context, 1), started: make(chan runCall, 1), canceled: make(chan struct{}),
 		release: make(chan struct{}), finish: make(chan error, 1)}
 	close(f.release)

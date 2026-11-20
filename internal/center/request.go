@@ -87,7 +87,7 @@ func (a RequestAuth) validate(r Request) error {
 		return fmt.Errorf("%w: invalid client or nonce", ErrBadRequest)
 	}
 	path, _, _ := strings.Cut(r.Target, "?")
-	required := r.Method == "POST" && path != "/v1/node/heartbeat"
+	required := r.Method == "POST" && !(role == "hub" && strings.HasSuffix(path, "/v1/node/heartbeat"))
 	if (required || a.IdempotencyKey != "") && !idempotencyPattern.MatchString(a.IdempotencyKey) {
 		return fmt.Errorf("%w: invalid idempotency key", ErrBadRequest)
 	}

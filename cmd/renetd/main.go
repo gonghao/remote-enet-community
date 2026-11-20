@@ -12,7 +12,16 @@ import (
 	"os/signal"
 )
 
+var version = "dev"
+
 func main() {
+	// A separate reader lets prompt cancellation interrupt a console read on all platforms.
+	if len(os.Args) == 2 && os.Args[1] == "--read-center-answer" {
+		if err := copyAnswer(os.Stdin, os.Stdout); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	if err := run(ctx, os.Args[1:], os.Stdout, os.Stderr); err != nil {
@@ -37,9 +46,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	case "invite":
 		err = runInvite(ctx, args[1:], stdout, stderr)
 	case "operator":
-		err = runOperator(ctx, args[1:], stderr, logger)
+		err = runOperator(ctx, args[1:], stdout, stderr, logger)
 	case "client":
-		err = runClient(ctx, args[1:], stderr, logger)
+		err = runClient(ctx, args[1:], stdout, stderr, logger)
 	default:
 		return fmt.Errorf("unknown command %q; use renetd --help", args[0])
 	}

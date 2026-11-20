@@ -20,6 +20,9 @@ func (v *View) stage() (string, string, ui.Color) {
 	if v.connecting || v.listening {
 		return "Starting", "Starting with the saved configuration.", blue
 	}
+	if v.state.Center.Phase != "" {
+		return v.centerStage(), v.centerReason(), blue
+	}
 	phase := v.state.Runtime.Phase
 	if !v.state.Running && phase != app.PhaseStopped {
 		return "Idle", "Configure your workspace, then start when you are ready.", muted
@@ -135,6 +138,9 @@ func (v *View) informationSections(c *ui.Context, compact bool) {
 			mode = v.tr("Direct")
 		case "relay":
 			mode = v.tr("Via hub %s", s.Path.Hub.Short())
+		}
+		if v.state.Center.Region != "" {
+			mode = v.tr("Via center %s · node %s", v.saved.Center.ID, v.state.Center.Region)
 		}
 		value("Connection mode", mode)
 		if s.Path.Kind == "relay" {

@@ -16,6 +16,10 @@ func (v *View) operatorPage(c *ui.Context) {
 	v.messages(c)
 	v.traffic(c)
 	v.card(c.Key("operator-actions"), "", "", func() {
+		if v.saved.Operator.Mode == "center" {
+			v.centerReception(c)
+			return
+		}
 		mode, addressLabel, addr := v.operatorAddress()
 		stage, _, color := v.stage()
 		ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {

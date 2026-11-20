@@ -215,11 +215,11 @@ func writeEnvelope(w io.Writer, e Envelope) error {
 
 // Read bounds allocation before decoding and consumes exactly one frame.
 func Read(r io.Reader, maxLen int) (any, error) {
-	return read(r, maxLen, false)
+	return read(r, maxLen, generalFrames)
 }
 
 // ReadPair bounds allocation and accepts only messages 11 through 16.
-func ReadPair(r io.Reader) (any, error) { return read(r, 256, true) }
+func ReadPair(r io.Reader) (any, error) { return read(r, maxPairFrame, pairingFrames) }
 
 // ReadHubTicket checks the negotiated ticket frame limit before allocation.
 func ReadHubTicket(r io.Reader) (HubTicket, error) {
@@ -234,7 +234,22 @@ func ReadHubTicket(r io.Reader) (HubTicket, error) {
 	return ticket, nil
 }
 
-func read(r io.Reader, maxLen int, pairOnly bool) (any, error) {
+const maxPairFrame = 256
+
+type frameMode int
+
+const (
+	generalFrames frameMode = iota
+	pairingFrames
+	centerControlFrames
+)
+
+// ReadCenterControl enforces the pairing limit on a mixed data control stream.
+func ReadCenterControl(r io.Reader) (any, error) {
+	return read(r, MaxFrameLen, centerControlFrames)
+}
+
+func read(r io.Reader, maxLen int, mode frameMode) (any, error) {
 	var prefix [4]byte
 	if _, err := io.ReadFull(r, prefix[:]); err != nil {
 		return nil, fmt.Errorf("proto: read length: %w", err)
@@ -243,8 +258,29 @@ func read(r io.Reader, maxLen int, pairOnly bool) (any, error) {
 	if maxLen <= 0 || n == 0 || uint64(n) > uint64(maxLen) {
 		return nil, fmt.Errorf("proto: invalid frame length %d (limit %d)", n, maxLen)
 	}
+	var head []byte
+	if mode == centerControlFrames && n > maxPairFrame {
+		// In a canonical envelope the type precedes the body. Five bytes
+		// cover the map, first key and a complete uint16 message number.
+		var header [5]byte
+		if _, err := io.ReadFull(r, header[:]); err != nil {
+			return nil, fmt.Errorf("proto: read envelope header: %w", err)
+		}
+		var typ MsgType
+		if header[0] != 0xa2 || header[1] != 1 {
+			return nil, fmt.Errorf("proto: invalid center control envelope")
+		}
+		if _, err := dec.UnmarshalFirst(header[2:], &typ); err != nil {
+			return nil, fmt.Errorf("proto: read control type: %w", err)
+		}
+		if typ >= TypePakeCommit && typ <= TypePairDecision {
+			return nil, fmt.Errorf("proto: pairing frame too large: %d", n)
+		}
+		head = header[:]
+	}
 	raw := make([]byte, int(n))
-	if _, err := io.ReadFull(r, raw); err != nil {
+	copy(raw, head)
+	if _, err := io.ReadFull(r, raw[len(head):]); err != nil {
 		return nil, fmt.Errorf("proto: read body: %w", err)
 	}
 	var e Envelope
@@ -255,7 +291,7 @@ func read(r io.Reader, maxLen int, pairOnly bool) (any, error) {
 		return nil, fmt.Errorf("proto: missing envelope type or body")
 	}
 	digital := e.Type >= TypePakeCommit && e.Type <= TypePairDecision
-	if pairOnly && !digital {
+	if mode == pairingFrames && !digital {
 		return nil, fmt.Errorf("proto: unexpected pairing type %d", e.Type)
 	}
 	var msg any

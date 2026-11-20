@@ -21,6 +21,10 @@ func (h runtimeLogHandler) Handle(_ context.Context, record slog.Record) error {
 	default:
 		return nil
 	}
+	if h.run.center {
+		h.record(record.Message)
+		return nil
+	}
 	record.Attrs(func(attr slog.Attr) bool {
 		if attr.Key != "error" {
 			return true

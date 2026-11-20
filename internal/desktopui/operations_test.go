@@ -10,6 +10,8 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"remote-enet/internal/center"
+	"remote-enet/internal/centerflow"
 	"remote-enet/internal/desktop"
 	"remote-enet/internal/settings"
 	renetui "remote-enet/internal/ui"
@@ -203,5 +205,29 @@ func TestSystemNoticeSurvivesSubscriptionAndActionUpdates(t *testing.T) {
 	tt.Frame()
 	if !tt.HasText(s.systemNotice) || !tt.HasText(s.commandErr) {
 		t.Fatal("action feedback hid the persistent system notice")
+	}
+}
+
+func TestRecoveryButtonSubmitsControllerAction(t *testing.T) {
+	s, posted := testShell(t)
+	var actions renetui.Actions
+	s.centerActions(&actions)
+	item := centerflow.SessionCandidate{ID: center.SessionID{1}, ShortID: "AQAAAA", RedeemedAt: time.Now()}
+	actions.CenterSessionCandidates = func() []centerflow.SessionCandidate { return []centerflow.SessionCandidate{item} }
+	s.view = renetui.New(s.state.Config, actions)
+	tt := ui.NewTester(s.view.Render, 440, 700)
+	label := item.ShortID + " · " + item.RedeemedAt.Local().Format(time.DateTime)
+	if button, ok := tt.AccessByRole(ui.RoleButton, label); !ok || button.Disabled {
+		t.Fatal("resume button unavailable")
+	}
+	if err := s.controller.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click(label); err != nil {
+		t.Fatal(err)
+	}
+	waitPosted(t, posted)
+	if s.commandErr != operationMessage(desktop.ErrClosed, "") || s.controller.Snapshot().Running {
+		t.Fatal("resume action did not report the closed controller", s.commandErr)
 	}
 }

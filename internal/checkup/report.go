@@ -7,7 +7,7 @@ import (
 )
 
 var findingIDs = map[string]bool{
-	"settings": true, "interfaces": true, "vehicle_adapter": true, "peer_configuration": true,
+	"center_meta": true, "center_login": true, "settings": true, "interfaces": true, "vehicle_adapter": true, "peer_configuration": true,
 	"hub_tls": true, "hub_dns": true, "hub_tcp": true, "hub_candidates": true, "presentation_adapter": true,
 	"hub_port": true, "diagnostic_port": true, "control_port": true, "discovery_port": true,
 	"public_endpoint": true, "mgu_permission": true, "mgu_routes": true, "peer_session": true,
@@ -26,7 +26,7 @@ var findingCodes = map[string]bool{
 	"routes_unavailable": true, "routes_available": true, "not_running": true, "session_connected": true,
 	"waiting_for_peer": true, "canceled": true, "probe_timeout": true, "permission_denied": true,
 	"port_in_use": true, "address_unavailable": true, "connection_refused": true, "dns_failed": true,
-	"network_failed": true,
+	"center_unconfigured": true, "center_verified": true, "center_unreachable": true, "center_id_mismatch": true, "signed_in": true, "unauthenticated": true, "login_unchecked": true, "network_failed": true,
 }
 
 // JSON projects only a bounded, fixed vocabulary. It is separate from the

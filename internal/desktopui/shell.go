@@ -77,7 +77,7 @@ func (s *shell) ready() {
 			if center.ID == "" {
 				detail = s.tr("Not configured")
 			}
-			result, err := mygo.Dialog.Message(mygo.MessageOptions{Parent: s.window, Type: mygo.MessageQuestion, Message: s.tr("Change center?"), Detail: detail, Buttons: []string{s.tr("Cancel"), s.tr("Change center…")}, DefaultButton: 0, CancelButton: 0})
+			result, err := mygo.Dialog.Message(mygo.MessageOptions{Parent: s.window, Title: s.tr(s.product.name), Type: mygo.MessageQuestion, Message: s.tr("Change center?"), Detail: detail, Buttons: []string{s.tr("Cancel"), s.tr("Change center")}, DefaultButton: 0, CancelButton: 0})
 			if err == nil && result.Button == 1 {
 				s.submit(renetui.ActionSetCenter, func(ctx context.Context) error { return s.controller.SetCenter(ctx, center) })
 			}

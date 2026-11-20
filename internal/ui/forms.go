@@ -58,10 +58,10 @@ func (v *View) nicSelect(c *ui.Context, label string, labelWidth float32) {
 		ui.Text(c, label).FontSize(clientFieldLabelSize).Width(labelWidth).Shrink(0)
 		sel := ui.SelectBase(c.Key("adapter"), &selected)
 		disabled := v.locked() || v.submitted != nil || v.actions.Save == nil
-		sel.Trigger.Label(v.tr("Adapter selection")).Disabled(disabled).Grow(1).MinWidth(0).Height(32).Padding(4, 8).Background(inputSurface).Border(1, controlStroke).Radius(0).
+		sel.Trigger.Label(v.tr("Adapter selection")).Disabled(disabled).Grow(1).MinWidth(0).Height(32).Padding(c.Theme().Space(1.5), c.Theme().Space(3.5)).Background(inputSurface).Border(1, controlStroke).Radius(0).
 			Tooltip(v.tr("Automatic requires one unambiguous adapter. Fixed selections are kept if an adapter disappears.")).Children(func() {
 			ui.Text(c, choices[selected].label).Grow(1).MinWidth(0).SingleLine().TruncateMiddle()
-			ui.Text(c, "⌄").TextColor(muted)
+			selectChevron(c)
 		})
 		sel.Popup(func(popup ui.Element) {
 			popup.Padding(4).Background(panel).Border(1, line).Radius(0).MaxHeight(240)
@@ -90,6 +90,17 @@ func (v *View) nicSelect(c *ui.Context, label string, labelWidth float32) {
 			v.refreshing = true
 			v.actions.Refresh()
 		}
+	})
+}
+
+// MyGo keeps Select's chevron private. Match its theme-scaled path for the
+// indexed adapter selector, whose labels need middle truncation.
+func selectChevron(c *ui.Context) {
+	size, color := c.Theme().Space(2.5), c.Theme().TextMuted
+	ui.Box(c).Size(size, size).Shrink(0).Draw(func(p *ui.Painter, r ui.Rect) {
+		var path ui.Path
+		path.MoveTo(r.X+0.1*r.W, r.Y+0.3*r.H).LineTo(r.X+0.5*r.W, r.Y+0.7*r.H).LineTo(r.X+0.9*r.W, r.Y+0.3*r.H)
+		p.StrokePath(&path, 1.5, color)
 	})
 }
 

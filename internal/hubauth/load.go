@@ -19,27 +19,49 @@ func Load(path string) (Config, error) {
 		return Config{}, fmt.Errorf("open configuration: %w", err)
 	}
 	defer f.Close()
-	const limit = 64 << 10
-	b, err := io.ReadAll(io.LimitReader(f, limit+1))
-	if err != nil {
-		return Config{}, fmt.Errorf("read configuration: %w", err)
-	}
-	if len(b) > limit || !utf8.Valid(b) {
-		return Config{}, errors.New("expected UTF-8 configuration of at most 64 KiB")
-	}
-	d := json.NewDecoder(bytes.NewReader(b))
-	d.UseNumber()
 	cfg := defaults()
-	if err := decode(d, reflect.ValueOf(&cfg).Elem(), ""); err != nil {
+	if err := DecodeStrict(f, 64<<10, &cfg); err != nil {
 		return Config{}, err
-	}
-	if _, err := d.Token(); err != io.EOF {
-		return Config{}, errors.New("trailing configuration content")
 	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+// DecodeStrict overlays a bounded UTF-8 JSON document onto a tagged struct.
+// Destinations support structs, slices, strings, int and int64. Discard dst on error.
+func DecodeStrict(r io.Reader, limit int, dst any) error {
+	v := reflect.ValueOf(dst)
+	if limit < 0 || v.Kind() != reflect.Pointer || v.IsNil() || v.Elem().Kind() != reflect.Struct {
+		return errors.New("expected nonnegative limit and pointer to struct")
+	}
+	reader := &io.LimitedReader{R: r, N: int64(limit)}
+	b, err := io.ReadAll(reader)
+	if err != nil {
+		return fmt.Errorf("read configuration: %w", err)
+	}
+	if reader.N == 0 {
+		var extra [1]byte
+		if _, err := io.ReadFull(r, extra[:]); err != io.EOF {
+			if err != nil {
+				return fmt.Errorf("read configuration: %w", err)
+			}
+			return fmt.Errorf("configuration exceeds %d bytes", limit)
+		}
+	}
+	if !utf8.Valid(b) {
+		return errors.New("expected UTF-8 configuration")
+	}
+	d := json.NewDecoder(bytes.NewReader(b))
+	d.UseNumber()
+	if err := decode(d, v.Elem(), ""); err != nil {
+		return err
+	}
+	if _, err := d.Token(); err != io.EOF {
+		return errors.New("trailing configuration content")
+	}
+	return nil
 }
 
 // Match exact JSON tags and track duplicate keys before assigning values.
@@ -72,7 +94,7 @@ func decode(d *json.Decoder, v reflect.Value, path string) error {
 			index := -1
 			for i := range v.NumField() {
 				f := v.Type().Field(i)
-				if f.Tag.Get("json") == name {
+				if tag, ok := f.Tag.Lookup("json"); ok && f.IsExported() && tag != "-" && tag == name {
 					index = i
 					break
 				}

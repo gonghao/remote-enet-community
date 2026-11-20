@@ -498,6 +498,7 @@
   "Operator offline": "Operator 不在线",
   "Self-hosted hub": "自建 Hub",
   "Share address": "分享地址",
+  "Copy hub address": "复制 Hub 地址",
   "Via hub %s": "经 Hub %s",
   "Waiting on hub": "已在 Hub 等待",
   "Hub address must include a host and port.": "Hub 地址必须包含主机和端口。",

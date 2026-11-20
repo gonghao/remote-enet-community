@@ -786,9 +786,21 @@ func TestOperatorHubSettingsAndPath(t *testing.T) {
 	if !tt.HasText("Waiting on hub") || !tt.HasText("Not configured") {
 		t.Fatal("missing hub wait or center status")
 	}
-	v.SetState(State{Running: true, Runtime: app.Snapshot{Phase: app.PhaseConnected, Path: transport.PathInfo{Kind: transport.PathRelay, Via: cfg.Operator.Hub.Addr, Hub: fp}}})
-	tt.Frame()
-	if !tt.HasText("Via hub " + cfg.Operator.Hub.Addr + " · " + fp.Short()) {
-		t.Fatal("missing pinned hub path")
+	const address = "workshop-operator-01.long-subdomain.dynamic-dns.example:47003"
+	v.actions.Copy = func(text string) { copied = text }
+	v.SetState(State{Running: true, Runtime: app.Snapshot{Phase: app.PhaseConnected, Path: transport.PathInfo{Kind: transport.PathRelay, Via: address, Hub: fp}}})
+	for _, lang := range []string{"en", "zh-Hans", "zh-Hant"} {
+		v.SetLanguage(lang)
+		for _, width := range []int{900, 1080} {
+			tt = ui.NewTester(v.Render, width, 760)
+			if !tt.HasText(v.tr("Via hub %s", fp.Short())) || !tt.HasText(address) {
+				t.Fatal("missing pinned hub path", lang, width)
+			}
+			copied = ""
+			click(t, tt, v.tr("Copy hub address"))
+			if copied != address {
+				t.Fatal("incomplete hub address", lang, width)
+			}
+		}
 	}
 }

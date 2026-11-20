@@ -128,9 +128,15 @@ func (v *View) informationSections(c *ui.Context, compact bool) {
 		case "direct":
 			mode = v.tr("Direct")
 		case "relay":
-			mode = v.tr("Via hub %s", s.Path.Via+" · "+s.Path.Hub.Short())
+			mode = v.tr("Via hub %s", s.Path.Hub.Short())
 		}
 		value("Connection mode", mode)
+		if s.Path.Kind == "relay" {
+			value("Hub address", s.Path.Via)
+			if ui.Button(c.Key("copy-hub-address"), v.tr("Copy hub address")).Disabled(v.actions.Copy == nil || s.Path.Via == "").Clicked() {
+				v.actions.Copy(s.Path.Via)
+			}
+		}
 		center := v.saved.Center.ID
 		if center == "" {
 			center = v.tr("Not configured")

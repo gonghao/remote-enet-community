@@ -498,6 +498,7 @@
   "Operator offline": "Operator offline",
   "Self-hosted hub": "Self-hosted hub",
   "Share address": "Share address",
+  "Copy hub address": "Copy hub address",
   "Via hub %s": "Via hub %s",
   "Waiting on hub": "Waiting on hub",
   "Hub address must include a host and port.": "Hub address must include a host and port.",

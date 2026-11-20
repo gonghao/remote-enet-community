@@ -5,8 +5,10 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"remote-enet/internal/identity"
@@ -23,12 +26,48 @@ import (
 var (
 	ErrCorrupt  = errors.New("trust: invalid state file")
 	ErrNotFound = errors.New("trust: peer not found")
+
+	errInvalidTicket = errors.New("trust: invalid endpoint ticket")
 )
 
+const maxTicketSize = 1024
+
+var ticketEncoding = base64.RawURLEncoding.Strict()
+
+type endpointTicket string
+
+func (t endpointTicket) MarshalJSON() ([]byte, error) {
+	return json.Marshal(ticketEncoding.EncodeToString([]byte(t)))
+}
+
+func (t *endpointTicket) UnmarshalJSON(raw []byte) error {
+	var encoded string
+	if err := json.Unmarshal(raw, &encoded); err != nil ||
+		encoded == "" || len(encoded) > ticketEncoding.EncodedLen(maxTicketSize) ||
+		strings.ContainsAny(encoded, "\r\n") {
+		return errInvalidTicket
+	}
+	decoded, err := ticketEncoding.DecodeString(encoded)
+	if err != nil {
+		return errInvalidTicket
+	}
+	*t = endpointTicket(decoded)
+	return nil
+}
+
 type endpointRecord struct {
-	Kind string `json:"kind"`
-	Addr string `json:"addr"`
-	Hub  string `json:"hub"`
+	Kind   string         `json:"kind"`
+	Addr   string         `json:"addr"`
+	Hub    string         `json:"hub"`
+	Ticket endpointTicket `json:"ticket,omitempty"`
+}
+
+func (e endpointRecord) endpoint() (transport.Endpoint, error) {
+	fp, err := identity.ParseFingerprint(e.Hub)
+	if err != nil {
+		return transport.Endpoint{}, err
+	}
+	return transport.Endpoint{Kind: e.Kind, Addr: e.Addr, Hub: fp, Ticket: string(e.Ticket)}, nil
 }
 
 type state struct {
@@ -137,10 +176,50 @@ func (s *Store) SavePeer(ctx context.Context, peer transport.PeerInfo) error {
 		if err := validEndpoint(e.Kind, e.Addr, e.Hub.String()); err != nil {
 			return err
 		}
-		endpoints = append(endpoints, endpointRecord{Kind: e.Kind, Addr: e.Addr, Hub: e.Hub.String()})
+		if len(e.Ticket) > maxTicketSize {
+			return errInvalidTicket
+		}
+		endpoints = append(endpoints, endpointRecord{Kind: e.Kind, Addr: e.Addr, Hub: e.Hub.String(), Ticket: endpointTicket(e.Ticket)})
 	}
 	return s.access(ctx, func(st *state) (bool, error) {
 		st.Peers[peer.ID.String()] = endpoints
+		return true, nil
+	})
+}
+
+// UpdateEndpointTicket replaces a ticket atomically. The peer, Hub fingerprint
+// and address must identify exactly one saved endpoint, and ticket is raw bytes.
+func (s *Store) UpdateEndpointTicket(ctx context.Context, peer, hub identity.Fingerprint, addr, ticket string) error {
+	if len(ticket) == 0 || len(ticket) > maxTicketSize {
+		return errInvalidTicket
+	}
+	return s.access(ctx, func(st *state) (bool, error) {
+		entries := st.Peers[peer.String()]
+		var match *endpointRecord
+		for i := range entries {
+			e := &entries[i]
+			if e.Addr != addr {
+				continue
+			}
+			fp, err := identity.ParseFingerprint(e.Hub)
+			if err != nil {
+				return false, err
+			}
+			if fp != hub {
+				continue
+			}
+			if match != nil {
+				return false, fmt.Errorf("trust: multiple saved endpoints match")
+			}
+			match = e
+		}
+		if match == nil {
+			return false, fmt.Errorf("%w: saved endpoint", ErrNotFound)
+		}
+		if match.Ticket == endpointTicket(ticket) {
+			return false, nil
+		}
+		match.Ticket = endpointTicket(ticket)
 		return true, nil
 	})
 }
@@ -153,11 +232,11 @@ func (s *Store) Peer(ctx context.Context, id identity.Fingerprint) (transport.Pe
 			return false, fmt.Errorf("%w: %s", ErrNotFound, id)
 		}
 		for _, e := range entries {
-			fp, err := identity.ParseFingerprint(e.Hub)
+			endpoint, err := e.endpoint()
 			if err != nil {
 				return false, err
 			}
-			peer.Endpoints = append(peer.Endpoints, transport.Endpoint{Kind: e.Kind, Addr: e.Addr, Hub: fp})
+			peer.Endpoints = append(peer.Endpoints, endpoint)
 		}
 		return false, nil
 	})
@@ -244,17 +323,33 @@ func (s *Store) load() (*state, error) {
 }
 
 func decodeState(f io.Reader) (*state, error) {
-	d := json.NewDecoder(io.LimitReader(f, 1<<20))
-	d.DisallowUnknownFields()
+	raw, err := io.ReadAll(io.LimitReader(f, (1<<20)+1))
+	if err != nil {
+		return nil, fmt.Errorf("%w: read state: %w", ErrCorrupt, err)
+	}
+	if len(raw) > 1<<20 {
+		return nil, fmt.Errorf("%w: state exceeds 1 MiB", ErrCorrupt)
+	}
+	var header struct {
+		Version int `json:"version"`
+	}
+	// Select the schema before validating fields that a future version could add.
+	if err := jsonv2.Unmarshal(raw, &header); err != nil {
+		return nil, fmt.Errorf("%w: cannot decode state", ErrCorrupt)
+	}
+	if header.Version != 1 && header.Version != 2 {
+		return nil, fmt.Errorf("%w: unsupported version", ErrCorrupt)
+	}
 	var st state
-	if err := d.Decode(&st); err != nil {
-		return nil, fmt.Errorf("%w: decode: %w", ErrCorrupt, err)
+	if err := jsonv2.Unmarshal(raw, &st, jsonv2.RejectUnknownMembers(true)); err != nil {
+		if errors.Is(err, errInvalidTicket) {
+			return nil, fmt.Errorf("%w: %w", ErrCorrupt, errInvalidTicket)
+		}
+		// JSON decoder errors may quote input from a credential-bearing file.
+		return nil, fmt.Errorf("%w: cannot decode state", ErrCorrupt)
 	}
-	if err := d.Decode(new(any)); err != io.EOF {
-		return nil, fmt.Errorf("%w: trailing data", ErrCorrupt)
-	}
-	if st.Version != 1 || st.Trusted == nil || st.Invites == nil || st.Peers == nil {
-		return nil, fmt.Errorf("%w: unsupported version or missing collections", ErrCorrupt)
+	if st.Trusted == nil || st.Invites == nil || st.Peers == nil {
+		return nil, fmt.Errorf("%w: missing collections", ErrCorrupt)
 	}
 	for key, trusted := range st.Trusted {
 		fp, err := identity.ParseFingerprint(key)
@@ -276,6 +371,9 @@ func decodeState(f io.Reader) (*state, error) {
 		for _, e := range endpoints {
 			if err := validEndpoint(e.Kind, e.Addr, e.Hub); err != nil {
 				return nil, fmt.Errorf("%w: %w", ErrCorrupt, err)
+			}
+			if st.Version == 1 && e.Ticket != "" {
+				return nil, fmt.Errorf("%w: endpoint ticket requires version 2", ErrCorrupt)
 			}
 		}
 	}
@@ -299,6 +397,18 @@ func validEndpoint(kind, addr, hub string) error {
 }
 
 func (s *Store) save(st *state) error {
+	st.Version = 1
+	for _, endpoints := range st.Peers {
+		for _, e := range endpoints {
+			if e.Ticket != "" {
+				st.Version = 2
+				break
+			}
+		}
+		if st.Version == 2 {
+			break
+		}
+	}
 	raw, err := json.Marshal(st)
 	if err != nil {
 		return fmt.Errorf("trust: encode state: %w", err)

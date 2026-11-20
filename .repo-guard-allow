@@ -1,0 +1,29 @@
+# repo-guard allowlist. Format: path-glob [| rule [| text]]
+# text is a substring of the match or sha256:<hex prefix> (see --show-digest).
+# Never put real private values here; use sha256: entries instead.
+
+# Exemptions are per value, never per directory: a blanket rule once hid a real
+# lab address in a test file. New fixtures should prefer 192.0.2.0/24.
+# Go test fixtures: fake gateways, adapters and parser edge cases.
+*_test.go | private-ipv4 | 192.168.1.
+*_test.go | private-ipv4 | 192.168.2.0
+*_test.go | private-ipv4 | 192.168.001.020
+*_test.go | private-ipv4 | 192.000.2.1
+*_test.go | private-ipv4 | 10.99.0.
+*_test.go | private-ipv4 | 10.21.32.43
+*_test.go | private-ipv4 | 10.0.0.1
+# Documentation example: fake ZGW bind address.
+cmd/fakezgw/README.md | private-ipv4 | 192.168.1.50
+docs/CONTRACTS.md | private-ipv4 | 192.168.1.50
+docs/DESIGN.md | private-ipv4 | 192.168.1.50
+# Addresses quoted from public third-party logs.
+docs/enet-protocol-research.md | private-ipv4 | 192.168.16.
+# Synthetic VIN in a UI fixture (sequential digits).
+internal/ui/view_test.go | vin
+
+# The guard and its tests contain rule patterns and synthetic samples of every rule.
+tools/repo-guard.py
+tools/test_repo_guard.py
+
+# This file lists only the public example values above.
+.repo-guard-allow | private-ipv4

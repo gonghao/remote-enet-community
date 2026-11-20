@@ -8,13 +8,13 @@ import (
 
 var findingIDs = map[string]bool{
 	"settings": true, "interfaces": true, "vehicle_adapter": true, "peer_configuration": true,
-	"hub_dns": true, "hub_tcp": true, "hub_candidates": true, "presentation_adapter": true,
+	"hub_tls": true, "hub_dns": true, "hub_tcp": true, "hub_candidates": true, "presentation_adapter": true,
 	"hub_port": true, "diagnostic_port": true, "control_port": true, "discovery_port": true,
 	"public_endpoint": true, "mgu_permission": true, "mgu_routes": true, "peer_session": true,
 }
 
 var findingCodes = map[string]bool{
-	"settings_invalid": true, "settings_valid": true, "interfaces_failed": true, "interfaces_available": true,
+	"hub_identity_mismatch": true, "tls_failed": true, "hub_verified": true, "settings_invalid": true, "settings_valid": true, "interfaces_failed": true, "interfaces_available": true,
 	"adapter_ambiguous": true, "adapter_unavailable": true, "adapter_selected": true,
 	"pairing_missing": true, "pairing_invalid": true, "pairing_unavailable": true, "invite_invalid": true,
 	"peer_available": true, "endpoint_invalid": true, "literal_address": true, "dns_resolved": true,

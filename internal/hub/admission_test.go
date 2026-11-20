@@ -9,7 +9,7 @@ import (
 )
 
 func TestSetupAdmission(t *testing.T) {
-	a := newSetupAdmission(SetupLimits{})
+	a := newSetupAdmission(SetupLimits{}, true)
 	now := time.Now()
 	for range 16 {
 		if !a.acquire(now) {
@@ -32,15 +32,27 @@ func TestSetupAdmission(t *testing.T) {
 	}
 }
 
-func TestEmbeddedSetupSlots(t *testing.T) {
+func TestSetupSlots(t *testing.T) {
+	for _, mode := range []string{"embedded", "standalone"} {
+		t.Run(mode, func(t *testing.T) { testSetupSlots(t, mode == "embedded") })
+	}
+}
+
+func testSetupSlots(t *testing.T, embedded bool) {
+	t.Helper()
 	h, c := local(t), local(t)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	firstAccepted := make(chan struct{})
-	e := NewEmbedded()
-	startOnListener(t, Options{Local: h, Embedded: e, SetupLimits: SetupLimits{Concurrent: 1, Timeout: 250 * time.Millisecond}},
+	o := Options{Local: h, SetupLimits: SetupLimits{Concurrent: 1, Timeout: 250 * time.Millisecond}}
+	if embedded {
+		o.Embedded = NewEmbedded()
+	} else {
+		o.Policy = testPolicy{}
+	}
+	startOnListener(t, o,
 		&acceptHookListener{Listener: ln, firstAccepted: firstAccepted})
 	addr := ln.Addr().String()
 	stalled, err := net.Dial("tcp", addr)
@@ -53,13 +65,20 @@ func TestEmbeddedSetupSlots(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("silent connection was not accepted")
 	}
-	if conn, _, err := ConnectBootstrap(t.Context(), addr, c); err == nil {
-		conn.Close()
+	if conn, err := Connect(t.Context(), addr, c, h.Fingerprint(), Request{Role: RoleWait}); err == nil || errors.Is(err, ErrUnauthorized) {
+		if conn != nil {
+			conn.Close()
+		}
 		t.Fatal("accepted overlapping setup")
 	}
 	stalled.SetReadDeadline(time.Now().Add(2 * time.Second))
 	if _, err := stalled.Read(make([]byte, 1)); !errors.Is(err, io.EOF) {
 		t.Fatalf("stalled setup: %v", err)
+	}
+	if !embedded {
+		connect(t, addr, h, c, Request{Role: RoleWait})
+		connect(t, addr, h, h, Request{Role: RoleDial, Target: c.Fingerprint()})
+		return
 	}
 	conn, fp, err := ConnectBootstrap(t.Context(), addr, c)
 	if err != nil {
@@ -70,7 +89,7 @@ func TestEmbeddedSetupSlots(t *testing.T) {
 		t.Fatal("wrong bootstrap identity")
 	}
 	select {
-	case <-e.notify:
+	case <-o.Embedded.notify:
 	case <-time.After(2 * time.Second):
 		t.Fatal("handoff was not published")
 	}

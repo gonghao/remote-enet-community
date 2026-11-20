@@ -52,7 +52,7 @@ func Run(role, version string, args []string) int {
 	defer cancel()
 	network := bundledNetworkOptions()
 	permission := netpriv.Inspect(network)
-	controllerOpts := desktop.Options{ConfigPath: opts.configPath, StateDir: opts.stateDir, FixedRole: role}
+	controllerOpts := desktop.Options{ConfigPath: opts.configPath, StateDir: opts.stateDir, FixedRole: role, AppVersion: version}
 	controllerOpts.NetworkStatus = func() netpriv.Status { return netpriv.Inspect(network) }
 	if role == settings.RoleOperator {
 		controllerOpts.DirectFactory = networkFactory(network)

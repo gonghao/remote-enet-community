@@ -25,9 +25,9 @@ type mismatchConnector struct {
 	calls int
 }
 
-func (c *mismatchConnector) DialDirectPair(context.Context, string) (transport.Session, error) {
+func (c *mismatchConnector) DialBootstrap(context.Context, string) (transport.Session, identity.Fingerprint, error) {
 	c.calls++
-	return nil, identity.ErrFingerprintMismatch
+	return nil, identity.Fingerprint{}, identity.ErrFingerprintMismatch
 }
 
 func TestDigitalIdentityMismatchTerminatesFirstDial(t *testing.T) {
@@ -112,7 +112,7 @@ func TestOperatorDoesNotPublishUnpairedClient(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts, err := connector.DialDirectPair(ctx, addr)
+	ts, _, err := connector.DialBootstrap(ctx, addr)
 	if err != nil {
 		t.Fatal(err)
 	}

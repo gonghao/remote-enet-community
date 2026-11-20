@@ -61,20 +61,20 @@ func TestLoadMissingOnly(t *testing.T) {
 	parent := filepath.Join(t.TempDir(), "not-created")
 	path := filepath.Join(parent, "settings.json")
 	cfg, err := Load(path)
-	if err != nil || cfg != Default() {
+	if err != nil || !cfg.Equal(Default()) {
 		t.Fatalf("missing config: %+v, %v", cfg, err)
 	}
 	if _, err := os.Stat(parent); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("loading missing config changed disk: %v", err)
 	}
 	for _, path := range []string{"", t.TempDir()} {
-		if cfg, err := Load(path); err == nil || cfg != (Config{}) {
+		if cfg, err := Load(path); err == nil || !cfg.Equal(Config{}) {
 			t.Errorf("invalid path %q: %+v, %v", path, cfg, err)
 		}
 	}
 	parentFile := filepath.Join(t.TempDir(), "file")
 	writeTestConfig(t, parentFile, []byte("not a directory"))
-	if cfg, err := Load(filepath.Join(parentFile, "settings.json")); err == nil || cfg != (Config{}) {
+	if cfg, err := Load(filepath.Join(parentFile, "settings.json")); err == nil || !cfg.Equal(Config{}) {
 		t.Fatalf("non-directory parent returned defaults: %+v, %v", cfg, err)
 	}
 }
@@ -83,14 +83,15 @@ func TestLoadFixture(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	writeTestConfig(t, path, []byte(fixture+" \n\t"))
 	want := Config{
-		Version: 1, Role: "operator", AllowLinkTest: false,
+		Version: 2, Role: "operator", AllowLinkTest: false,
 		Client: Client{NICName: "Ethernet 12", NICAddr: "169.254.12.34"},
 		Operator: Operator{
+			Mode:   "direct",
 			Listen: "0.0.0.0:47000", Endpoint: "home.example:47000", Bind: "192.168.1.20",
 			DiagnosticPort: 6801, ControlPort: 6811, DiscoveryPort: 6811, Exclusive: true,
 		},
 	}
-	if got, err := Load(path); err != nil || got != want {
+	if got, err := Load(path); err != nil || !got.Equal(want) {
 		t.Fatalf("fixture = %+v, %v; want %+v", got, err, want)
 	}
 }
@@ -144,7 +145,7 @@ func TestLoadRejectsCorruptConfig(t *testing.T) {
 		{"array-object", strings.Replace(fixture, `"client": {"nic_name": "Ethernet 12", "nic_addr": "169.254.12.34", "peer": ""}`, `"client": []`, 1)},
 		{"int-overflow", strings.Replace(fixture, `"control_port": 6811`, `"control_port": 999999999999999999999999999999999999`, 1)},
 		{"fractional-port", strings.Replace(fixture, `"control_port": 6811`, `"control_port": 6811.1`, 1)},
-		{"unsupported-version", strings.Replace(fixture, `"version": 1`, `"version": 2`, 1)},
+		{"unsupported-version", strings.Replace(fixture, `"version": 1`, `"version": 3, "future": null`, 1)},
 		{"invalid-role", strings.Replace(fixture, `"role": "operator"`, `"role": "hub"`, 1)},
 		{"invalid-port", strings.Replace(fixture, `"control_port": 6811`, `"control_port": 0`, 1)},
 		{"equal-tcp-ports", strings.Replace(fixture, `"control_port": 6811`, `"control_port": 6801`, 1)},
@@ -162,7 +163,7 @@ func TestLoadRejectsCorruptConfig(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "settings.json")
 			original := []byte(tc.data)
 			writeTestConfig(t, path, original)
-			if cfg, err := Load(path); err == nil || cfg != (Config{}) {
+			if cfg, err := Load(path); err == nil || !cfg.Equal(Config{}) {
 				t.Fatalf("corrupt config returned %+v, %v", cfg, err)
 			}
 			assertFileUnchanged(t, path, original)
@@ -179,7 +180,7 @@ func TestLoadSizeLimitIncludesTrailingWhitespace(t *testing.T) {
 	}
 	data = append(data, ' ')
 	writeTestConfig(t, path, data)
-	if cfg, err := Load(path); err == nil || cfg != (Config{}) {
+	if cfg, err := Load(path); err == nil || !cfg.Equal(Config{}) {
 		t.Fatalf("oversized config returned %+v, %v", cfg, err)
 	}
 }
@@ -229,7 +230,7 @@ func TestScopedAddressValidationAndPersistence(t *testing.T) {
 						if err := Save(path, cfg); err != nil {
 							t.Fatalf("save valid scoped address: %v", err)
 						}
-						if got, err := Load(path); err != nil || got != cfg {
+						if got, err := Load(path); err != nil || !got.Equal(cfg) {
 							t.Fatalf("scoped address round trip: %+v, %v", got, err)
 						}
 						return
@@ -245,7 +246,7 @@ func TestScopedAddressValidationAndPersistence(t *testing.T) {
 					data := []byte(strings.Replace(fixture, originalField, `"`+field+`": `+string(valueJSON), 1))
 					data = bytes.Replace(data, []byte(`"role": "operator"`), []byte(`"role": "`+role+`"`), 1)
 					writeTestConfig(t, path, data)
-					if got, err := Load(path); err == nil || got != (Config{}) {
+					if got, err := Load(path); err == nil || !got.Equal(Config{}) {
 						t.Errorf("invalid scoped address loaded: %+v, %v", got, err)
 					}
 					assertFileUnchanged(t, path, data)
@@ -267,6 +268,7 @@ func TestSaveRoundTripAndReplace(t *testing.T) {
 	cfg.Role, cfg.AllowLinkTest = RoleOperator, false
 	cfg.Client = Client{NICName: "Ethernet adapter \u8f66\u4fa7", NICAddr: "169.254.12.34", Peer: identity.Fingerprint{1, 2, 3}.String()}
 	cfg.Operator = Operator{
+		Mode:   "direct",
 		Listen: "[::]:47001", Endpoint: "home.example.com:47001", Bind: "192.168.1.20",
 		DiagnosticPort: 16801, ControlPort: 16811, DiscoveryPort: 16811, Exclusive: true,
 	}
@@ -275,7 +277,7 @@ func TestSaveRoundTripAndReplace(t *testing.T) {
 		if err := Save(path, cfg); err != nil {
 			t.Fatalf("save %s: %v", role, err)
 		}
-		if got, err := Load(path); err != nil || got != cfg {
+		if got, err := Load(path); err != nil || !got.Equal(cfg) {
 			t.Fatalf("round trip %s = %+v, %v; want %+v", role, got, err, cfg)
 		}
 	}
@@ -287,12 +289,12 @@ func TestSaveRoundTripAndReplace(t *testing.T) {
 	if err := json.Unmarshal(data, &fields); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"version", "role", "allow_link_test", "client", "operator"} {
+	for _, name := range []string{"version", "role", "allow_link_test", "client", "operator", "center"} {
 		if _, ok := fields[name]; !ok {
 			t.Errorf("missing snake_case field %s", name)
 		}
 	}
-	if len(fields) != 5 {
+	if len(fields) != 6 {
 		t.Fatalf("unexpected persisted fields: %s", data)
 	}
 	if runtime.GOOS != "windows" {
@@ -316,7 +318,7 @@ func TestSaveUnconfiguredDefaults(t *testing.T) {
 		if err := Save(path, cfg); err != nil {
 			t.Fatalf("save unconfigured %s: %v", role, err)
 		}
-		if got, err := Load(path); err != nil || got != cfg {
+		if got, err := Load(path); err != nil || !got.Equal(cfg) {
 			t.Fatalf("unconfigured %s round trip = %+v, %v", role, got, err)
 		}
 	}
@@ -413,7 +415,7 @@ func TestRejectSymlinksIncludingDanglingSymlinks(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if cfg, err := Load(path); err == nil || cfg != (Config{}) {
+		if cfg, err := Load(path); err == nil || !cfg.Equal(Config{}) {
 			t.Errorf("symlink load with dangling=%t: %+v, %v", dangling, cfg, err)
 		}
 		if err := Save(path, Default()); err == nil {

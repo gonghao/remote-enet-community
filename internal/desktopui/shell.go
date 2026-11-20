@@ -2,6 +2,7 @@ package desktopui
 
 import (
 	"context"
+	"crypto/sha256"
 	"runtime"
 	"sync"
 	"time"
@@ -16,6 +17,7 @@ import (
 )
 
 type shell struct {
+	hubInvite                  string
 	product                    product
 	version                    string
 	language                   string
@@ -83,6 +85,10 @@ func (s *shell) ready() {
 			s.submit(renetui.ActionConnect, func(ctx context.Context) error { return s.controller.StartClient(ctx, invitation) })
 		}
 	} else {
+		actions.LoadIssuerEntry = func() {
+			var entry string
+			s.submitWithCompletion(renetui.ActionIssuerEntry, func(ctx context.Context) error { var err error; entry, err = s.controller.IssuerEntry(ctx); return err }, func() { s.view.SetIssuerEntry(entry) })
+		}
 		actions.Listen = func() { s.submit(renetui.ActionListen, s.controller.StartOperator) }
 		actions.ConnectMGU = func() { s.submit(renetui.ActionConnectMGU, s.controller.ConnectMGU) }
 		actions.ConnectEVO = func() { s.submit(renetui.ActionConnectMGU, s.controller.ConnectEVO) }
@@ -91,7 +97,17 @@ func (s *shell) ready() {
 		actions.StopCapture = func() { s.submit(renetui.ActionStopCapture, s.controller.StopCapture) }
 		actions.MarkCapture = s.markCapture
 		actions.IssueInvite = func() {
-			s.submit(renetui.ActionInvite, func(ctx context.Context) error { _, err := s.controller.IssueInvite(ctx); return err })
+			var code string
+			s.submitWithCompletion(renetui.ActionInvite, func(ctx context.Context) error {
+				var err error
+				code, err = s.controller.IssueInvite(ctx)
+				return err
+			}, func() {
+				if s.state.HubInviteDigest == sha256.Sum256([]byte(code)) {
+					s.hubInvite = code
+					s.applyState()
+				}
+			})
 		}
 		actions.IssueNumericCode = s.issueNumericCode
 		actions.CopyNumericCode = s.copyNumericCode
@@ -312,12 +328,20 @@ func (s *shell) applyState() {
 	}
 	s.view.SetLanguage(s.language)
 	s.view.SetConfig(s.state.Config)
+	invitation := s.state.Invitation
+	if s.hubInvite != "" {
+		if s.state.HubInviteDigest == sha256.Sum256([]byte(s.hubInvite)) {
+			invitation = s.hubInvite
+		} else {
+			s.hubInvite = ""
+		}
+	}
 	s.view.SetState(renetui.State{
 		Runtime: runtime, Running: s.state.Running,
 		Stopping: s.state.Stopping, Testing: s.state.Testing,
 		DirectWorking: s.state.DirectWorking,
 		Capture:       s.state.Capture,
-		Invitation:    s.state.Invitation, Notice: notice, Error: errText,
+		Invitation:    invitation, Notice: notice, Error: errText,
 		NumericCode: s.state.NumericCode,
 		NICs:        s.state.NICs, TestResult: s.state.TestResult, Events: s.state.Events,
 		Permission:                       s.permission,

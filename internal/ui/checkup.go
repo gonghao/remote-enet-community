@@ -10,7 +10,11 @@ import (
 )
 
 func (v *View) checksEntry(c *ui.Context) {
-	if ui.Button(c.Key("open-checks"), v.tr("Connection checks")).Label(v.tr("Open connection checks")).Clicked() {
+	button := ui.Button(c.Key("open-checks"), v.tr("Connection checks"))
+	if width, _ := c.Size(); v.page == settingsPage && width < 400 {
+		button.Padding(4, 8)
+	}
+	if button.Label(v.tr("Open connection checks")).Clicked() {
 		v.page = checksPage
 	}
 }
@@ -104,6 +108,8 @@ func checkTitle(id string) string {
 		return "Peer configuration"
 	case "hub_dns":
 		return "Hub address resolution"
+	case "hub_tls":
+		return "Hub TLS"
 	case "hub_tcp":
 		return "Hub TCP reachability"
 	case "hub_candidates":
@@ -166,7 +172,13 @@ func checkHint(code, role string) string {
 		return "Invalid port"
 	case checkup.DirectInputInvalidCode:
 		return "Enter eight digits"
-	case checkup.DirectInputAddressRequired:
+	case "hub_verified":
+		return "Hub fingerprint verified"
+	case "hub_identity_mismatch":
+		return "Hub identity mismatch"
+	case "tls_failed":
+		return "Hub TLS check failed"
+	case checkup.CenterInputUnsupported, checkup.DirectInputAddressRequired:
 		return "Enter the direct address and port"
 	case "endpoint_invalid":
 		return "The endpoint is invalid. Check the saved endpoint or request a new invitation."

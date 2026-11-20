@@ -295,7 +295,7 @@ func TestClientAdapterSavePreservesSettingsDraft(t *testing.T) {
 			click(t, tt, "Ethernet · 169.254.10.1")
 			want := cfg
 			want.Client.NICName, want.Client.NICAddr = "Ethernet", "169.254.10.1"
-			if len(requests) != 1 || requests[0] != want || v.submitted == nil || v.draft.Client != want.Client {
+			if len(requests) != 1 || !requests[0].Equal(want) || v.submitted == nil || v.draft.Client != want.Client {
 				t.Fatalf("adapter choice did not submit only the NIC fields: %+v", requests)
 			}
 			v.SetConfig(cfg)
@@ -319,7 +319,7 @@ func TestClientAdapterSavePreservesSettingsDraft(t *testing.T) {
 				wantDraft.AllowLinkTest = !cfg.AllowLinkTest
 				wantConnects = 0
 			}
-			if v.submitted != nil || v.saved != want || v.draft != wantDraft || v.dirty() != editPreference {
+			if v.submitted != nil || !v.saved.Equal(want) || !v.draft.Equal(wantDraft) || v.dirty() != editPreference {
 				t.Fatal("adapter save acknowledgement did not preserve the remaining edits")
 			}
 			click(t, tt, "Adapter selection")
@@ -364,7 +364,7 @@ func TestClientAdapterSaveFailureRestoresSelection(t *testing.T) {
 			click(t, tt, "USB LAN · 169.254.20.1")
 			wantSave := cfg
 			wantSave.Client.NICName, wantSave.Client.NICAddr = "USB LAN", "169.254.20.1"
-			if len(requests) != 1 || requests[0] != wantSave {
+			if len(requests) != 1 || !requests[0].Equal(wantSave) {
 				t.Fatalf("adapter choice did not submit a save: %+v", requests)
 			}
 
@@ -372,7 +372,7 @@ func TestClientAdapterSaveFailureRestoresSelection(t *testing.T) {
 			v.SetState(state)
 			v.Complete(ActionSave)
 			tt.Frame()
-			if v.submitted != nil || v.saved != cfg || v.draft != wantDraft || v.dirty() != editPreference {
+			if v.submitted != nil || !v.saved.Equal(cfg) || !v.draft.Equal(wantDraft) || v.dirty() != editPreference {
 				t.Fatal("failed save did not restore the saved adapter while preserving other edits")
 			}
 			if v.canConnect() != !editPreference || !tt.HasText("Ethernet · 169.254.10.1") {
@@ -381,7 +381,7 @@ func TestClientAdapterSaveFailureRestoresSelection(t *testing.T) {
 
 			click(t, tt, "Adapter selection")
 			click(t, tt, "USB LAN · 169.254.20.1")
-			if len(requests) != 2 || requests[1] != wantSave {
+			if len(requests) != 2 || !requests[1].Equal(wantSave) {
 				t.Fatalf("choosing the same adapter did not retry the save: %+v", requests)
 			}
 		})
@@ -716,6 +716,99 @@ func TestPeerIDDetailsAndCopy(t *testing.T) {
 						}
 					}
 				})
+			}
+		}
+	}
+}
+
+func TestCenterReceiptsPreserveFormAndDirtyState(t *testing.T) {
+	cfg := settings.Default()
+	v := New(cfg, Actions{})
+	cfg.Center = settings.Center{ID: "garage", API: []string{"https://garage.invalid"}}
+	v.SetConfig(cfg)
+	if v.dirty() {
+		t.Fatal("center change dirtied clean form")
+	}
+	v.draft.AllowLinkTest = !cfg.AllowLinkTest
+	submitted := v.draft
+	v.submitted = &submitted
+	cfg.Center.ID = "next"
+	v.SetConfig(cfg)
+	if !v.dirty() || v.submitted == nil || v.submitted.Center.ID != "next" || v.draft.Center.ID != "next" {
+		t.Fatal("center receipt lost draft or pending submission")
+	}
+	cfg.AllowLinkTest = v.draft.AllowLinkTest
+	v.SetConfig(cfg)
+	if v.dirty() || v.submitted != nil {
+		t.Fatal("matching receipt did not acknowledge save")
+	}
+}
+
+func TestOperatorHubSettingsAndPath(t *testing.T) {
+	cfg := settings.Default()
+	cfg.Role = settings.RoleOperator
+	cfg.Operator.Bind = "127.0.0.1"
+	var copied string
+	v := New(cfg, Actions{Copy: func(text string) { copied = text }, Listen: func() {}, IssueInvite: func() {}})
+	v.page = settingsPage
+	tt := ui.NewTester(v.Render, 1080, 1000)
+	click(t, tt, "Connection mode")
+	click(t, tt, "Self-hosted hub")
+	if v.draft.Operator.Mode != "hub" || !tt.HasText("Hub fingerprint") {
+		t.Fatal("mode selection did not expose hub fields")
+	}
+	input(t, tt, "Hub address", "hub.example:47000")
+	input(t, tt, "Hub fingerprint", identity.Fingerprint{7}.String())
+	input(t, tt, "Share address", "public.example:443")
+	hub := v.draft.Operator.Hub
+	click(t, tt, "Connection mode")
+	click(t, tt, "Direct")
+	click(t, tt, "Connection mode")
+	click(t, tt, "Self-hosted hub")
+	if v.draft.Operator.Hub != hub || hub.Share != "public.example:443" {
+		t.Fatal("hub fields lost across mode switch")
+	}
+	v.SetIssuerEntry("public entry")
+	tt.Frame()
+	click(t, tt, "Copy entry")
+	if copied != "public entry" {
+		t.Fatal("wrong issuer entry copied")
+	}
+	fp := identity.Fingerprint{7}
+	cfg.Operator.Mode = "hub"
+	cfg.Operator.Hub = settings.Hub{Addr: "hub.invalid:443", FP: fp.String()}
+	v = New(cfg, Actions{Listen: func() {}, IssueInvite: func() {}})
+	if !v.canListen() || !v.canInvite() {
+		t.Fatal("share address fallback unavailable")
+	}
+	for _, tc := range []struct{ message, title string }{
+		{"", "Connecting to hub"},
+		{"Hub has not authorized this device. Check the entry and the system time.", "Not authorized by hub"},
+	} {
+		v.SetState(State{Running: true, Runtime: app.Snapshot{Phase: app.PhaseListening, LastError: tc.message}})
+		if title, _, _ := v.stage(); title != tc.title {
+			t.Fatalf("stage = %q, want %q", title, tc.title)
+		}
+	}
+	v.SetState(State{Running: true, Runtime: app.Snapshot{Phase: app.PhaseListening, HubWaiting: true}})
+	tt = ui.NewTester(v.Render, 1080, 1000)
+	if !tt.HasText("Waiting on hub") {
+		t.Fatal("missing hub wait status")
+	}
+	const address = "workshop-operator-01.long-subdomain.dynamic-dns.example:47003"
+	v.actions.Copy = func(text string) { copied = text }
+	v.SetState(State{Running: true, Runtime: app.Snapshot{Phase: app.PhaseConnected, Path: transport.PathInfo{Kind: transport.PathRelay, Via: address, Hub: fp}}})
+	for _, lang := range []string{"en", "zh-Hans", "zh-Hant"} {
+		v.SetLanguage(lang)
+		for _, width := range []int{900, 1080} {
+			tt = ui.NewTester(v.Render, width, 760)
+			if !tt.HasText(v.tr("Via hub %s", fp.Short())) || !tt.HasText(address) {
+				t.Fatal("missing pinned hub path", lang, width)
+			}
+			copied = ""
+			click(t, tt, v.tr("Copy hub address"))
+			if copied != address {
+				t.Fatal("incomplete hub address", lang, width)
 			}
 		}
 	}

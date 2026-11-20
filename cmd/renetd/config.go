@@ -7,6 +7,9 @@ import (
 	"net"
 	"net/netip"
 	"strconv"
+
+	"remote-enet/internal/app"
+	"remote-enet/internal/identity"
 )
 
 func flags(name string, stderr io.Writer) *flag.FlagSet {
@@ -60,4 +63,32 @@ func port(value int, label string, zero bool) error {
 		return fmt.Errorf("%s must be in %d..65535", label, minimum)
 	}
 	return nil
+}
+
+type hubFlags struct{ addr, fp string }
+
+func addHubFlags(fs *flag.FlagSet) *hubFlags {
+	h := new(hubFlags)
+	fs.StringVar(&h.addr, "hub", "", "standalone hub host:port")
+	fs.StringVar(&h.fp, "hub-fp", "", "pinned hub fingerprint")
+	return h
+}
+
+func (h hubFlags) config(fs *flag.FlagSet, exclusive string) (*app.HubConfig, error) {
+	set := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	if !set["hub"] && !set["hub-fp"] {
+		return nil, nil
+	}
+	if set[exclusive] {
+		return nil, fmt.Errorf("--%s and --hub are mutually exclusive", exclusive)
+	}
+	if err := endpoint(h.addr); err != nil {
+		return nil, fmt.Errorf("--hub: %w", err)
+	}
+	fp, err := identity.ParseFingerprint(h.fp)
+	if err != nil || fp.IsZero() {
+		return nil, fmt.Errorf("--hub-fp requires a nonzero device fingerprint")
+	}
+	return &app.HubConfig{Addr: h.addr, FP: fp}, nil
 }

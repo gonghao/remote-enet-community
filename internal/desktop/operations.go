@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"remote-enet/internal/app"
+	"remote-enet/internal/identity"
 	"remote-enet/internal/linktest"
 	"remote-enet/internal/settings"
 )
@@ -17,7 +18,7 @@ type issuingInvite struct {
 }
 
 // IssueInvite shares the operator trust directory with the active listener.
-// Only the returned value and temporary State.Invitation contain the secret.
+// Hub bearer invitations are returned only to the issuing caller.
 func (c *Controller) IssueInvite(ctx context.Context) (string, error) {
 	ctx, finish, epoch, err := c.operation(ctx, false)
 	if err != nil {
@@ -43,7 +44,7 @@ func (c *Controller) IssueInvite(ctx context.Context) (string, error) {
 	if err == nil && g != nil && g.stopping {
 		err = ErrBusy
 	}
-	if err == nil && c.state.Config.Operator.Endpoint == "" {
+	if err == nil && c.state.Config.Operator.Mode != "hub" && c.state.Config.Operator.Endpoint == "" {
 		err = fmt.Errorf("desktop: operator endpoint required before issuing invitations")
 	}
 	if err != nil {
@@ -52,6 +53,15 @@ func (c *Controller) IssueInvite(ctx context.Context) (string, error) {
 		return "", err
 	}
 	cfg := app.InviteConfig{StateDir: c.roleDir(settings.RoleOperator), Endpoint: c.state.Config.Operator.Endpoint, TTL: 15 * time.Minute}
+	if op := c.state.Config.Operator; op.Mode == "hub" {
+		fp, err := identity.ParseFingerprint(op.Hub.FP)
+		if err != nil {
+			c.mu.Unlock()
+			return "", err
+		}
+		cfg.Endpoint = op.Hub.Share
+		cfg.Hub = &app.HubConfig{Addr: op.Hub.Addr, FP: fp}
+	}
 	inviteCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	pending := &issuingInvite{cancel: cancel, done: make(chan struct{})}

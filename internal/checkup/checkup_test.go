@@ -2,6 +2,7 @@ package checkup
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"net/netip"
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -17,6 +19,7 @@ import (
 
 	"remote-enet/internal/app"
 	"remote-enet/internal/carside"
+	"remote-enet/internal/hub"
 	"remote-enet/internal/identity"
 	"remote-enet/internal/netpriv"
 	"remote-enet/internal/settings"
@@ -338,5 +341,77 @@ func TestDirectInputCheckIsLocal(t *testing.T) {
 				t.Fatal("unexpected exported finding")
 			}
 		})
+	}
+}
+
+func TestStandaloneHubProbeSendsNoApplicationData(t *testing.T) {
+	local, err := identity.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, match := range []bool{true, false} {
+		ln, err := tls.Listen("tcp4", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{local.Cert}, NextProtos: []string{hub.ALPN}, ClientAuth: tls.RequireAnyClientCert, MinVersion: tls.VersionTLS13})
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan error, 1)
+		go func() {
+			conn, err := ln.Accept()
+			if err != nil {
+				done <- err
+				return
+			}
+			defer conn.Close()
+			_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+			var first [1]byte
+			n, err := conn.Read(first[:])
+			if n != 0 || err == nil || match && err != io.EOF {
+				done <- errors.New("unexpected TLS application data or termination")
+				return
+			}
+			done <- nil
+		}()
+		pin := local.Fingerprint()
+		if !match {
+			pin[0] ^= 1
+		}
+		ep := transport.Endpoint{Kind: "hub", Addr: ln.Addr().String(), Hub: pin, Ticket: "full-ticket-12345678"}
+		r := run(t.Context(), Input{Config: settings.Default(), PeerID: identity.Fingerprint{2}, Endpoints: []transport.Endpoint{ep}}, fakeBackend(t))
+		_ = ln.Close()
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		f := finding(t, r, "hub_tls", 1)
+		if match && f.Code != "hub_verified" || !match && f.Code != "hub_identity_mismatch" {
+			t.Fatalf("wrong pin result: %+v", f)
+		}
+		data, err := JSON(r)
+		if err != nil || strings.Contains(string(data), ep.Ticket) || strings.Contains(string(data), "12345678") {
+			t.Fatal("credential in checkup export")
+		}
+	}
+}
+
+func TestOperatorHubModeChecksShareAddress(t *testing.T) {
+	// Hub.Addr is a closed loopback port so the hub_tls probe stays local.
+	for _, tc := range []struct{ share, want string }{
+		{"hub-share.example:47100", "hub-share.example"},
+		{"", ""},
+	} {
+		b, in := fakeBackend(t), operatorInput()
+		in.Config.Operator.Mode = "hub"
+		in.Config.Operator.Endpoint = "old-direct.example:47000"
+		in.Config.Operator.Hub.Addr = "127.0.0.1:9"
+		in.Config.Operator.Hub.Share = tc.share
+		in.Config.Operator.Hub.FP = identity.Fingerprint{1}.String()
+		var hosts []string
+		b.lookup = func(_ context.Context, host string) ([]netip.Addr, error) {
+			hosts = append(hosts, host)
+			return []netip.Addr{netip.MustParseAddr("192.0.2.10")}, nil
+		}
+		run(t.Context(), in, b)
+		if slices.Contains(hosts, "old-direct.example") || tc.want != "" && !slices.Contains(hosts, tc.want) || tc.want == "" && len(hosts) != 0 {
+			t.Fatalf("share %q resolved %v", tc.share, hosts)
+		}
 	}
 }

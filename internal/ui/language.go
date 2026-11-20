@@ -1,9 +1,11 @@
 package ui
 
 import (
+	"slices"
+	"strings"
+
 	"github.com/egoist/mygo/i18n"
 	"github.com/egoist/mygo/ui"
-	"strings"
 
 	"remote-enet/internal/locales"
 )
@@ -18,6 +20,10 @@ func (v *View) tr(source string, args ...any) string {
 func (v *View) validationMessage(err error) string {
 	message := err.Error()
 	switch {
+	case strings.HasPrefix(message, "settings: operator.hub.addr:"):
+		return v.tr("Hub address must include a host and port.")
+	case strings.HasPrefix(message, "settings: operator.hub.fp"):
+		return v.tr("Enter the full Hub fingerprint.")
 	case strings.HasPrefix(message, "settings: operator.listen:"):
 		return v.tr("Listen address must be a valid IP or hostname followed by a port.")
 	case strings.HasPrefix(message, "settings: operator.endpoint:"):
@@ -41,19 +47,9 @@ func (v *View) languageSelect(c *ui.Context) {
 		}
 	}
 	ui.Field(c.Key("language-field"), v.tr("Interface language"), func() {
-		selectBox := ui.SelectBase(c.Key("language"), &selected)
-		selectBox.Trigger.Label(v.tr("Interface language")).Disabled(v.actions.SetLanguage == nil).FillWidth().MinWidth(0).Height(32).Padding(8, 12).Background(inputSurface).Border(1, controlStroke).Radius(0).Children(func() {
-			ui.Text(c, labels[selected]).Grow(1).MinWidth(0).SingleLine()
-			ui.Text(c, "⌄").TextColor(muted)
-		})
-		selectBox.Popup(func(popup ui.Element) {
-			popup.Padding(4).Background(panel).Border(1, line).Radius(0)
-			for i, label := range labels {
-				selectBox.Item(i).Padding(8, 12).Children(func() { ui.Text(c, label) })
-			}
-		})
-		if selectBox.Trigger.Changed() {
-			v.actions.SetLanguage(tags[selected])
+		choice := labels[selected]
+		if ui.Select(c.Key("language"), &choice, labels).Label(v.tr("Interface language")).Disabled(v.actions.SetLanguage == nil).FillWidth().MinWidth(0).Height(32).Changed() {
+			v.actions.SetLanguage(tags[slices.Index(labels, choice)])
 		}
 	}).FillWidth()
 	ui.Text(c, v.tr("Changes apply immediately. Network settings and unsaved edits are kept.")).FontSize(11).FillWidth().TextColor(muted)

@@ -9,8 +9,8 @@ import (
 	"remote-enet/internal/transport"
 )
 
-// ReadPeer reads the atomic public trust snapshot without creating a store,
-// lock directory or identity. It does not consume invitation tokens.
+// ReadPeer obtains saved endpoints, including dial credentials, from the atomic
+// trust snapshot without creating a store, lock directory or identity.
 func ReadPeer(ctx context.Context, dir string, id identity.Fingerprint) (transport.PeerInfo, error) {
 	if err := ctx.Err(); err != nil {
 		return transport.PeerInfo{}, err
@@ -59,11 +59,11 @@ func ReadPeer(ctx context.Context, dir string, id identity.Fingerprint) (transpo
 	}
 	peer := transport.PeerInfo{ID: id}
 	for _, e := range entries {
-		fp, err := identity.ParseFingerprint(e.Hub)
+		endpoint, err := e.endpoint()
 		if err != nil {
 			return transport.PeerInfo{}, err
 		}
-		peer.Endpoints = append(peer.Endpoints, transport.Endpoint{Kind: e.Kind, Addr: e.Addr, Hub: fp})
+		peer.Endpoints = append(peer.Endpoints, endpoint)
 	}
 	return peer, nil
 }

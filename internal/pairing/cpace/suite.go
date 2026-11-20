@@ -14,6 +14,7 @@ import (
 	"github.com/gtank/ristretto255"
 
 	"remote-enet/internal/identity"
+	"remote-enet/internal/proto"
 )
 
 const (
@@ -23,14 +24,24 @@ const (
 
 // Binding uses the inner TLS exporter, full peer fingerprints and hashes of the exact framed Hellos.
 type Binding struct {
+	Capability                         string
+	HubFP                              [32]byte // Zero for direct pairing, required for Hub pairing.
 	Exporter                           [32]byte
 	ClientFP, OperatorFP               identity.Fingerprint
 	HelloClientHash, HelloOperatorHash [32]byte
 }
 
-func (b Binding) ci() []byte {
-	return lvCat([]byte("renet-pake-v1"), []byte(suiteID), []byte("pair-direct/1"), []byte("renet/1"),
-		b.ClientFP[:], b.OperatorFP[:], b.HelloClientHash[:], b.HelloOperatorHash[:])
+func (b Binding) ci() ([]byte, error) {
+	fields := [][]byte{[]byte("renet-pake-v1"), []byte(suiteID), []byte(b.Capability), []byte("renet/1"),
+		b.ClientFP[:], b.OperatorFP[:], b.HelloClientHash[:], b.HelloOperatorHash[:]}
+	switch {
+	case b.Capability == proto.PairHubCapability && b.HubFP != [32]byte{}:
+		fields = append(fields, b.HubFP[:])
+	case b.Capability == proto.PairDirectCapability && b.HubFP == [32]byte{}:
+	default:
+		return nil, errBinding
+	}
+	return lvCat(fields...), nil
 }
 
 // The draft uses unsigned LEB128 lengths, including for empty AD.
@@ -91,7 +102,11 @@ func share(code string, b Binding) (*ristretto255.Scalar, [32]byte, error) {
 	if b.Exporter == [32]byte{} || b.ClientFP.IsZero() || b.OperatorFP.IsZero() {
 		return nil, [32]byte{}, errBinding
 	}
-	g, err := generator([]byte(code), b.ci(), b.Exporter[:])
+	ci, err := b.ci()
+	if err != nil {
+		return nil, [32]byte{}, err
+	}
+	g, err := generator([]byte(code), ci, b.Exporter[:])
 	if err != nil {
 		return nil, [32]byte{}, err
 	}

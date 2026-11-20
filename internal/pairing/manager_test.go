@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"remote-enet/internal/pairing/cpace"
+	"remote-enet/internal/proto"
 )
 
 func issue(t *testing.T, m *Manager) Display {
@@ -371,4 +372,4 @@ func TestHandshakeTimeout(t *testing.T) {
 }
 
 // testBinding is non-zero because cpace rejects zero exporters and fingerprints.
-var testBinding = cpace.Binding{Exporter: [32]byte{2}, ClientFP: [32]byte{3}, OperatorFP: [32]byte{4}}
+var testBinding = cpace.Binding{Capability: proto.PairDirectCapability, Exporter: [32]byte{2}, ClientFP: [32]byte{3}, OperatorFP: [32]byte{4}}

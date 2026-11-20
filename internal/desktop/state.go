@@ -2,6 +2,7 @@ package desktop
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"regexp"
 	"slices"
@@ -79,6 +80,11 @@ func (c *Controller) publishLocked() {
 }
 
 func cloneState(s State) State {
+	if s.Config.Operator.Mode == "hub" && s.Invitation != "" {
+		s.HubInviteDigest = sha256.Sum256([]byte(s.Invitation))
+		s.Invitation = ""
+	}
+	s.Config.Center.API = slices.Clone(s.Config.Center.API)
 	s.NICs = slices.Clone(s.NICs)
 	s.Events = slices.Clone(s.Events)
 	s.Checkup.Findings = slices.Clone(s.Checkup.Findings)

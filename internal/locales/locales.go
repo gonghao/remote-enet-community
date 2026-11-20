@@ -41,6 +41,10 @@ func Match(tag string) string {
 // Text formats only an application-owned message. Callers must not pass raw
 // identities, filenames, annotations or protocol payloads as message keys.
 func Text(tag, source string, args ...any) string {
+	// Until R5, both bare-code outcomes have the same actionable desktop hint.
+	if source == "Numeric codes from a center are not supported yet" {
+		source = "Enter the direct address and port"
+	}
 	text := source
 	if translated, ok := catalogs[Match(tag)][source]; ok {
 		text = translated
@@ -52,18 +56,26 @@ func Text(tag, source string, args ...any) string {
 }
 
 var pairingMessages = map[string]string{
-	"unavailable":       "Code unavailable",
-	"expired":           "Code expired",
-	"budget_exhausted":  "Attempts exhausted",
-	"rate_limited":      "Try again later",
-	"busy":              "Operator busy",
-	"confirmation":      "Incorrect code or connection tampered",
-	"store_failed":      "Could not save pairing",
-	"dns":               "Address lookup failed",
-	"timeout":           "Connection timed out",
-	"unsupported":       "Numeric pairing unsupported",
-	"identity_mismatch": "Device identity mismatch",
-	"interrupted":       "Pairing interrupted",
+	"hub_identity_mismatch":                "Hub identity mismatch",
+	"hub_unreachable":                      "Cannot reach hub",
+	"hub_wait_unauthorized":                "Hub has not authorized this device. Check the entry and the system time.",
+	"hub_pairing_disabled":                 "Hub numeric pairing is not enabled for this device",
+	"hub_authorization_expired_or_revoked": "Hub authorization expired or revoked",
+	"operator_offline":                     "Operator offline",
+	"hub_ticket":                           "Could not obtain hub authorization",
+	"hub_issuer":                           "Issuer key on this device is unavailable. Check the state directory and file permissions.",
+	"unavailable":                          "Code unavailable",
+	"expired":                              "Code expired",
+	"budget_exhausted":                     "Attempts exhausted",
+	"rate_limited":                         "Try again later",
+	"busy":                                 "Operator busy",
+	"confirmation":                         "Incorrect code or connection tampered",
+	"store_failed":                         "Could not save pairing",
+	"dns":                                  "Address lookup failed",
+	"timeout":                              "Connection timed out",
+	"unsupported":                          "Numeric pairing unsupported",
+	"identity_mismatch":                    "Device identity mismatch",
+	"interrupted":                          "Pairing interrupted",
 }
 
 // PairingMessage accepts only fixed reason codes.

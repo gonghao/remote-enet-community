@@ -59,6 +59,7 @@ func (v vector) scalar(t *testing.T, key string) *ristretto255.Scalar {
 func (v vector) binding(t *testing.T) Binding {
 	t.Helper()
 	return Binding{
+		Capability:        proto.PairDirectCapability,
 		Exporter:          [32]byte(v.bytes(t, "sid")),
 		ClientFP:          [32]byte(v.bytes(t, "fpA")),
 		OperatorFP:        [32]byte(v.bytes(t, "fpB")),
@@ -82,7 +83,7 @@ func TestGeneratorVector(t *testing.T) {
 }
 
 func TestExchangeVectors(t *testing.T) {
-	for _, name := range []string{"exchange", "application"} {
+	for _, name := range []string{"exchange", "application", "application-hub"} {
 		t.Run(name, func(t *testing.T) {
 			v := readVector(t, name)
 			prs, ci, sid := v.bytes(t, "PRS"), v.bytes(t, "CI"), v.bytes(t, "sid")
@@ -111,9 +112,17 @@ func TestExchangeVectors(t *testing.T) {
 			}
 			key := isk(sid, k[:], a[:], adA, y[:], adB)
 			v.check(t, "ISK_IR", key[:])
-			if name == "application" {
+			if name != "exchange" {
 				b := v.binding(t)
-				v.check(t, "CI", b.ci())
+				if name == "application-hub" {
+					b.Capability = proto.PairHubCapability
+					b.HubFP = [32]byte(v.bytes(t, "hub_fp"))
+				}
+				ci, err := b.ci()
+				if err != nil {
+					t.Fatal(err)
+				}
+				v.check(t, "CI", ci)
 				digest := commitment(a)
 				v.check(t, "commit", digest[:])
 				tags := confirmationTags(b, k, a, y)

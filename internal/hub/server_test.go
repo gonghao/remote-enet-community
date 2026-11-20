@@ -107,13 +107,14 @@ func eventually(t *testing.T, check func() bool) {
 
 func TestRelay(t *testing.T) {
 	h, a, b := local(t), local(t), local(t)
-	s, addr, _ := start(t, Options{Local: h})
+	s, addr, _ := start(t, Options{Local: h, Policy: testPolicy{}})
+	dialRequest := Request{Role: RoleDial, Target: b.Fingerprint(), Token: []byte("reusable-device-ticket")}
 	wait := connect(t, addr, h, b, Request{Role: RoleWait})
 	if _, err := Connect(t.Context(), addr, b, h.Fingerprint(), Request{Role: RoleWait}); !errors.Is(err, ErrPeerBusy) {
 		t.Fatalf("duplicate waiter: %v", err)
 	}
-	dial := connect(t, addr, h, a, Request{Role: RoleDial, Target: b.Fingerprint()})
-	if _, err := Connect(t.Context(), addr, a, h.Fingerprint(), Request{Role: RoleDial, Target: b.Fingerprint()}); !errors.Is(err, ErrPeerBusy) {
+	dial := connect(t, addr, h, a, dialRequest)
+	if _, err := Connect(t.Context(), addr, a, h.Fingerprint(), dialRequest); !errors.Is(err, ErrPeerBusy) {
 		t.Fatalf("second dial: %v", err)
 	}
 	var wg sync.WaitGroup
@@ -130,7 +131,7 @@ func TestRelay(t *testing.T) {
 		return len(s.waits) == 0
 	})
 	wait = connect(t, addr, h, b, Request{Role: RoleWait})
-	dial = connect(t, addr, h, a, Request{Role: RoleDial, Target: b.Fingerprint()})
+	dial = connect(t, addr, h, a, dialRequest)
 	_ = wait.Close()
 	if _, err := dial.Read(make([]byte, 1)); err == nil {
 		t.Fatal("dial side survived wait close")
@@ -139,19 +140,22 @@ func TestRelay(t *testing.T) {
 
 func TestUnknownAndAuthorization(t *testing.T) {
 	h, a, b := local(t), local(t), local(t)
-	_, addr, _ := start(t, Options{Local: h})
+	_, addr, _ := start(t, Options{Local: h, Policy: testPolicy{}})
 	if _, err := Connect(t.Context(), addr, a, h.Fingerprint(), Request{Role: RoleDial, Target: b.Fingerprint()}); !errors.Is(err, ErrUnknownPeer) {
 		t.Fatalf("unknown: %v", err)
 	}
-	_, restricted, _ := start(t, Options{Local: h, Authorize: func(dev identity.Fingerprint, role Role, target identity.Fingerprint) bool {
-		return dev == b.Fingerprint() && role == RoleWait
-	}})
+	_, restricted, _ := start(t, Options{Local: h, Policy: testPolicy{valid: func(_ Grant, dev identity.Fingerprint) bool {
+		return dev == b.Fingerprint()
+	}}})
 	if _, err := Connect(t.Context(), restricted, a, h.Fingerprint(), Request{Role: RoleWait}); !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("unauthorized: %v", err)
 	}
-	_, tokenAddr, _ := start(t, Options{Local: h, AuthorizeToken: func(_ identity.Fingerprint, _ Role, _ identity.Fingerprint, token []byte) bool {
-		return string(token) == "secret"
-	}})
+	_, tokenAddr, _ := start(t, Options{Local: h, Policy: testPolicy{admit: func(_ identity.Fingerprint, req Request, _ time.Time) (Grant, error) {
+		if string(req.Token) != "secret" {
+			return Grant{}, ErrUnauthorized
+		}
+		return Grant{}, nil
+	}}})
 	if _, err := Connect(t.Context(), tokenAddr, b, h.Fingerprint(), Request{Role: RoleWait, Token: []byte("wrong")}); !errors.Is(err, ErrUnauthorized) {
 		t.Fatal(err)
 	}
@@ -164,7 +168,7 @@ func TestUnknownAndAuthorization(t *testing.T) {
 
 func TestPairCompetition(t *testing.T) {
 	h, a, b := local(t), local(t), local(t)
-	_, addr, _ := start(t, Options{Local: h})
+	_, addr, _ := start(t, Options{Local: h, Policy: testPolicy{}})
 	connect(t, addr, h, b, Request{Role: RoleWait})
 	const n = 24
 	results := make(chan error, n)
@@ -204,7 +208,7 @@ func TestPairCompetition(t *testing.T) {
 
 func TestWaitDisconnectAndEagerData(t *testing.T) {
 	h, b := local(t), local(t)
-	s, addr, _ := start(t, Options{Local: h})
+	s, addr, _ := start(t, Options{Local: h, Policy: testPolicy{}})
 	for _, eager := range []bool{false, true} {
 		c := connect(t, addr, h, b, Request{Role: RoleWait})
 		if eager {
@@ -222,7 +226,7 @@ func TestWaitDisconnectAndEagerData(t *testing.T) {
 func TestEmbedded(t *testing.T) {
 	h, a := local(t), local(t)
 	e := NewEmbedded()
-	_, addr, cancel := start(t, Options{Local: h, Embedded: e, AuthorizeToken: func(_ identity.Fingerprint, _ Role, _ identity.Fingerprint, _ []byte) bool { return false }})
+	_, addr, cancel := start(t, Options{Local: h, Embedded: e})
 	dial := connect(t, addr, h, a, Request{Role: RoleDial, Target: h.Fingerprint(), Token: []byte("ignored")})
 	ctx, stop := context.WithTimeout(t.Context(), 3*time.Second)
 	defer stop()
@@ -244,7 +248,7 @@ func TestEmbedded(t *testing.T) {
 
 func TestOuterTLS(t *testing.T) {
 	h, a := local(t), local(t)
-	_, addr, _ := start(t, Options{Local: h})
+	_, addr, _ := start(t, Options{Local: h, Policy: testPolicy{}})
 	if _, err := Connect(t.Context(), addr, a, a.Fingerprint(), Request{Role: RoleWait}); err == nil {
 		t.Fatal("wrong hub pin accepted")
 	}
@@ -291,7 +295,7 @@ func TestOuterTLS(t *testing.T) {
 
 func TestShutdownAndCancellation(t *testing.T) {
 	h, a, b := local(t), local(t), local(t)
-	_, addr, cancel := start(t, Options{Local: h})
+	_, addr, cancel := start(t, Options{Local: h, Policy: testPolicy{}})
 	wait := connect(t, addr, h, b, Request{Role: RoleWait})
 	dial := connect(t, addr, h, a, Request{Role: RoleDial, Target: b.Fingerprint()})
 	partial, err := net.Dial("tcp", addr)
@@ -319,12 +323,44 @@ func TestShutdownAndCancellation(t *testing.T) {
 func TestNoGoroutineLeak(t *testing.T) {
 	before := runtime.NumGoroutine()
 	for range 5 {
+		t.Run("pairing and revocation", func(t *testing.T) {
+			h, op, client := local(t), local(t), local(t)
+			p := testPolicy{operator: op.Fingerprint(), admit: func(_ identity.Fingerprint, _ Request, now time.Time) (Grant, error) {
+				return Grant{PairingUntil: now.Add(time.Minute)}, nil
+			}}
+			s, addr, _ := start(t, Options{Local: h, Policy: p})
+			wait := connect(t, addr, h, op, Request{Role: RoleWait})
+			dial := connect(t, addr, h, client, Request{Role: RoleDial, Target: h.Fingerprint()})
+			s.SetPolicy(nil)
+			assertClosed(t, wait)
+			assertClosed(t, dial)
+		})
 		t.Run("cycle", func(t *testing.T) {
 			h, a, b := local(t), local(t), local(t)
-			_, addr, _ := start(t, Options{Local: h})
+			_, addr, _ := start(t, Options{Local: h, Policy: testPolicy{}})
 			connect(t, addr, h, b, Request{Role: RoleWait})
 			connect(t, addr, h, a, Request{Role: RoleDial, Target: b.Fingerprint()})
 		})
 	}
 	eventually(t, func() bool { return runtime.NumGoroutine() <= before })
+}
+
+func TestPairedDialFirstByteDeadline(t *testing.T) {
+	const timeout = 150 * time.Millisecond
+	h, a, b := local(t), local(t), local(t)
+	_, addr, _ := start(t, Options{Local: h, Policy: testPolicy{}, SetupLimits: SetupLimits{Timeout: timeout}})
+	wait := connect(t, addr, h, b, Request{Role: RoleWait})
+	dial := connect(t, addr, h, a, Request{Role: RoleDial, Target: b.Fingerprint()})
+	for _, c := range []net.Conn{wait, dial} {
+		var networkErr net.Error
+		if _, err := c.Read(make([]byte, 1)); err == nil || errors.As(err, &networkErr) && networkErr.Timeout() {
+			t.Fatalf("expected remote close, got %v", err)
+		}
+	}
+	wait = connect(t, addr, h, b, Request{Role: RoleWait})
+	dial = connect(t, addr, h, a, Request{Role: RoleDial, Target: b.Fingerprint()})
+	exchange(t, dial, wait)
+	time.Sleep(2 * timeout)
+	exchange(t, dial, wait)
+	exchange(t, wait, dial)
 }

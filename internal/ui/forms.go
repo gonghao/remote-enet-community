@@ -58,10 +58,10 @@ func (v *View) nicSelect(c *ui.Context, label string, labelWidth float32) {
 		ui.Text(c, label).FontSize(clientFieldLabelSize).Width(labelWidth).Shrink(0)
 		sel := ui.SelectBase(c.Key("adapter"), &selected)
 		disabled := v.locked() || v.submitted != nil || v.actions.Save == nil
-		sel.Trigger.Label(v.tr("Adapter selection")).Disabled(disabled).Grow(1).MinWidth(0).Height(32).Padding(4, 8).Background(inputSurface).Border(1, controlStroke).Radius(0).
+		sel.Trigger.Label(v.tr("Adapter selection")).Disabled(disabled).Grow(1).MinWidth(0).Height(32).Padding(c.Theme().Space(1.5), c.Theme().Space(3.5)).Background(inputSurface).Border(1, controlStroke).Radius(0).
 			Tooltip(v.tr("Automatic requires one unambiguous adapter. Fixed selections are kept if an adapter disappears.")).Children(func() {
 			ui.Text(c, choices[selected].label).Grow(1).MinWidth(0).SingleLine().TruncateMiddle()
-			ui.Text(c, "⌄").TextColor(muted)
+			selectChevron(c)
 		})
 		sel.Popup(func(popup ui.Element) {
 			popup.Padding(4).Background(panel).Border(1, line).Radius(0).MaxHeight(240)
@@ -93,11 +93,63 @@ func (v *View) nicSelect(c *ui.Context, label string, labelWidth float32) {
 	})
 }
 
-func (v *View) operatorForm(c *ui.Context) {
-	ui.Grid(c).Columns(2).FillWidth().Gap(12).Children(func() {
-		v.field(c, "Listen address", "0.0.0.0:47000", &v.draft.Operator.Listen, v.locked())
-		v.field(c, "Public endpoint", "host.example:47000", &v.draft.Operator.Endpoint, v.locked())
+// MyGo keeps Select's chevron private. Match its theme-scaled path for the
+// indexed adapter selector, whose labels need middle truncation.
+func selectChevron(c *ui.Context) {
+	size, color := c.Theme().Space(2.5), c.Theme().TextMuted
+	ui.Box(c).Size(size, size).Shrink(0).Draw(func(p *ui.Painter, r ui.Rect) {
+		var path ui.Path
+		path.MoveTo(r.X+0.1*r.W, r.Y+0.3*r.H).LineTo(r.X+0.5*r.W, r.Y+0.7*r.H).LineTo(r.X+0.9*r.W, r.Y+0.3*r.H)
+		p.StrokePath(&path, 1.5, color)
 	})
+}
+
+func (v *View) operatorForm(c *ui.Context) {
+	hubMode := v.draft.Operator.Mode == "hub"
+	ui.Field(c, v.tr("Connection mode"), func() {
+		labels := []string{v.tr("Direct"), v.tr("Self-hosted hub")}
+		mode := labels[0]
+		if hubMode {
+			mode = labels[1]
+		}
+		if ui.Select(c.Key("hub-mode"), &mode, labels).Label(v.tr("Connection mode")).FillWidth().Height(32).Disabled(v.locked()).Changed() {
+			hubMode = mode == labels[1]
+		}
+	}).FillWidth()
+	if hubMode {
+		v.draft.Operator.Mode = "hub"
+		ui.Grid(c).Columns(2).FillWidth().Gap(12).Children(func() {
+			v.field(c, "Hub address", "host.example:47000", &v.draft.Operator.Hub.Addr, v.locked())
+			v.field(c, "Share address", "host.example:47000", &v.draft.Operator.Hub.Share, v.locked())
+		})
+		v.field(c, "Hub fingerprint", "", &v.draft.Operator.Hub.FP, v.locked())
+		v.issuerControls(c)
+	} else {
+		v.draft.Operator.Mode = "direct"
+		ui.Grid(c).Columns(2).FillWidth().Gap(12).Children(func() {
+			v.field(c, "Listen address", "0.0.0.0:47000", &v.draft.Operator.Listen, v.locked())
+			v.field(c, "Public endpoint", "host.example:47000", &v.draft.Operator.Endpoint, v.locked())
+		})
+	}
+}
+
+func (v *View) issuerControls(c *ui.Context) {
+	if !v.issuerRequested && v.actions.LoadIssuerEntry != nil {
+		v.issuerRequested = true
+		v.actions.LoadIssuerEntry()
+	}
+	v.value(c, "Hub authorization entry", v.issuerEntry)
+	ui.Row(c).FillWidth().Gap(8).Children(func() {
+		if v.issuerEntry == "" && v.issuerRequested && ui.Button(c.Key("reload-entry"), v.tr("Reload entry")).Disabled(v.actions.LoadIssuerEntry == nil).Clicked() {
+			v.actions.LoadIssuerEntry()
+		}
+		if ui.Button(c.Key("copy-entry"), v.tr("Copy entry")).Disabled(v.issuerEntry == "" || v.actions.Copy == nil).Clicked() {
+			v.actions.Copy(v.issuerEntry)
+		}
+	})
+}
+
+func (v *View) presentationForm(c *ui.Context) {
 	v.field(c, "Presentation IPv4", "Local IPv4 used by diagnostic tools", &v.draft.Operator.Bind, v.locked())
 	ui.Grid(c).Columns(3).FillWidth().Gap(12).Children(func() {
 		for i, label := range []string{"Diagnostic TCP", "Control TCP", "Discovery UDP"} {
@@ -107,6 +159,9 @@ func (v *View) operatorForm(c *ui.Context) {
 	ui.Checkbox(c.Key("exclusive"), &v.draft.Operator.Exclusive, v.tr("Exclusive diagnostic tool access")).Label(v.tr("Exclusive diagnostic tool access")).Disabled(v.locked())
 	ui.Text(c, v.tr("Windows: one diagnostic process at a time. Owner detection is unavailable on other platforms.")).FontSize(11).TextColor(muted)
 }
+
+// SetIssuerEntry accepts only the public entry produced by the local operator.
+func (v *View) SetIssuerEntry(entry string) { v.issuerEntry = entry }
 
 func (v *View) value(c *ui.Context, label, text string) ui.Element {
 	display := text

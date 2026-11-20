@@ -204,7 +204,7 @@ func TestOperatorInvalidStateIsLocalButBindFailureIsFatal(t *testing.T) {
 
 type testConnector struct{ session transport.Session }
 
-func (testConnector) DialDirectPair(context.Context, string) (transport.Session, error) {
+func (testConnector) DialBootstrap(context.Context, string) (transport.Session, identity.Fingerprint, error) {
 	panic("unexpected bootstrap dial on a pinned connection")
 }
 

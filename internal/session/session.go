@@ -50,7 +50,18 @@ type Options struct {
 	// ConfirmSAS may block until ctx is canceled. A nil hook accepts automatically.
 	ConfirmSAS func(context.Context, string, identity.Fingerprint) (bool, error)
 	LocalFP    identity.Fingerprint
-	Remember   func(context.Context, identity.Fingerprint) error
+	// HubFP selects hub-bound PAKE. Use zero for direct pairing.
+	HubFP identity.Fingerprint
+	// EndpointHub is the Client's expected Hub identity for device tickets.
+	EndpointHub identity.Fingerprint
+	// RequireHubTicket prevents a Client using a bearer invitation from pairing
+	// with an Operator that cannot replace it with a device ticket.
+	RequireHubTicket bool
+	// GrantTicket enables Operator ticket delivery and must return promptly.
+	GrantTicket func(client identity.Fingerprint) ([]byte, error)
+	// Now supplies the Client clock for ticket expiry. Nil uses time.Now.
+	Now      func() time.Time
+	Remember func(context.Context, identity.Fingerprint) error
 	// Callbacks must return when ctx is canceled. OnMessage must not block.
 	OnTunnel  func(context.Context, proto.OpenTunnel, transport.Stream)
 	OnMessage func(any)
@@ -79,6 +90,8 @@ type Session struct {
 	NegotiatedCapabilities []string
 	setupTimer             *time.Timer
 	outcome                PairingOutcome
+	hubTicket              []byte
+	pendingTicket          []byte
 	linkTestNegotiated     bool
 	linkTestIn             atomic.Bool
 	linkTestOut            atomic.Bool
@@ -101,9 +114,17 @@ func Run(ctx context.Context, ts transport.Session, o Options) (*Session, error)
 		o.Logger = slog.Default()
 	}
 	o.Capabilities = linkTestCapabilities(o.Capabilities, o.AllowLinkTest)
-	o.Capabilities = slices.DeleteFunc(o.Capabilities, func(v string) bool { return v == proto.PairDirectCapability })
+	o.Capabilities = slices.DeleteFunc(o.Capabilities, func(v string) bool {
+		return v == proto.PairDirectCapability || v == proto.PairHubCapability || v == proto.HubTicketCapability
+	})
 	if o.Role == RoleClient && o.DigitalCode != "" || o.Role == RoleOperator && o.DigitalManager != nil {
-		o.Capabilities = append(o.Capabilities, proto.PairDirectCapability)
+		o.Capabilities = append(o.Capabilities, o.pairCapability())
+	}
+	if o.Role == RoleClient || o.GrantTicket != nil {
+		o.Capabilities = append(o.Capabilities, proto.HubTicketCapability)
+	}
+	if o.Now == nil {
+		o.Now = time.Now
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	s := &Session{ts: ts, opts: o, ctx: runCtx, cancel: cancel, done: make(chan struct{})}
@@ -185,6 +206,10 @@ func (s *Session) handshake(ctx context.Context) error {
 		msg, err = proto.Read(reader, proto.MaxFrameLen)
 		if err == nil {
 			err = proto.Write(writer, local)
+			// A peer can consume our Hello and close before Write completes.
+			if peer, ok := msg.(proto.Hello); err != nil && ok && peer.ProtoVersion == proto.Version && s.opts.unsupportedPairing(peer) {
+				return pairingFailure(ReasonUnsupported)
+			}
 		}
 	}
 	if err != nil {
@@ -211,14 +236,38 @@ func (s *Session) handshake(ctx context.Context) error {
 			}
 		}
 	}
-	if slices.Contains(s.NegotiatedCapabilities, proto.PairDirectCapability) {
-		if err := s.digital(ctx, [32]byte(localHash.Sum(nil)), [32]byte(peerHash.Sum(nil))); err != nil {
+	if err := s.authorize(ctx, hello, [32]byte(localHash.Sum(nil)), [32]byte(peerHash.Sum(nil))); err != nil {
+		return err
+	}
+	if slices.Contains(s.NegotiatedCapabilities, proto.HubTicketCapability) {
+		return s.exchangeHubTicket()
+	}
+	return nil
+}
+
+func (o Options) unsupportedPairing(peer proto.Hello) bool {
+	if o.Role == RoleClient {
+		return peer.Role == string(RoleOperator) && o.DigitalCode != "" && !slices.Contains(peer.Capabilities, o.pairCapability())
+	}
+	requested := slices.Contains(peer.Capabilities, proto.PairDirectCapability) || slices.Contains(peer.Capabilities, proto.PairHubCapability)
+	return peer.Role == string(RoleClient) && requested && (o.DigitalManager == nil || !slices.Contains(peer.Capabilities, o.pairCapability()))
+}
+
+func (s *Session) authorize(ctx context.Context, hello proto.Hello, localHash, peerHash [32]byte) error {
+	if s.opts.Role == RoleClient && s.opts.RequireHubTicket && !slices.Contains(s.NegotiatedCapabilities, proto.HubTicketCapability) {
+		return pairingFailure(ReasonHubTicket)
+	}
+	if slices.Contains(s.NegotiatedCapabilities, s.opts.pairCapability()) {
+		if err := s.digital(ctx, localHash, peerHash); err != nil {
 			return err
 		}
 		s.outcome = DigitalPaired
 		return nil
 	}
-	if s.opts.Role == RoleClient && s.opts.DigitalCode != "" || s.opts.Role == RoleOperator && slices.Contains(hello.Capabilities, proto.PairDirectCapability) {
+	if s.opts.unsupportedPairing(hello) {
+		if !s.opts.Initiator {
+			s.finishRejection()
+		}
 		return pairingFailure(ReasonUnsupported)
 	}
 	if s.opts.Role == RoleClient {
@@ -236,6 +285,9 @@ func (s *Session) handshake(ctx context.Context) error {
 			return fmt.Errorf("session: expected PairResult, got %T", msg)
 		}
 		if !result.Accepted {
+			if result.Reason == string(ReasonHubTicket) && slices.Contains(s.NegotiatedCapabilities, proto.HubTicketCapability) {
+				return pairingFailure(ReasonHubTicket)
+			}
 			if result.Reason == invalidPairingToken {
 				return fmt.Errorf("%w: %s", ErrPairing, invalidPairingToken)
 			}
@@ -244,13 +296,24 @@ func (s *Session) handshake(ctx context.Context) error {
 		return nil
 	}
 	trusted := s.opts.Trusted != nil && s.opts.Trusted(s.Peer())
+	var token proto.PairToken
 	if !trusted {
 		msg, err := proto.Read(s.control, proto.MaxFrameLen)
 		if err != nil {
 			return err
 		}
-		token, ok := msg.(proto.PairToken)
-		trusted = ok && token.Token != [16]byte{} && s.opts.AcceptToken != nil && s.opts.AcceptToken(s.Peer(), token.Token)
+		token, _ = msg.(proto.PairToken)
+	}
+	if trusted || (token.Token != [16]byte{} && s.opts.AcceptToken != nil) {
+		if err := s.prepareHubTicket(); err != nil {
+			if proto.Write(s.control, proto.PairResult{Reason: string(ReasonHubTicket)}) == nil {
+				s.finishRejection()
+			}
+			return err
+		}
+		if !trusted {
+			trusted = s.opts.AcceptToken(s.Peer(), token.Token)
+		}
 	}
 	result := proto.PairResult{Accepted: trusted}
 	if !trusted {
@@ -341,7 +404,7 @@ func (s *Session) readControl() {
 				s.opts.OnRTT(sample)
 			}
 		case proto.PairToken: // A trusted peer may still send an invitation token.
-		case proto.Hello, proto.PairResult, proto.OpenTunnel, proto.PakeCommit, proto.PairDecision, proto.PakeShareA, proto.PakeShareB, proto.PakeConfirmA, proto.PakeConfirmB:
+		case proto.Hello, proto.HubTicket, proto.PairResult, proto.OpenTunnel, proto.PakeCommit, proto.PairDecision, proto.PakeShareA, proto.PakeShareB, proto.PakeConfirmA, proto.PakeConfirmB:
 			s.finish(fmt.Errorf("session: unexpected control message %T", m))
 			return
 		default:

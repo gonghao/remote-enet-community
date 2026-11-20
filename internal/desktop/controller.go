@@ -12,6 +12,7 @@ import (
 
 	"remote-enet/internal/app"
 	"remote-enet/internal/carside"
+	"remote-enet/internal/center"
 	"remote-enet/internal/checkup"
 	"remote-enet/internal/hsfzcapture"
 	"remote-enet/internal/identity"
@@ -36,6 +37,8 @@ type Options struct {
 	ConfigPath, StateDir string
 	// FixedRole is client or operator; empty preserves generic behavior.
 	FixedRole string
+	// AppVersion is the executable's build version used for center requests.
+	AppVersion string
 	// DirectFactory confines platform authorization to an explicit Operator action.
 	DirectFactory app.DirectFactory
 	// NetworkStatus only inspects capabilities; it must never request authorization.
@@ -51,13 +54,15 @@ type State struct {
 	Running, Stopping, Testing bool
 	DirectWorking              bool
 	Invitation, Notice, Error  string
-	NumericCode                pairing.Status
-	PairingHint                string
-	NICs                       []carside.NIC
-	TestResult                 linktest.Result
-	Events                     []string
-	Checking                   bool
-	Checkup                    checkup.Report
+	// HubInviteDigest lets the GUI discard a late issuance result after Stop or Save.
+	HubInviteDigest [32]byte
+	NumericCode     pairing.Status
+	PairingHint     string
+	NICs            []carside.NIC
+	TestResult      linktest.Result
+	Events          []string
+	Checking        bool
+	Checkup         checkup.Report
 }
 
 type appRuntime interface {
@@ -81,6 +86,7 @@ type dependencies struct {
 	pairedPeer  func(context.Context, string, transport.PeerInfo) error
 	readPeer    func(context.Context, string, identity.Fingerprint) (transport.PeerInfo, error)
 	checkup     func(context.Context, checkup.Input) checkup.Report
+	checkCenter func(ctx context.Context, cfg settings.Center, role, appVersion string) []center.EntryResult
 }
 
 func production() dependencies {
@@ -96,6 +102,7 @@ func production() dependencies {
 		issueInvite: app.IssueInvite,
 		readPeer:    trust.ReadPeer,
 		checkup:     checkup.Run,
+		checkCenter: center.Check,
 		pairedPeer: func(ctx context.Context, dir string, expected transport.PeerInfo) error {
 			store, err := trust.Open(ctx, dir)
 			if err != nil {
@@ -255,9 +262,35 @@ func (c *Controller) Subscribe(ctx context.Context) <-chan State {
 	return sub.ch
 }
 
-// Save only accepts idle configuration. Peer is controller-managed: merging it
-// from the current baseline prevents a stale GUI form from undoing pairing.
+// Save merges the persisted peer and center under the configuration gate.
 func (c *Controller) Save(ctx context.Context, cfg settings.Config) error {
+	return c.saveConfig(ctx, cfg, nil)
+}
+
+// SetCenter changes the persisted center independently of any pending form edits.
+func (c *Controller) SetCenter(ctx context.Context, center settings.Center) error {
+	center.API = slices.Clone(center.API)
+	return c.saveConfig(ctx, settings.Config{}, &center)
+}
+
+// IssuerEntry returns the public authorization entry for this operator identity.
+func (c *Controller) IssuerEntry(ctx context.Context) (string, error) {
+	ctx, finish, _, err := c.operation(ctx, false)
+	if err != nil {
+		return "", err
+	}
+	defer finish()
+	if err := c.acquire(ctx); err != nil {
+		return "", err
+	}
+	defer c.release()
+	if c.Snapshot().Config.Role != settings.RoleOperator {
+		return "", ErrRole
+	}
+	return app.IssuerEntry(ctx, c.roleDir(settings.RoleOperator), "operator")
+}
+
+func (c *Controller) saveConfig(ctx context.Context, cfg settings.Config, center *settings.Center) error {
 	ctx, finish, _, err := c.operation(ctx, true)
 	if err != nil {
 		c.failure("Settings could not be saved.", err)
@@ -276,6 +309,12 @@ func (c *Controller) Save(ctx context.Context, cfg settings.Config) error {
 	defer c.release()
 	c.mu.Lock()
 	err = c.availableLocked(ctx, true)
+	if center != nil {
+		cfg = c.state.Config
+		cfg.Center = *center
+	} else {
+		cfg.Center = c.state.Config.Center
+	}
 	if err == nil && !c.allowsRole(cfg.Role) {
 		err = ErrRole
 	}

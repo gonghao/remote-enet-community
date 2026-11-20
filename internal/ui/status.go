@@ -36,6 +36,15 @@ func (v *View) stage() (string, string, ui.Color) {
 	case app.PhaseConnecting:
 		return "Connecting", "Establishing the peer session.", blue
 	case app.PhaseListening:
+		if v.state.Runtime.HubWaiting {
+			return "Waiting on hub", "Waiting for a client to connect.", blue
+		}
+		if v.role == settings.RoleOperator && v.saved.Operator.Mode == "hub" {
+			if v.hubWaitDenied() {
+				return "Not authorized by hub", "", amber
+			}
+			return "Connecting to hub", "", blue
+		}
 		return "Listening", "Waiting for a client to connect.", blue
 	case app.PhaseConnected:
 		return "Connected", "The peer session is established.", green
@@ -120,8 +129,20 @@ func (v *View) informationSections(c *ui.Context, compact bool) {
 	section("connection", "CONNECTION", func() {
 		v.peerValue(c.Key("status-peer"), "Peer", s.Peer)
 		value("Peer address", s.Path.RemoteAddr)
-		value("Path", v.tr(string(s.Path.Kind)))
-		value("Via", s.Path.Via)
+		mode := ""
+		switch s.Path.Kind {
+		case "direct":
+			mode = v.tr("Direct")
+		case "relay":
+			mode = v.tr("Via hub %s", s.Path.Hub.Short())
+		}
+		value("Connection mode", mode)
+		if s.Path.Kind == "relay" {
+			value("Hub address", s.Path.Via)
+			if ui.Button(c.Key("copy-hub-address"), v.tr("Copy hub address")).Disabled(v.actions.Copy == nil || s.Path.Via == "").Clicked() {
+				v.actions.Copy(s.Path.Via)
+			}
+		}
 	})
 	section("session", "SESSION", func() {
 		if v.role == settings.RoleOperator {

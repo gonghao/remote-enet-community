@@ -396,7 +396,7 @@ func TestNaturalRuntimeFailureAndSaveReceipts(t *testing.T) {
 	if err := c.Save(t.Context(), cfg); err != nil {
 		t.Fatal(err)
 	}
-	if s := c.Snapshot(); s.Notice != "Settings saved." || s.Error != "" || s.Config.Client.Peer != clientSettings().Client.Peer || saved != s.Config {
+	if s := c.Snapshot(); s.Notice != "Settings saved." || s.Error != "" || s.Config.Client.Peer != clientSettings().Client.Peer || !saved.Equal(s.Config) {
 		t.Fatal("save did not publish a successful, peer-preserving receipt")
 	}
 	fail = true
@@ -404,7 +404,7 @@ func TestNaturalRuntimeFailureAndSaveReceipts(t *testing.T) {
 	if err := c.Save(t.Context(), cfg); err == nil {
 		t.Fatal("failed persistence reported success")
 	}
-	if s := c.Snapshot(); s.Config != saved || s.Error == "" || s.Notice != "" {
+	if s := c.Snapshot(); !s.Config.Equal(saved) || s.Error == "" || s.Notice != "" {
 		t.Fatal("failed save modified the baseline or kept a success notice")
 	}
 	fail = false
@@ -477,7 +477,7 @@ func TestRefreshPreservesMissingSelectionAndCancellation(t *testing.T) {
 	if err := c.RefreshNICs(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if s := c.Snapshot(); s.Config != cfg || len(s.NICs) != 1 {
+	if s := c.Snapshot(); !s.Config.Equal(cfg) || len(s.NICs) != 1 {
 		t.Fatal("refresh changed the saved fixed interface")
 	}
 	ctx, cancel := context.WithCancel(context.WithValue(t.Context(), "wait", true))
@@ -722,7 +722,7 @@ func TestIdleStopDoesNotCancelOrWaitForAtomicSave(t *testing.T) {
 	if err := await(t, saved); err != nil {
 		t.Fatal(err)
 	}
-	if s := c.Snapshot(); s.Config != cfg || s.Notice != "Settings saved." || s.Error != "" {
+	if s := c.Snapshot(); !s.Config.Equal(cfg) || s.Notice != "Settings saved." || s.Error != "" {
 		t.Fatal("stop epoch canceled or lost an admitted atomic save")
 	}
 }

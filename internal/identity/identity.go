@@ -143,6 +143,22 @@ func fromKey(priv ed25519.PrivateKey, pub ed25519.PublicKey) (*Local, error) {
 // Save writes the key and certificate as PEM into dir (created if missing).
 // The key file is mode 0600.
 func (l *Local) Save(dir string) error {
+	return l.save(dir, os.O_TRUNC)
+}
+
+// Create persists a fresh identity only if the key path is unoccupied.
+func Create(dir string) (*Local, error) {
+	l, err := Generate()
+	if err != nil {
+		return nil, err
+	}
+	if err := l.save(dir, os.O_EXCL); err != nil {
+		return nil, err
+	}
+	return l, nil
+}
+
+func (l *Local) save(dir string, mode int) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("identity: mkdir: %w", err)
 	}
@@ -151,7 +167,12 @@ func (l *Local) Save(dir string) error {
 		return fmt.Errorf("identity: marshal key: %w", err)
 	}
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
-	if err := os.WriteFile(filepath.Join(dir, keyFile), keyPEM, 0o600); err != nil {
+	f, err := os.OpenFile(filepath.Join(dir, keyFile), os.O_CREATE|os.O_WRONLY|mode, 0600)
+	if err != nil {
+		return fmt.Errorf("identity: open key: %w", err)
+	}
+	_, writeErr := f.Write(keyPEM)
+	if err := errors.Join(writeErr, f.Close()); err != nil {
 		return fmt.Errorf("identity: write key: %w", err)
 	}
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: l.Cert.Certificate[0]})
@@ -164,6 +185,15 @@ func (l *Local) Save(dir string) error {
 // Load reads an identity saved by Save. The certificate is re-derived from
 // the key if the cert file is missing or does not match it.
 func Load(dir string) (*Local, error) {
+	return load(dir, true)
+}
+
+// LoadExisting never writes. It requires the existing private key and rebuilds
+// a missing or mismatched certificate in memory. Hub pins remain valid because
+// the fingerprint depends only on the public key.
+func LoadExisting(dir string) (*Local, error) { return load(dir, false) }
+
+func load(dir string, persistRepair bool) (*Local, error) {
 	keyPEM, err := os.ReadFile(filepath.Join(dir, keyFile))
 	if err != nil {
 		return nil, fmt.Errorf("identity: read key: %w", err)
@@ -199,6 +229,9 @@ func Load(dir string) (*Local, error) {
 	l, err := fromKey(priv, pub)
 	if err != nil {
 		return nil, err
+	}
+	if !persistRepair {
+		return l, nil
 	}
 	if err := l.Save(dir); err != nil {
 		return nil, err

@@ -7,15 +7,18 @@ import (
 	"log/slog"
 	"net/netip"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
 	"remote-enet/internal/carside"
+	"remote-enet/internal/hub"
 	"remote-enet/internal/identity"
 	"remote-enet/internal/invite"
 	"remote-enet/internal/observe"
 	"remote-enet/internal/pairing/cpace"
 	"remote-enet/internal/session"
+	"remote-enet/internal/ticket"
 	"remote-enet/internal/transport"
 	hubtransport "remote-enet/internal/transport/hub"
 	"remote-enet/internal/trust"
@@ -123,7 +126,24 @@ func validatePeer(peer transport.PeerInfo) error {
 
 type clientConnector interface {
 	transport.Connector
-	DialDirectPair(context.Context, string) (transport.Session, error)
+	DialBootstrap(context.Context, string) (transport.Session, identity.Fingerprint, error)
+}
+
+// Expired credentials never reach discovery or the connector. Other saved
+// endpoints remain eligible when a peer has more than one route.
+func dialCandidates(peer transport.PeerInfo, now time.Time) (transport.PeerInfo, error) {
+	eps := slices.DeleteFunc(slices.Clone(peer.Endpoints), func(ep transport.Endpoint) bool {
+		if ep.Ticket == "" {
+			return false
+		}
+		_, claims, err := ticket.Inspect([]byte(ep.Ticket))
+		return err != nil || !claims.Expires.After(now)
+	})
+	if len(eps) == 0 && len(peer.Endpoints) > 0 {
+		return peer, HubAuthorizationExpired
+	}
+	peer.Endpoints = eps
+	return peer, nil
 }
 
 func (r *Runtime) clientLoop(ctx context.Context, cfg ClientConfig, connector clientConnector, peer transport.PeerInfo, token [16]byte, store *trust.Store) error {
@@ -131,6 +151,11 @@ func (r *Runtime) clientLoop(ctx context.Context, cfg ClientConfig, connector cl
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+		if !cfg.Peer.IsZero() {
+			if _, err := dialCandidates(peer, time.Now()); err != nil {
+				return err
+			}
 		}
 		nic, err := selectNIC(ctx, cfg)
 		if errors.Is(err, carside.ErrNICUnavailable) {
@@ -197,8 +222,8 @@ func (r *Runtime) clientLoop(ctx context.Context, cfg ClientConfig, connector cl
 		})
 		saved, connected, fatal, err := r.clientConnection(ctx, connector, peer, token, store, nic, gateway, cfg)
 		if saved != nil {
-			peer, cfg.DirectPair = *saved, nil
-		} else if cfg.DirectPair != nil {
+			peer, cfg.DirectPair, cfg.Peer = *saved, nil, saved.ID
+		} else if cfg.DirectPair != nil && !errors.Is(err, hub.ErrUnknownPeer) && !errors.Is(err, hub.ErrPeerBusy) {
 			return fmt.Errorf("%w: %w", classifyPairingError(err), err)
 		}
 		if connected {
@@ -218,6 +243,8 @@ func (r *Runtime) clientLoop(ctx context.Context, cfg ClientConfig, connector cl
 		cfg.Logger.Warn("client connection ended; retrying", "error", err, "retry_in", delay)
 		message := sessionEndMessage(session.RoleClient, err)
 		switch {
+		case errors.Is(err, hub.ErrUnknownPeer):
+			message = string(OperatorOffline)
 		case errors.Is(err, identity.ErrFingerprintMismatch):
 			message = string(PairingErrorKind("identity_mismatch"))
 		case errors.Is(err, hubtransport.ErrPeerBusy):
@@ -228,6 +255,40 @@ func (r *Runtime) clientLoop(ctx context.Context, cfg ClientConfig, connector cl
 		}
 		delay = nextDelay(delay, cfg.RetryMax)
 	}
+}
+
+func ticketDialError(err error) (fatal bool, classified error) {
+	var kind PairingErrorKind
+	switch {
+	case errors.Is(err, hub.ErrPeerBusy):
+		kind = "busy"
+	case errors.Is(err, hub.ErrUnknownPeer):
+		kind = OperatorOffline
+	case errors.As(err, &kind):
+		return true, err
+	case errors.Is(err, identity.ErrFingerprintMismatch):
+		kind, fatal = HubIdentityMismatch, true
+	case allEndpointsUnauthorized(err):
+		kind, fatal = HubAuthorizationExpired, true
+	default:
+		kind = HubUnreachable
+	}
+	return fatal, fmt.Errorf("%w: %w", kind, err)
+}
+
+// Dial wraps the joined candidate errors. One retryable path is enough
+// to keep a saved peer reachable even when another path's ticket is revoked.
+func allEndpointsUnauthorized(err error) bool {
+	var joined interface{ Unwrap() []error }
+	if !errors.As(err, &joined) {
+		return errors.Is(err, hub.ErrUnauthorized)
+	}
+	for _, cause := range joined.Unwrap() {
+		if !allEndpointsUnauthorized(cause) {
+			return false
+		}
+	}
+	return true
 }
 
 func selectNIC(ctx context.Context, cfg ClientConfig) (carside.NIC, error) {
@@ -274,14 +335,33 @@ func (r *Runtime) clientConnection(ctx context.Context, connector clientConnecto
 		}
 	}()
 	var ts transport.Session
+	var outer, pairingHub identity.Fingerprint
 	if direct != nil {
-		ts, err = connector.DialDirectPair(connectionCtx, direct.Address)
+		ts, outer, err = connector.DialBootstrap(connectionCtx, direct.Address)
+		if err == nil && ts.Peer() != outer {
+			pairingHub = outer
+		}
 	} else {
-		ts, err = connector.Dial(connectionCtx, peer)
+		candidates := peer
+		if !cfg.Peer.IsZero() {
+			candidates, err = dialCandidates(peer, time.Now())
+			if err != nil {
+				return nil, false, true, err
+			}
+		}
+		ts, err = connector.Dial(connectionCtx, candidates)
+		if err != nil && connectionCtx.Err() == nil && slices.ContainsFunc(candidates.Endpoints, func(ep transport.Endpoint) bool { return ep.Ticket != "" }) {
+			fatal, err := ticketDialError(err)
+			return nil, false, fatal, err
+		}
 	}
 	if err != nil {
 		return nil, false, false, err
 	}
+	path := ts.Path()
+	requiresTicket := !pairingHub.IsZero() || slices.ContainsFunc(peer.Endpoints, func(ep transport.Endpoint) bool {
+		return ep.Hub == path.Hub && ep.Addr == path.Via && ep.Ticket != ""
+	})
 	forwarder, err := carside.NewForwarder(nic, cfg.Logger, carside.WithObserver(metrics))
 	if err != nil {
 		ts.Close(err)
@@ -301,32 +381,37 @@ func (r *Runtime) clientConnection(ctx context.Context, connector clientConnecto
 	}
 	s, err := session.Run(connectionCtx, ts, session.Options{
 		Role: session.RoleClient, Initiator: true, AppVersion: "dev", Token: token,
+		HubFP: pairingHub, EndpointHub: path.Hub, RequireHubTicket: requiresTicket,
 		DigitalCode: code, LocalFP: r.Snapshot().Device, OnTunnel: forwarder.HandleTunnel,
 		OnRTT: metrics.onRTT, AllowLinkTest: cfg.AllowLinkTest, Logger: cfg.Logger,
 	})
 	if err != nil {
+		if errors.Is(err, session.ReasonHubTicket) {
+			return nil, false, true, fmt.Errorf("%w: %w", PairingErrorKind(session.ReasonHubTicket), err)
+		}
 		return nil, false, false, err
 	}
 	if direct != nil {
 		if s.PairingOutcome() != session.DigitalPaired {
 			return nil, false, true, session.ReasonInterrupted
 		}
-		peer = transport.PeerInfo{ID: ts.Peer(), Endpoints: []transport.Endpoint{{Kind: "hub", Addr: direct.Address, Hub: ts.Peer()}}}
+		peer = transport.PeerInfo{ID: ts.Peer(), Endpoints: []transport.Endpoint{{Kind: "hub", Addr: direct.Address, Hub: outer}}}
 	} else {
 		metrics.start()
 	}
-	if err := store.SavePeer(connectionCtx, peer); err != nil {
+	peer, err = persistPeer(connectionCtx, store, peer, path, string(s.HubTicket()), !cfg.Peer.IsZero())
+	if err != nil {
 		if connectionCtx.Err() != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
-			return saved, true, false, context.Cause(connectionCtx)
+			return nil, false, false, context.Cause(connectionCtx)
 		}
 		if direct != nil {
 			return nil, false, true, cpace.ReasonStoreFailed
 		}
 		return saved, true, true, fmt.Errorf("save paired operator: %w", err)
 	}
+	saved = &peer
 	if direct != nil {
 		metrics.start()
-		saved = &peer
 		if cfg.Hooks.OnPaired != nil {
 			copyPeer := peer
 			copyPeer.Endpoints = append([]transport.Endpoint(nil), peer.Endpoints...)
@@ -355,6 +440,33 @@ func (r *Runtime) clientConnection(ctx context.Context, connector clientConnecto
 		}
 		return saved, true, false, s.Err()
 	}
+}
+
+// Each device ticket is bound to one Hub. An unused bearer credential from
+// a multi-endpoint invitation must never enter the saved peer record.
+func persistPeer(ctx context.Context, store *trust.Store, peer transport.PeerInfo, path transport.PathInfo, deviceTicket string, reconnect bool) (transport.PeerInfo, error) {
+	if reconnect && deviceTicket == "" {
+		return peer, nil
+	}
+	endpoints := make([]transport.Endpoint, 0, len(peer.Endpoints))
+	matched := false
+	for _, ep := range peer.Endpoints {
+		if deviceTicket != "" && ep.Hub == path.Hub && ep.Addr == path.Via {
+			ep.Ticket = deviceTicket
+			matched = true
+		} else if !reconnect && ep.Ticket != "" {
+			continue
+		}
+		endpoints = append(endpoints, ep)
+	}
+	if deviceTicket != "" && !matched {
+		return peer, PairingErrorKind(session.ReasonHubTicket)
+	}
+	peer.Endpoints = endpoints
+	if reconnect {
+		return peer, store.UpdateEndpointTicket(ctx, peer.ID, path.Hub, path.Via, deviceTicket)
+	}
+	return peer, store.SavePeer(ctx, peer)
 }
 
 func (r *Runtime) monitorNIC(ctx context.Context, selected carside.NIC, cfg ClientConfig) error {

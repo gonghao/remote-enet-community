@@ -91,6 +91,16 @@
 
 私有审查结果保存在 `/tmp/remote-enet-opensource-20261119/`，不作为公开发行内容。扫描没有覆盖不可达对象、reflog-only 内容、远端不可见引用、压缩/二进制中的所有隐藏数据、所有令牌格式或所有个人信息；无命中不是无泄漏保证。公开哪些分支、提交、制品与 Git 元数据仍需按最终发布方式检查。
 
+### 4.1 公开仓库守卫
+
+`tools/repo-guard.py` 扫描私有标记（私有 IPv4 段、VIN 形态、`renet1:` 邀请码正文、PEM 私钥块），命中只输出打码片段，有命中退出码 1。CI 的 check job 对全部已跟踪文件运行；也可本地运行：
+
+- `python3 -B tools/repo-guard.py`：全量；`--staged`：暂存区；`--rev-range A..B`：这些提交新增的行。
+- 私有规则（域名、主机名等）不入库：`--rules FILE` 或环境变量 `REPO_GUARD_RULES`（文件路径），CI 用 secret `REPO_GUARD_RULES_INLINE`（内容）；一行一条正则，`#` 注释。secret 未配置时只跑内置规则。
+- 误报：行内加 `repo-guard: allow`，或在 `.repo-guard-allow` 写 `路径glob | 规则名 | 文本`（后两项可省；文本可写 `sha256:<前缀>`，前缀用 `--show-digest` 在本地取得，避免把私有内容写进 allowlist）。
+- 安装 pre-push 钩子：`ln -s ../../tools/git-hooks/pre-push .git/hooks/pre-push`，并在 shell 中设置 `REPO_GUARD_RULES`。
+- 局限：VIN 为启发式（见脚本注释），不是保证；守卫不替代人工审查，也不扫描已有历史（需要时用 `--rev-range` 指定范围）。
+
 ## 5. 已选许可证与发行条件
 
 | 候选 | 适合的目标 | 必须接受的边界 |

@@ -7,3 +7,5 @@
 专用连接测试复用 Hello 的 `linktest/1` capability 与现有 `OpenTunnel{Kind:"linktest/1", Target:"", Origin:""}` 头，不新增消息编号或字段、不改变版本。头之后的有界二进制 echo 协议只在两个 renet session 内处理，见 [linktest](../linktest/README.md)，不作为车辆 TCP/reverse 隧道下发。
 
 数字配对能力为 `pair-direct/1`。11 PakeCommit、12 PakeShareB、13 PakeShareA、14 PakeConfirmB、15 PakeConfirmA、16 PairDecision。11、14、15 的键 1 为 64 字节串，12、13 为 32 字节串。16 的键 1 为布尔值，键 2 为原因文本。ReadPair 先检查 256 字节上限，再严格解码这六种规范 CBOR 帧。
+
+经自建 Hub 的数字配对使用 `pair-hub/1`，沿用消息 11 至 16。设备票下发单独协商 `hub-ticket/1`。协商成功后，Operator 在握手结束时发送 17 HubTicket，正文为 `{1: ticket}`，票据为 1 至 1024 字节的 CBOR 字节串。`ReadHubTicket` 在分配前检查 CBOR 信封长度上限 1100 字节，只接受规范编码的消息 17。普通 `Read` 识别 17 时同样严格检查正文和信封。`ReadPair` 仍只接受 11 至 16。

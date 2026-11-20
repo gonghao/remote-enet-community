@@ -173,3 +173,53 @@ func TestReadPairRejectsLegacyResult(t *testing.T) {
 		t.Fatal("accepted legacy result on pairing stream")
 	}
 }
+
+func TestHubTicket(t *testing.T) {
+	for _, n := range []int{0, 1, 1024, 1025} {
+		ticket := HubTicket{Ticket: bytes.Repeat([]byte{23}, n)}
+		var frame bytes.Buffer
+		err := Write(&frame, &ticket)
+		if n == 0 || n > 1024 {
+			if err == nil || frame.Len() != 0 {
+				t.Errorf("wrote invalid ticket of length %d", n)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ReadPair(bytes.NewReader(frame.Bytes())); err == nil {
+			t.Fatal("ReadPair accepted ticket")
+		}
+		got, err := ReadHubTicket(&frame)
+		if err != nil || !bytes.Equal(got.Ticket, ticket.Ticket) {
+			t.Fatalf("ticket length %d: %v", n, err)
+		}
+	}
+	if _, err := ReadHubTicket(bytes.NewReader(binary.BigEndian.AppendUint32(nil, 1101))); err == nil || errors.Is(err, io.EOF) {
+		t.Fatalf("frame limit: %v", err)
+	}
+	var other bytes.Buffer
+	if err := Write(&other, PairDecision{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadHubTicket(&other); err == nil {
+		t.Fatal("accepted wrong message")
+	}
+}
+
+func TestHubTicketRejectsMalformedBody(t *testing.T) {
+	for _, body := range [][]byte{
+		{0xa0}, {0xa1, 1, 0x40}, {0xa1, 1, 0xf6}, {0xa1, 1, 0x61, 65},
+		{0xa1, 1, 0x58, 1, 0}, {0xa2, 1, 0x41, 0, 2, 0},
+		append([]byte{0xa1, 1, 0x59, 4, 1}, make([]byte, 1025)...),
+	} {
+		var frame bytes.Buffer
+		if err := writeEnvelope(&frame, Envelope{Type: 17, Body: body}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Read(&frame, MaxFrameLen); err == nil {
+			t.Errorf("accepted invalid ticket body (length %d)", len(body))
+		}
+	}
+}

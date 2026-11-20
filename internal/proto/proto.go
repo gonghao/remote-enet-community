@@ -19,6 +19,14 @@ const MaxFrameLen = 1 << 20
 // PairDirectCapability opts a client into a single numeric redemption.
 const PairDirectCapability = "pair-direct/1"
 
+// PairHubCapability binds numeric pairing to the observed Hub fingerprint.
+const PairHubCapability = "pair-hub/1"
+
+// HubTicketCapability negotiates device ticket delivery after pairing.
+const HubTicketCapability = "hub-ticket/1"
+
+const maxHubTicketFrame = 1100
+
 type MsgType uint16
 
 const (
@@ -38,6 +46,7 @@ const (
 	TypePakeConfirmB  MsgType = 14
 	TypePakeConfirmA  MsgType = 15
 	TypePairDecision  MsgType = 16
+	TypeHubTicket     MsgType = 17
 )
 
 type Hello struct {
@@ -46,6 +55,12 @@ type Hello struct {
 	AppVersion   string   `cbor:"3,keyasint"`
 	Capabilities []string `cbor:"4,keyasint"`
 }
+
+// HubTicket carries the opaque device ticket in an inner control frame.
+type HubTicket struct {
+	Ticket []byte `cbor:"1,keyasint"`
+}
+
 type pairValue struct {
 	Value [32]byte `cbor:"1,keyasint"`
 }
@@ -123,7 +138,12 @@ func Write(w io.Writer, msg any) error {
 		msg = v.Elem().Interface()
 	}
 	var typ MsgType
-	switch msg.(type) {
+	switch m := msg.(type) {
+	case HubTicket:
+		if len(m.Ticket) < 1 || len(m.Ticket) > 1024 {
+			return fmt.Errorf("proto: invalid Hub ticket length %d", len(m.Ticket))
+		}
+		typ = TypeHubTicket
 	case Hello:
 		typ = TypeHello
 	case PakeCommit:
@@ -198,6 +218,19 @@ func Read(r io.Reader, maxLen int) (any, error) {
 // ReadPair bounds allocation and accepts only messages 11 through 16.
 func ReadPair(r io.Reader) (any, error) { return read(r, 256, true) }
 
+// ReadHubTicket checks the negotiated ticket frame limit before allocation.
+func ReadHubTicket(r io.Reader) (HubTicket, error) {
+	msg, err := Read(r, maxHubTicketFrame)
+	if err != nil {
+		return HubTicket{}, err
+	}
+	ticket, ok := msg.(HubTicket)
+	if !ok {
+		return HubTicket{}, fmt.Errorf("proto: expected HubTicket, got %T", msg)
+	}
+	return ticket, nil
+}
+
 func read(r io.Reader, maxLen int, pairOnly bool) (any, error) {
 	var prefix [4]byte
 	if _, err := io.ReadFull(r, prefix[:]); err != nil {
@@ -224,6 +257,11 @@ func read(r io.Reader, maxLen int, pairOnly bool) (any, error) {
 	}
 	var msg any
 	switch e.Type {
+	case TypeHubTicket:
+		if len(raw) > maxHubTicketFrame {
+			return nil, fmt.Errorf("proto: Hub ticket frame too large: %d", len(raw))
+		}
+		msg = new(HubTicket)
 	case TypeHello:
 		msg = new(Hello)
 	case TypePakeCommit:
@@ -262,13 +300,13 @@ func read(r io.Reader, maxLen int, pairOnly bool) (any, error) {
 	if err := dec.Unmarshal(e.Body, msg); err != nil {
 		return nil, fmt.Errorf("proto: decode type %d: %w", e.Type, err)
 	}
-	if digital {
+	if digital || e.Type == TypeHubTicket {
 		var canonical bytes.Buffer
 		if err := Write(&canonical, msg); err != nil {
 			return nil, err
 		}
 		if !bytes.Equal(raw, canonical.Bytes()[4:]) {
-			return nil, fmt.Errorf("proto: noncanonical pairing frame")
+			return nil, fmt.Errorf("proto: noncanonical control frame")
 		}
 	}
 	return reflect.ValueOf(msg).Elem().Interface(), nil

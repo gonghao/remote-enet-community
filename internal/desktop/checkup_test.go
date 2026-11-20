@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -69,7 +70,10 @@ func TestCheckEndpointsDoesNotPairOrPersist(t *testing.T) {
 	c := testController(t, clientSettings(), func(d *dependencies) {
 		d.readPeer = func(context.Context, string, identity.Fingerprint) (transport.PeerInfo, error) {
 			reads++
-			return peer, nil
+			stored := peer
+			stored.Endpoints = slices.Clone(peer.Endpoints)
+			stored.Endpoints[0].Ticket = "stored-ticket-12345678"
+			return stored, nil
 		}
 		d.checkup = func(_ context.Context, in checkup.Input) checkup.Report {
 			inputs = append(inputs, in)

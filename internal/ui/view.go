@@ -50,6 +50,7 @@ type Actions struct {
 	Listen            func()
 	Stop              func()
 	IssueInvite       func()
+	LoadIssuerEntry   func()
 	IssueNumericCode  func()
 	CopyNumericCode   func(uint64)
 	RevokeNumericCode func(uint64)
@@ -88,10 +89,14 @@ const (
 	ActionIssueNumericCode
 	ActionCopyNumericCode
 	ActionRevokeNumericCode
+	ActionIssuerEntry
 )
 
 // View and all of its methods belong to the UI thread.
 type View struct {
+	issuerEntry     string
+	issuerRequested bool
+
 	actions                             Actions
 	role                                string
 	language                            string
@@ -130,7 +135,7 @@ type View struct {
 func New(initial settings.Config, actions Actions) *View {
 	v := &View{actions: actions, role: initial.Role, saved: initial}
 	v.resetDraft(initial)
-	if initial.Role == settings.RoleOperator && (initial.Operator.Endpoint == "" || initial.Operator.Bind == "") {
+	if initial.Role == settings.RoleOperator && (initial.Operator.Mode != "hub" && initial.Operator.Endpoint == "" || initial.Operator.Bind == "") {
 		v.page = settingsPage
 	}
 	return v
@@ -145,12 +150,14 @@ func (v *View) SetConfig(cfg settings.Config) {
 		return
 	}
 	clean := !v.dirty()
+	v.draft.Center = cfg.Center
 	v.draft.Client.Peer = cfg.Client.Peer
 	if v.submitted != nil {
+		v.submitted.Center = cfg.Center
 		v.submitted.Client.Peer = cfg.Client.Peer
-		if *v.submitted == cfg {
+		if v.submitted.Equal(cfg) {
 			current, err := v.config()
-			clean = err == nil && current == cfg
+			clean = err == nil && current.Equal(cfg)
 			v.submitted = nil
 			v.savingAdapter = false
 		}
@@ -172,7 +179,8 @@ func (v *View) SetState(state State) {
 	if state.Testing || state.TestResult != v.state.TestResult || !state.Running {
 		v.testing = false
 	}
-	if state.Invitation != "" && state.Invitation != v.state.Invitation || state.Stopping {
+	newInvitation := state.Invitation != "" && state.Invitation != v.state.Invitation
+	if newInvitation || state.Stopping {
 		v.issuing = false
 	}
 	if state.Running && !v.state.Running {
@@ -263,7 +271,7 @@ func (v *View) config() (settings.Config, error) {
 
 func (v *View) dirty() bool {
 	cfg, err := v.config()
-	return err != nil || cfg != v.saved
+	return err != nil || !cfg.Equal(v.saved)
 }
 
 func (v *View) locked() bool {
@@ -279,11 +287,11 @@ func (v *View) canConnect() bool {
 }
 
 func (v *View) canListen() bool {
-	return v.actions.Listen != nil && v.ready() && v.saved.Operator.Listen != "" && v.saved.Operator.Endpoint != "" && v.saved.Operator.Bind != ""
+	return v.actions.Listen != nil && v.ready() && (v.saved.Operator.Mode == "hub" || v.saved.Operator.Listen != "" && v.saved.Operator.Endpoint != "") && v.saved.Operator.Bind != ""
 }
 
 func (v *View) canInvite() bool {
-	return v.actions.IssueInvite != nil && !v.state.Stopping && !v.stopping && !v.connecting && !v.listening && !v.issuing && v.submitted == nil && !v.dirty() && v.saved.Operator.Endpoint != "" && v.saved.Validate() == nil
+	return v.actions.IssueInvite != nil && !v.state.Stopping && !v.stopping && !v.connecting && !v.listening && !v.issuing && v.submitted == nil && !v.dirty() && (v.saved.Operator.Mode == "hub" || v.saved.Operator.Endpoint != "") && v.saved.Validate() == nil
 }
 
 func (v *View) canStop() bool {

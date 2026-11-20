@@ -32,7 +32,7 @@ func TestFixedRoleAcrossPagesAndConfigUpdates(t *testing.T) {
 			wrong.AllowLinkTest = !cfg.AllowLinkTest
 			v.SetConfig(wrong)
 			tt.Frame()
-			if v.saved != cfg || v.draft != cfg {
+			if !v.saved.Equal(cfg) || !v.draft.Equal(cfg) {
 				t.Fatal("a mismatched config replaced the fixed role or saved settings")
 			}
 			openSettings(t, tt)
@@ -101,7 +101,7 @@ func TestDashboardPrimaryControlsAreVisible(t *testing.T) {
 				labels := []string{"Connect client", "Stop runtime", "Invite or address:port and code", "Adapter selection", "Refresh adapters", "Settings", "Log"}
 				if role == settings.RoleOperator {
 					width, height = 1080, 760
-					labels = []string{"Start operator", "Stop runtime", "Generate invitation", "Copy invitation", "Test connection", "Settings", "Log"}
+					labels = []string{"Start operator", "Stop runtime", "Invitation · easy to copy and paste", "Numeric code · easy to dictate", "Test connection", "Settings", "Log"}
 				}
 				tt := ui.NewTester(v.Render, width, height)
 				for _, label := range labels {
@@ -135,7 +135,7 @@ func TestSessionControlsStayInPlaceWhenMessagesChange(t *testing.T) {
 					width, height = operatorMinWidth, operatorMinHeight
 					labels = []string{"Start operator"}
 					if zoom == 1 {
-						labels = append(labels, "Generate numeric code", "Generate invitation")
+						labels = append(labels, "Numeric code · easy to dictate", "Invitation · easy to copy and paste")
 					}
 				}
 				v := New(cfg, Actions{})
@@ -271,5 +271,66 @@ func TestClientSettingsPreserveInvitationAndEdits(t *testing.T) {
 	click(t, tt, "Save settings")
 	if saved.AllowLinkTest || strings.Contains(fmt.Sprint(saved), "test-only-paste") || v.invitation != "test-only-paste" {
 		t.Fatal("navigation or state update lost edits or persisted an invitation")
+	}
+}
+
+func TestResponsiveSessionAndSettings(t *testing.T) {
+	for _, language := range []string{"en", "zh-Hans", "zh-Hant"} {
+		for _, role := range []string{settings.RoleOperator, settings.RoleClient} {
+			for _, p := range []page{sessionPage, settingsPage} {
+				widths := []int{1080, operatorMinWidth}
+				if role == settings.RoleClient {
+					widths = []int{clientWidth}
+				}
+				for _, width := range widths {
+					t.Run(fmt.Sprintf("%s/%s/%d/%d", language, role, p, width), func(t *testing.T) {
+						cfg := operatorConfig()
+						cfg.Role = role
+						cfg.Center = settings.Center{ID: "saved-center", API: []string{"https://center.invalid"}}
+						v := New(cfg, Actions{})
+						v.SetLanguage(language)
+						v.page = p
+						height := 760
+						if role == settings.RoleClient {
+							height = clientHeight
+						}
+						tt := ui.NewTester(v.Render, width, height)
+						for _, hidden := range []string{"Center", "Center ID", "Check center", "Change center…", cfg.Center.ID, cfg.Center.API[0]} {
+							if _, ok := tt.Find(hidden); ok {
+								t.Fatalf("hidden center configuration visible: %s", hidden)
+							}
+						}
+						left, right := "Numeric code · easy to dictate", "Invitation · easy to copy and paste"
+						if p == settingsPage {
+							left, right = "Connection settings", "Network & presentation"
+							if role == settings.RoleClient {
+								left, right = "Preferences", "Connection test"
+							}
+						}
+						if role == settings.RoleClient && p == sessionPage {
+							left, right = "Adapter selection", "Connect client"
+						}
+						a, okA := tt.Find(v.tr(left))
+						b, okB := tt.Find(v.tr(right))
+						if !okA || !okB {
+							t.Fatalf("missing %q or %q", left, right)
+						}
+						if width >= twoColumnWidth {
+							if a.Y+a.H/2 != b.Y+b.H/2 || a.X+a.W > b.X {
+								t.Fatalf("expected separate columns: %+v, %+v", a, b)
+							}
+						} else if b.Y < a.Y+a.H {
+							t.Fatalf("expected stacked groups: %+v, %+v", a, b)
+						}
+						if width != operatorMinWidth {
+							tt.Scroll(float32(width/2), float32(height/2), 0, 900)
+							if after, _ := tt.Find(v.tr(left)); after != a {
+								t.Fatalf("default page scrolled: %+v -> %+v", a, after)
+							}
+						}
+					})
+				}
+			}
+		}
 	}
 }

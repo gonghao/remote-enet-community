@@ -6,11 +6,11 @@ Hub 只根据本文件的路由头建立路径。路由完成后的字节属于�
 
 - TCP 上运行 TLS 1.3，ALPN 必须为 `renet-hub/1`，不接受缺省 ALPN 或 TLS 1.2。
 - 双方各出示一张 Ed25519 自签设备证书。检查有效期、Subject/Issuer 一致、自签名和未知关键扩展；不使用公网 CA、DNS 名或客户端自报 ID。
-- 设备 ID 是证书 Ed25519 公钥的 SHA-256，由 `identity.FingerprintOfCert` 计算。普通 Connect 必须钉扎 `Endpoint.Hub`，拒绝零指纹。直连数字配对专用的 ConnectBootstrap 从通过上述校验的证书取得候选指纹 H，在同一条连接上发送 target=H、token 长度为零的 dial 请求。内层 TLS 须钉扎 H，口令确认由上层完成。
+- 设备 ID 是证书 Ed25519 公钥的 SHA-256，由 `identity.FingerprintOfCert` 计算。普通 Connect 必须钉扎 `Endpoint.Hub`，拒绝零指纹。ConnectBootstrap 从通过上述校验的证书取得候选指纹 H，在同一条连接上发送 target=H、token 长度为零的 dial 请求。直连配对时内层 TLS 须钉扎 H；独立 Hub 的 H 只标识中转方，Operator 的身份确认由端点完成。
 - Hub 从 TLS 客户端证书取得设备 ID。路由头不含发送方 ID，无法通过修改头部冒充其他 wait 方。
-- TCP 建立、TLS 握手、头部和状态交换各连接共用最多 10 秒的外层 setup 窗口；调用方 context 可更早取消。成功后清除 setup deadline，context 的后续生命周期由调用方或 transport 管理。
+- TCP 建立、TLS 握手、头部和状态交换共用一个外层 setup 窗口（默认 10 秒）；调用方 context 可更早取消。成功后清除 setup deadline，context 的后续生命周期由调用方或 transport 管理。
 
-内嵌 listener 在创建 TLS worker 前非阻塞检查并发和速率。默认同时允许 16 个 setup，每秒接纳 8 个、突发 16 个，超限直接关闭 TCP。可通过 SetupLimits 配置并发、速率、突发和外层 setup 时限；路由完成或 setup 失败即释放并发槽。
+所有 listener 在创建 TLS worker 前非阻塞检查并发和速率，超限直接关闭 TCP。内嵌 Hub 默认同时允许 16 个 setup，每秒接纳 8 个、突发 16 个；独立 Hub 分别为 64、32 和 64。可通过 SetupLimits 配置并发、速率、突发和外层 setup 时限；路由完成或 setup 失败即释放并发槽。
 
 ## 请求与响应
 
@@ -38,27 +38,31 @@ TLS 握手后，客户端只发一个请求，整数采用网络字节序：
 
 ## 独立 Hub 配对
 
-wait 的注册键只能取自设备证书指纹，同一键最多一个注册。wait 收到 ok 后可长期空闲，但在 dial 配对前必须保持应用字节静默，否则被关闭。此约束只涉及发送时序，Hub 不检查字节内容。端到端 TLS 的 server 端首先等待读取，满足此约束。
+通过准入的 wait 以外层设备证书指纹为键登记，同一设备重复登记返回 `busy`。wait 收到 `ok` 后可以长期空闲，配对前发送应用字节会被关闭。普通 dial 按 target 查找 wait：没有登记返回 `unknown-peer`，已被占用返回 `busy`，不符合 wait 指定的对端指纹返回 `unauthorized`。拒绝均保留原登记与正在进行的会话。
 
-dial 原子占有目标 wait，随后收到 ok。之后双方直接传递裸字节，没有二次消息或长度帧。wait 的 ok 只表示注册，不表示已有 dial，等待方从首批字节进入内层握手。wait 端不会从 Hub 得知 dial 的指纹，由注入的内层 Wrap 验证身份。
-
-一个 wait 同时只接受一个 dial；第二个 dial 返回 busy，不排队、不抢占。配对中的任一方向 EOF/错误导致两侧关闭，取消服务也会关闭全部连接。Hub 不保留 TCP 半关闭语义，也不复用已用过的 wait 流；会话结束后等待方必须重新注册。
-
-Hub 用同一把锁决定注册和配对，wait 的 socket 只有一个读取者，配对后经有界管道传递到 dial；反向直接拷贝。每条配对的拷贝协程在返回前被回收。不存在按流量增长的等待缓冲区。
+配对成功时 Hub 在锁内占有 wait，并登记 dial 方的 Grant。解锁后才发送状态字节；任一侧写 `ok` 失败会清理登记并关闭相关连接。wait 的 `ok` 只表示注册成功，dial 的 `ok` 表示已配对。dial 收到配对成功状态后，须在一个新的 SetupLimits.Timeout 窗口（默认 10 秒）内发出至少一个字节，否则 Hub 关闭两端并释放 wait。Hub 一读到首字节即清除读期限，此后双方可以长期空闲。转发保留全部原始字节，内层握手负责验证实际对端。任一方向 EOF、出错或服务退出都会关闭两侧并回收转发协程；下次会话需重新注册 wait，同一张有效的设备票可以再次使用。
 
 ## Embedded 交接
 
-启用 Embedded 且 `dial.target == Hub.Local.Fingerprint()` 时，连接不查 wait 表，直接交给 `Embedded.Accept`。它返回剥离路由头的连接和来自证书的设备指纹。Hub 仍拥有服务关闭时的强制关闭权；调用方须在拒绝、握手失败、会话终止时关闭返回的连接。
+启用 Embedded 时，target 为本 Hub 指纹的 dial 直接占有本地交接槽。无策略时只接受这种自拨，忽略其 token；其余 wait 和 dial 一律返回 `unauthorized`。显式配置策略时，自拨同样经过准入复查。
 
-Embedded 使用一个活动槽，reserve、publish 和领取均在同一把锁下完成。过期连接的晚到 publish 不能覆盖新占位。未领取的连接最多占用 10 秒；领取后由 transport 负责内层 setup 期限和会话生命周期。服务停止立即关闭包括未领取连接在内的所有 socket。
+交接槽一次容纳一条连接，已占用返回 `busy`。`Embedded.Accept` 返回经过外层认证的设备指纹和已剥离路由头的连接。未领取的交接在 setup 时限后释放；过期连接的迟到发布无法覆盖新占位。领取方负责关闭连接，服务退出也会关闭所有交接连接。
 
-`Authorize` 应用于所有请求。`AuthorizeToken` 可为独立 Hub 校验 token；内嵌 self-dial 忽略 token，但仍执行 `Authorize`。两个回调为 nil 时不限制身份。回调可能并发执行，应快速返回，不能等待网络或服务关闭事件。
+## 配对入口
+
+独立 Hub 收到 target 为本 Hub 指纹的 dial 时，token 必须为空，外层设备须通过策略检查。Hub 在路由锁内读取当前策略指定的 `pairing_operator`。未配置时返回 `unauthorized`；已配置但没有对应 wait 时返回 `unknown-peer`；wait 已配对时返回 `busy`。空闲 wait 的 Grant 必须带开放窗口，且此刻不能晚于 `pair_until + skew`，否则返回 `unauthorized`。通过后按普通配对转发。窗口只在配对入口拨入时检查。
+
+## 准入策略
+
+独立 Hub 启动必须配置 Policy。Hub 将外层设备指纹、路由请求和当前时间交给策略快照的 `Admit`，在路由锁外完成验票。`Grant.Ref` 由策略解释；`Expires` 是含时钟偏差的最后准入时刻，零值表示无票据期限；`PairingUntil` 是含偏差的窗口截止时刻，零值表示窗口关闭。两项截止时刻均包含边界。
+
+Hub 在同一把路由锁内用**当前策略**的 `Valid` 复核撤销条件，重读时间检查本次请求的准入期限，再登记 wait 或配对。路由表同时保存双方的 Grant，作为撤销索引。`SetPolicy` 在锁内替换策略，关闭失效的空闲 wait，以及任一方失效的整条转发。重载只检查撤销条件，票据到期不会顺带断开空闲 wait 或已建立的转发。
 
 ## transport 生命周期与接线
 
 `hubtransport.Register(wrap)` 在应用启动时注册 `"hub"`，只调用一次；显式注入解决基础层 `Config.Options` 只能传字符串、不能传函数的问题。注册表工厂接受 `listen`，较复杂配置直接调用 `New(Options)`。
 
-- `Options.Endpoints` 是 Acceptor 的独立 Hub wait 候选；`Options.Token` 是这些 Hub 的可选鉴权材料。候选和 token 在 New 时拷贝。
+- `Options.Endpoints` 是 Acceptor 的独立 Hub wait 候选，在 New 时拷贝。每次注册前调用 `Options.WaitToken(ctx, hub)` 现签 token（nil 时发送空 token），Connector 对每个候选使用该端点自己的 `Endpoint.Ticket` 作为 dial token。`Options.OnRegister(hub, token, err)` 在每次注册尝试结束后异步调用，不持有连接器的锁，调用之间不保证顺序，Close 之后也可能到达，因此必须快速返回。`Refresh` 作废尚未收到任何字节的空闲注册，让调用方换一张票据重新注册。`DialBootstrap` 返回外层候选指纹 H，内层 Expect 为零，由调用方按内层实际对端是否等于 H 决定配对能力。
 - `Options.Listen` 创建并拥有内嵌 Hub listener；`Options.Embedded` 可从外部服务器接收连接。两者同时提供时使用同一个 Embedded。提供 Embedded 时 Acceptor 使用它，不同时注册 Endpoints。
 - Connector 并发尝试 PeerInfo 的所有 hub 候选；完整 Wrap 首个成功者获胜。返回前取消并回收其他候选，关闭其连接和已生成的 Session。全部失败时用 `errors.Join` 保留可识别的底层原因。
 - 内嵌路径以 `Endpoint.Hub == PeerInfo.ID` 识别，Path 为 direct；其他路径为 relay 且 Via 为 Hub 地址。外层钉扎与内层期望身份分别校验，不能用路径分类代替认证。

@@ -179,14 +179,14 @@ func TestPairFile(t *testing.T) {
 		}
 		return path
 	}
-	direct, err := readPairFile(write("ok", "10.0.5.107:47000 0482 7193\n"))
-	if err != nil || direct.Address != "10.0.5.107:47000" || direct.Code != "04827193" {
+	direct, err := readPairFile(write("ok", "192.0.2.107:47000 0482 7193\n"))
+	if err != nil || direct.Address != "192.0.2.107:47000" || direct.Code != "04827193" {
 		t.Fatalf("direct pair = %+v, %v", direct, err)
 	}
-	if _, err := readPairFile(write("oversized", "10.0.5.107:47000 04827193"+strings.Repeat(" ", 4096))); err == nil || err.Error() != "--pair-file exceeds 4 KiB" {
+	if _, err := readPairFile(write("oversized", "192.0.2.107:47000 04827193"+strings.Repeat(" ", 4096))); err == nil || err.Error() != "--pair-file exceeds 4 KiB" {
 		t.Fatalf("oversized pair file: %v", err)
 	}
-	for name, content := range map[string]string{"code-only": "0482 7193", "bad-code": "10.0.5.107:47000 0482719", "bad-host": "bad_host:47000 04827193"} {
+	for name, content := range map[string]string{"code-only": "0482 7193", "bad-code": "192.0.2.107:47000 0482719", "bad-host": "bad_host:47000 04827193"} {
 		t.Run(name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			err := run(t.Context(), []string{"client", "--state-dir", t.TempDir(), "--pair-file", write(name, content)}, &stdout, &stderr)
@@ -199,7 +199,7 @@ func TestPairFile(t *testing.T) {
 		})
 	}
 	var stdout, stderr bytes.Buffer
-	if err := run(t.Context(), []string{"client", "--state-dir", t.TempDir(), "--pair-file", write("ok2", "10.0.5.107:47000 04827193"), "--peer", "x"}, &stdout, &stderr); err == nil {
+	if err := run(t.Context(), []string{"client", "--state-dir", t.TempDir(), "--pair-file", write("ok2", "192.0.2.107:47000 04827193"), "--peer", "x"}, &stdout, &stderr); err == nil {
 		t.Fatal("multiple pairing sources accepted")
 	}
 }

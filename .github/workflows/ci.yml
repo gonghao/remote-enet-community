@@ -33,6 +33,10 @@ jobs:
         run: |
           python3 -B -m unittest discover -s tools -p 'test_*.py'
           sh -n tools/build-macos-client.sh
+      - name: Scan for private markers
+        env:
+          REPO_GUARD_RULES_INLINE: ${{ secrets.REPO_GUARD_RULES_INLINE }}
+        run: python3 -B tools/repo-guard.py
 
   race:
     runs-on: ubuntu-latest
@@ -79,6 +83,7 @@ jobs:
           go build -tags mygo_nowebview -ldflags "$desktop_ldflags" -o build/renet-client-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./cmd/renet-client
           go build -tags mygo_nowebview -ldflags "$desktop_ldflags" -o build/renet-operator-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./cmd/renet-operator
           go build -trimpath -o build/renet-labprobe-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./cmd/renet-labprobe
+          go build -trimpath -o build/renet-hub-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./cmd/renet-hub
       - name: Verify macOS packaging without publishing binaries
         if: matrix.goos == 'darwin'
         shell: bash

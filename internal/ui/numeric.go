@@ -43,17 +43,29 @@ func (v *View) numericCodeControls(c *ui.Context) {
 	idle := v.numericAction == 0
 	canIssue := idle && v.state.Running && !v.state.Stopping && !v.stopping &&
 		v.state.Runtime.Phase == app.PhaseListening && status.Address != "" && !status.Committing
-	v.clearExpiredNumericCode()
-	ui.Row(c.Key("numeric-code-controls")).FillWidth().Gap(8).Children(func() {
-		if ui.Button(c.Key("issue-numeric-code"), v.tr("Generate numeric code")).Disabled(!canIssue || v.actions.IssueNumericCode == nil).Clicked() {
+
+	ui.Row(c.Key("numeric-code-status")).Height(pairingOutputHeight).AlignItems(ui.Center).Gap(12).Children(func() {
+		code, color := "---- ----", muted
+		if secret := v.numericDisplay.Code; secret != "" {
+			code, color = secret[:4]+" "+secret[4:], c.Theme().Text
+		}
+		ui.Text(c, code).Font("monospace").FontSize(16).TextColor(color).Shrink(0)
+		if current {
+			seconds := int(max(0, time.Until(status.ExpiresAt).Round(time.Second)) / time.Second)
+			ui.Text(c, v.tr("Expires in %s", fmt.Sprintf("%d:%02d", seconds/60, seconds%60))).Font("monospace").FontSize(11).TextColor(muted)
+			ui.Text(c, v.tr("Attempts left: %d", status.AttemptsLeft)).Font("monospace").FontSize(11).TextColor(muted)
+		}
+	})
+	ui.Row(c.Key("numeric-code-controls")).Gap(8).Children(func() {
+		if ui.Button(c.Key("issue-numeric-code"), v.tr("Generate numeric code")).Padding(4, 8).Height(32).Disabled(!canIssue || v.actions.IssueNumericCode == nil).Clicked() {
 			v.numericAction = ActionIssueNumericCode
 			v.actions.IssueNumericCode()
 		}
-		if ui.Button(c.Key("copy-numeric-code"), v.tr("Copy address and code")).Disabled(!idle || !current || v.actions.CopyNumericCode == nil).Clicked() {
+		if ui.Button(c.Key("copy-numeric-code"), v.tr("Copy address and code")).Padding(4, 8).Height(32).Disabled(!idle || !current || v.actions.CopyNumericCode == nil).Clicked() {
 			v.numericAction = ActionCopyNumericCode
 			v.actions.CopyNumericCode(status.Generation)
 		}
-		if ui.Button(c.Key("revoke-numeric-code"), v.tr("Revoke code")).Disabled(!idle || !current || v.actions.RevokeNumericCode == nil).Clicked() {
+		if ui.Button(c.Key("revoke-numeric-code"), v.tr("Revoke code")).Padding(4, 8).Height(32).Disabled(!idle || !current || v.actions.RevokeNumericCode == nil).Clicked() {
 			v.numericAction = ActionRevokeNumericCode
 			v.actions.RevokeNumericCode(status.Generation)
 		}
@@ -63,18 +75,11 @@ func (v *View) numericCodeControls(c *ui.Context) {
 		ui.Text(c, v.tr("Completing pairing")).FontSize(11).TextColor(muted).Role(ui.RoleStatus)
 	case status.Redeemed:
 		ui.Text(c, v.tr("Code redeemed")).FontSize(11).TextColor(muted).Role(ui.RoleStatus)
-	case current:
-		ui.Row(c.Key("numeric-code-status")).FillWidth().AlignItems(ui.Center).Gap(12).Children(func() {
-			if code := v.numericDisplay.Code; code != "" {
-				ui.Text(c, code[:4]+" "+code[4:]).Font("monospace").FontSize(16).Shrink(0)
-			}
-			seconds := int(max(0, time.Until(status.ExpiresAt).Round(time.Second)) / time.Second)
-			ui.Text(c, v.tr("Expires in %s", fmt.Sprintf("%d:%02d", seconds/60, seconds%60))).Font("monospace").FontSize(11).TextColor(muted)
-			ui.Text(c, v.tr("Attempts left: %d", status.AttemptsLeft)).Font("monospace").FontSize(11).TextColor(muted)
-		})
-	case status.Generation != 0:
+	case !current && (status.Generation != 0 || status.Reason == cpace.Reason(app.HubPairingDisabled)):
 		message := "Code unavailable"
 		switch status.Reason {
+		case cpace.Reason(app.HubPairingDisabled):
+			message = "Hub numeric pairing is not enabled for this device"
 		case "", cpace.ReasonExpired:
 			message = "Code expired"
 		case cpace.ReasonBudgetExhausted:

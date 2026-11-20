@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"time"
 
 	"remote-enet/internal/identity"
@@ -41,6 +42,7 @@ func (s *Session) PairingOutcome() PairingOutcome { return s.outcome }
 const (
 	ReasonUnsupported cpace.Reason = "unsupported"
 	ReasonInterrupted cpace.Reason = "interrupted"
+	ReasonHubTicket   cpace.Reason = "hub_ticket"
 )
 
 func pairingFailure(r cpace.Reason) error { return fmt.Errorf("%w: %w", ErrPairing, r) }
@@ -56,12 +58,19 @@ func admissionReason(err error) (cpace.Reason, bool) {
 	return "", false
 }
 
+func (o Options) pairCapability() string {
+	if o.HubFP.IsZero() {
+		return proto.PairDirectCapability
+	}
+	return proto.PairHubCapability
+}
+
 func (s *Session) digital(ctx context.Context, local, peer [32]byte) error {
 	exp, ok := s.ts.(interface{ PairingExporter() [32]byte })
 	if !ok || s.opts.LocalFP == (identity.Fingerprint{}) || s.Peer() == (identity.Fingerprint{}) {
 		return pairingFailure(ReasonInterrupted)
 	}
-	b := cpace.Binding{Exporter: exp.PairingExporter(), ClientFP: s.opts.LocalFP, OperatorFP: s.Peer(), HelloClientHash: local, HelloOperatorHash: peer}
+	b := cpace.Binding{Capability: s.opts.pairCapability(), HubFP: s.opts.HubFP, Exporter: exp.PairingExporter(), ClientFP: s.opts.LocalFP, OperatorFP: s.Peer(), HelloClientHash: local, HelloOperatorHash: peer}
 	if s.opts.Role == RoleClient {
 		return s.digitalClient(ctx, b)
 	}
@@ -174,6 +183,9 @@ func (s *Session) digitalClient(ctx context.Context, b cpace.Binding) error {
 	if decision.Accepted && decision.Reason == "accepted" {
 		return nil
 	}
+	if !decision.Accepted && decision.Reason == string(ReasonHubTicket) && slices.Contains(s.NegotiatedCapabilities, proto.HubTicketCapability) {
+		return pairingFailure(ReasonHubTicket)
+	}
 	if !decision.Accepted && decision.Reason == string(cpace.ReasonStoreFailed) {
 		return pairingFailure(cpace.ReasonStoreFailed)
 	}
@@ -220,6 +232,9 @@ func (s *Session) digitalOperator(ctx context.Context, b cpace.Binding) error {
 	}
 	if err = s.confirmSAS(attempt.Context(), sas); err != nil {
 		return err
+	}
+	if err := s.prepareHubTicket(); err != nil {
+		return s.rejectPair(ReasonHubTicket)
 	}
 	// Commit rechecks the generation and may cancel the attempt context itself.
 	stop()

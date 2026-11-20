@@ -145,6 +145,7 @@ Session 实现要求：`OpenStream/AcceptStream` 尊重 ctx；`Stream.CloseWrite
 ```go
 type Options struct {
     Local *identity.Local
+    // R3 已删除 Authorize / AuthorizeToken，改为 Options.Policy（见下文 R3 节）。
     // Authorize 决定哪些设备可以 wait / dial；nil = 全部允许（自用内嵌模式）。
     Authorize func(dev identity.Fingerprint, role Role, target identity.Fingerprint) bool
     // 可选的独立 Hub 凭证校验；内嵌 self-dial 不校验 Token。
@@ -174,7 +175,7 @@ type Options struct {
     // Embedded 非 nil 时 Acceptor 从它取连接；Listen 非空时 Acceptor 还会自己起一个内嵌 hub.Server 监听该地址。
     Embedded *hub.Embedded
     Listen   string
-    // 独立 Hub：Acceptor 主动注册 wait；Token 为 Hub 凭证，与 PairToken 不同。
+    // 独立 Hub：Acceptor 主动注册 wait。R3 已删除静态 Token，改为 WaitToken / OnRegister（见下文 R3 节）。
     Endpoints []transport.Endpoint
     Token     []byte
 }
@@ -296,11 +297,152 @@ CPace-ristretto255-SHA512，固定草案 -21，套件标识 `CPACE-RISTR255-SHA5
 | `internal/identity` | `ErrFingerprintMismatch`，由 `hub`、`secure` 包装返回 |
 | `internal/hub` | `ConnectBootstrap(ctx, addr, local) (net.Conn, identity.Fingerprint, error)`：在同一条外层连接上读取 H 并自拨；`Connect` 仍拒绝零指纹。`SetupLimits` 限制未认证 setup 的并发与速率 |
 | `internal/secure` | 内层握手后导出 `EXPORTER-renet-pake-sid-v1`，session 提供 `PairingExporter() [32]byte` |
-| `internal/transport/hub` | `New` 返回 `*Connector`，新增 `DialDirectPair(ctx, addr)`；包装后的 session 保留 `PairingExporter` |
+| `internal/transport/hub` | `New` 返回 `*Connector`，新增 `DialDirectPair(ctx, addr)`（R3 已由 `DialBootstrap` 取代并删除）；包装后的 session 保留 `PairingExporter` |
 | `internal/proto` | 11 PakeCommit、12 PakeShareB、13 PakeShareA、14 PakeConfirmB、15 PakeConfirmA、16 PairDecision，只能用 `ReadPair` 严格解码；Hello 能力 `pair-direct/1` |
 | `internal/session` | `Options.DigitalCode` / `DigitalManager`（`DigitalResponder`）/ `LocalFP` / `Remember` / `ConfirmSAS`（nil 自动通过）；`(*Session).PairingOutcome()` 区分 `Legacy` 与 `DigitalPaired`。Operator 确认并落盘后发 16 accepted，Client 确认并收到该决定后才报告成功 |
 | `internal/invite` | `ParseInput` 区分 `Raw` / `Direct` / `Center`；`ParseAddress`；错误为固定文案，不含输入 |
 | `internal/app` | `ClientConfig.DirectPair`、`ClientHooks.OnPaired`、`OperatorConfig.ShareAddress`；`Runtime.IssueNumericCode` / `NumericCodeStatus` / `NumericCodeDisplay` / `RevokeNumericCode`；`PairingErrorKind` |
+
+---
+
+## R3. 自建 Hub 与中心地址配置（2026-11-20 冻结）
+
+设计、票据字段、Hub 校验步骤与审查处理见 [SELFHOST](SELFHOST.md)；中心模式的相关条文见 [CENTER-CONTRACT §8.2、§10.7、§16、§17](CENTER-CONTRACT.md#18-修订记录)。以下签名取自实现，以代码为准。R3 删除的接口：`hub.Options.Authorize` / `AuthorizeToken`、`transport/hub.Options.Token`、`(*Connector).DialDirectPair`；不保留兼容层。
+
+### `internal/ticket`（新增，自建票据 v = 2）
+
+```go
+const ( WaitTTL = 10 * time.Minute; DialTTL = 30 * 24 * time.Hour )
+type Kid [8]byte                                   // SHA-256(公钥) 的前 8 字节
+func KidOf(pub ed25519.PublicKey) Kid
+type Claims struct {
+    Device, Peer, Hub                       identity.Fingerprint
+    Role                                    uint8     // 1 = dial，2 = wait
+    IssuedAt, NotBefore, Expires, PairUntil time.Time // 零值的 Device / Peer / PairUntil 在签名时省略
+    JTI                                     [16]byte
+    Bearer                                  bool
+}
+func Sign(priv ed25519.PrivateKey, c Claims) ([]byte, error)   // 先按字段表校验，秒级精度
+func Verify(raw []byte, key func(Kid) (ed25519.PublicKey, bool)) (Kid, Claims, error) // A2–A5；验签通过前不解释 payload
+func Inspect(raw []byte) (Kid, Claims, error)                  // 不验签，只供提示与运维展示
+func CheckTime(c Claims, now time.Time, skew, maxTTL, bootstrapMaxTTL, pairingWindowMax int64) error // A10
+type Issuer struct{ ... }                                       // 签发密钥，与设备身份密钥分开
+func LoadOrCreateIssuer(path string) (*Issuer, error)          // PKCS#8 PEM；硬链接独占发布，不支持时回退 O_EXCL；非 Windows 检查权限位
+func (i *Issuer) PublicKey() ed25519.PublicKey
+func (i *Issuer) Kid() Kid
+func (i *Issuer) Wait(now time.Time, dev, hub identity.Fingerprint, pairUntil time.Time) ([]byte, error) // pairUntil 为零则不带窗口
+func (i *Issuer) Dial(now time.Time, client, operator, hub identity.Fingerprint) ([]byte, error)
+func (i *Issuer) Bootstrap(now, expires time.Time, operator, hub identity.Fingerprint) ([]byte, [16]byte, error) // 返回不记名票据与 jti
+```
+
+票据向量由 `internal/ticket/testdata/gen/generate.py` 独立生成。
+
+### `internal/hub`（改动）
+
+```go
+type Request struct { Role Role; Target identity.Fingerprint; Token []byte }
+type Grant struct { Ref any; Expires, PairingUntil time.Time } // 含时钟偏差的含边界截止时刻；零值：无期限 / 窗口关闭
+type Policy interface {
+    Admit(dev identity.Fingerprint, req Request, now time.Time) (Grant, error) // 锁外，A 组检查；不做外部 I/O，错误可安全写日志
+    Valid(g Grant, dev identity.Fingerprint) bool                              // 锁内，只判撤销条件，不看时间
+    PairingOperator() identity.Fingerprint                                     // 零值表示配对入口关闭
+}
+type Options struct {
+    Local       *identity.Local
+    Policy      Policy
+    Now         func() time.Time // 只控制 Grant 期限，不影响 socket deadline
+    Embedded    *Embedded
+    Logger      *slog.Logger
+    SetupLimits SetupLimits      // 内嵌与独立 Hub 都适用
+}
+func (s *Server) SetPolicy(p Policy) (closedWaits, closedPairs int) // 锁内替换并关闭失效路由；nil 撤销全部中继
+```
+
+无 Policy 时：有 Embedded 的 Hub 只接受内嵌自拨，其余 `unauthorized`；没有 Embedded 的 Hub，`Serve` 返回错误。独立 Hub 上 target 为本机指纹的 dial 走配对入口，配对后须在 `SetupLimits.Timeout` 内发出首字节。外层协议格式与状态码不变，详见 [PROTOCOL](../internal/hub/PROTOCOL.md)。
+
+### `internal/hubauth`（新增）
+
+```go
+type Config struct { Version int; Mode string; IdentityDir, Listen string; Issuers []Issuer; PairingOperator string
+    TicketMaxTTLS, BootstrapMaxTTLS, PairingWindowMaxS, ClockSkewS int64; SetupLimits SetupLimits; Deny Deny } // JSON 键见 SELFHOST 4.1
+func Load(path string) (Config, error)            // 严格解码并校验；缺省值已应用
+func (c Config) Validate() error
+func (c Config) ReloadCompatible(old Config) error // identity_dir、listen、mode、setup_limits 变化需重启
+func NewPolicy(cfg Config, hubFP identity.Fingerprint) (*Policy, error) // 实现 hub.Policy，不可变快照
+func Explain(cfg Config, hubFP identity.Fingerprint, raw []byte, dev identity.Fingerprint, now time.Time) error // 离线执行 A2–A7、A9–A11
+```
+
+### `cmd/renet-hub`（新增）
+
+`renet-hub init|fingerprint --identity-dir DIR`；`check|serve --config FILE`（`serve` 另有 `--debug`）；`ticket inspect --config FILE --ticket-file FILE [--device FP] [--hub-fp FP]`。Unix 上 SIGHUP 重载，信号接线在带构建约束的文件里。
+
+### `internal/transport`、`internal/transport/hub`（改动）
+
+```go
+// transport
+type Endpoint struct { Kind, Addr string; Hub identity.Fingerprint; Ticket string } // Ticket 是不透明票据字节，string 保持可比较
+type PathInfo struct { Kind PathKind; LocalAddr, RemoteAddr, Via string; Hub identity.Fingerprint } // Hub = 外层钉住的指纹
+
+// transport/hub
+type Options struct {
+    Local *identity.Local; Wrap Wrap; Embedded *router.Embedded; Listen string; SetupLimits router.SetupLimits
+    Endpoints []transport.Endpoint
+    WaitToken  func(ctx context.Context, hub identity.Fingerprint) ([]byte, error)    // 每次注册前现签；nil 发送空 token
+    OnRegister func(hub identity.Fingerprint, token []byte, err error)                // 注册尝试结束后异步回调，token 为副本（签发失败为 nil）
+}
+func (a *Connector) Refresh()                                                          // 作废尚未收到任何字节的空闲注册（含签票与重试中的），再重新注册
+func (a *Connector) DialBootstrap(ctx context.Context, addr string) (transport.Session, identity.Fingerprint, error) // 返回外层 H；内层 Expect 为零
+```
+
+`OnRegister` 的调用相互之间不保证顺序，可能在 Close 之后到达，必须快速返回。
+
+### `internal/proto`、`internal/pairing/cpace`、`internal/session`（改动）
+
+| 包 | 新增 |
+|---|---|
+| `internal/proto` | `PairHubCapability = "pair-hub/1"`、`HubTicketCapability = "hub-ticket/1"`；`TypeHubTicket MsgType = 17`；`HubTicket{Ticket []byte}`（键 1，1–1024 字节）；`ReadHubTicket(r io.Reader) (HubTicket, error)`，信封上限 1100 字节，只接受规范编码；`ReadPair` 仍只接受 11 至 16 |
+| `internal/pairing/cpace` | `Binding` 增加 `Capability string` 与 `HubFP [32]byte`：`pair-direct/1` 时 `HubFP` 为零，`pair-hub/1` 时非零，CI 末尾追加 `hub_fp` |
+| `internal/session` | `Options.HubFP`（非零时数字配对只用 `pair-hub/1`）、`Options.EndpointHub`（Client 期望的端点 Hub 指纹）、`Options.RequireHubTicket`、`Options.GrantTicket func(client identity.Fingerprint) ([]byte, error)`（Operator；非 nil 时声明 `hub-ticket/1`，在提交配对前预签）、`Options.Now`；`(*Session).HubTicket() []byte`；`ReasonHubTicket cpace.Reason = "hub_ticket"`。Client 总是声明 `hub-ticket/1` |
+
+### `internal/trust`、`internal/invite`、`internal/settings`、`internal/identity`
+
+| 包 | 新增 |
+|---|---|
+| `internal/trust` | 文件版本 2：端点记录可带 `ticket`；读取接受版本 1 与 2，版本 1 带 `ticket` 判为损坏；有任一端点带票据时写版本 2，否则写版本 1。`SavePeer` / `Peer` / `ReadPeer` 透传 `Endpoint.Ticket`。`(*Store).UpdateEndpointTicket(ctx context.Context, peer, hub identity.Fingerprint, addr, ticket string) error`：按 peer、Hub 指纹与地址唯一定位端点，原子替换票据 |
+| `internal/invite` | `Invite.Version` 可为 2：每个端点的 `hub` 之后附 `ticket length:u16 + ticket`（0–1024）；有票据必须编码为版本 2，无票据为版本 1（字节不变）；`Decode` 接受 1 与 2；旧解码器拒绝版本 2 |
+| `internal/settings` | `Version = 2`；`Operator.Mode`（`"direct"` / `"hub"`）、`Operator.Hub{Addr, FP, Share string}`、顶层 `Center{ID string; API []string}`；`Load` 将版本 1 在内存中升级（缺省中心取构建期 `-ldflags -X remote-enet/internal/settings.defaultCenterJSON=...`）；`Save` 总是写版本 2；版本 1 升级时三个 Hub 字段均为空字符串。直连模式使用 `Endpoint`，允许保留任意已填写且合法的 Hub 字段；Hub 模式要求 `Addr`、`FP`，分享地址取 `Share`，为空则用 `Addr`；`Config.Equal` |
+| `internal/identity` | `LoadExisting(dir string) (*Local, error)`：只读，私钥必须存在，证书缺失或不符时在内存中重建、不落盘；`Create(dir string) (*Local, error)`：仅当私钥路径未被占用时创建 |
+
+### `internal/center`（新增，只做无需签名的 `GET /v1/meta`）
+
+```go
+type Meta struct { CenterID string; APIVersions []string; ServerTime time.Time; MinAppVersion MinAppVersion }
+type MinAppVersion struct { Operator, Client, Hub string }
+func FetchMeta(ctx context.Context, client *http.Client, entry, role, appVersion string) (Meta, error)
+type Status string // Verified | Unreachable | IDMismatch
+type EntryResult struct { Entry string; Status Status }
+func Check(ctx context.Context, c settings.Center, role, appVersion string) []EntryResult // 逐入口各自 10 秒
+type HTTPError struct { StatusCode int; Code string }
+```
+
+请求携带 `Renet-Client: <role>/<app_version>`（非 SemVer 版本发送 `0.0.0-dev`），拒绝重定向，要求校验证书的 TLS 且不带凭据，响应体上限 16 KiB。
+
+### `internal/app`、`internal/desktop`、`cmd/renetd`
+
+```go
+type HubConfig struct { Addr string; FP identity.Fingerprint }
+// OperatorConfig.Hub *HubConfig（非 nil 时 Listen 必须为空）；InviteConfig.Hub *HubConfig
+func IssuerEntry(ctx context.Context, stateDir, name string) (string, error) // 一行可粘贴进 Hub 配置 issuers 的 JSON
+// Snapshot.HubWaiting bool：独立 Hub 已确认当前空闲 wait
+const ( HubIssuer PairingErrorKind = "hub_issuer"; HubIdentityMismatch = "hub_identity_mismatch"; HubWaitUnauthorized = "hub_wait_unauthorized"
+        HubPairingDisabled = "hub_pairing_disabled"; HubAuthorizationExpired = "hub_authorization_expired_or_revoked"
+        HubUnreachable = "hub_unreachable"; OperatorOffline = "operator_offline" )
+func (c *Controller) SetCenter(ctx context.Context, center settings.Center) error // 只能在空闲时；Save 不能修改中心
+func (c *Controller) IssuerEntry(ctx context.Context) (string, error)
+func (c *Controller) CheckCenter(ctx context.Context) (settings.Center, []center.EntryResult, error)
+```
+
+`app.ClientConfig` 的配对来源仍为 `Invite` / `InviteFile` / `DirectPair` / `Peer` 之一；Client 经 `DialBootstrap` 配对，已保存配对在拨号前按 `Endpoint.Ticket` 的 `exp` 过滤端点，续期按 `PathInfo.Hub` + `PathInfo.Via` 调用 `UpdateEndpointTicket`。`renetd`：`operator --hub HOST:PORT --hub-fp FP [--share-address HOST:PORT]`（与 `--listen` 互斥）、`issuer --state-dir DIR [--name NAME]`、`invite --hub HOST:PORT --hub-fp FP [--ttl D]`。
 
 ---
 

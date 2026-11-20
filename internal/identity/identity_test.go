@@ -3,6 +3,9 @@ package identity
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -66,5 +69,30 @@ func TestCertUsableForMutualTLS(t *testing.T) {
 		if !found {
 			t.Fatalf("missing ext key usage %v", u)
 		}
+	}
+}
+
+func TestReadOnlyIdentity(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := LoadExisting(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing key: %v", err)
+	}
+	local, err := Create(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Create(dir); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("duplicate identity: %v", err)
+	}
+	path := filepath.Join(dir, certFile)
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadExisting(dir)
+	if err != nil || loaded.Fingerprint() != local.Fingerprint() {
+		t.Fatalf("read-only repair: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("certificate created: %v", err)
 	}
 }

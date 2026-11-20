@@ -17,16 +17,21 @@ const innerSetupTimeout = 10 * time.Second
 // would cancel an otherwise healthy session. Waiters arm on first traffic.
 type setupConn struct {
 	net.Conn
-	mu       sync.Mutex
-	timer    *time.Timer
-	finished bool
-	started  bool
-	cancel   context.CancelCauseFunc
+	mu          sync.Mutex
+	timer       *time.Timer
+	finished    bool
+	started     bool
+	onFirstRead func()
+	cancel      context.CancelCauseFunc
 }
 
-func (c *setupConn) arm() {
+func (c *setupConn) arm(received bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if received && c.onFirstRead != nil {
+		c.onFirstRead()
+		c.onFirstRead = nil
+	}
 	if c.started || c.finished {
 		return
 	}
@@ -45,13 +50,13 @@ func (c *setupConn) arm() {
 func (c *setupConn) Read(p []byte) (int, error) {
 	n, err := c.Conn.Read(p)
 	if n > 0 {
-		c.arm()
+		c.arm(true)
 	}
 	return n, err
 }
 
 func (c *setupConn) Write(p []byte) (int, error) {
-	c.arm()
+	c.arm(false)
 	return c.Conn.Write(p)
 }
 
@@ -65,11 +70,11 @@ func (c *setupConn) finish() error {
 	return c.Conn.SetDeadline(time.Time{})
 }
 
-func (a *Connector) wrap(ctx context.Context, conn net.Conn, isClient bool, expect identity.Fingerprint, p transport.PathInfo, idleWait bool) (transport.Session, error) {
+func (a *Connector) wrap(ctx context.Context, conn net.Conn, isClient bool, expect identity.Fingerprint, p transport.PathInfo, onFirstRead func()) (transport.Session, error) {
 	wrapCtx, cancel := context.WithCancelCause(ctx)
-	c := &setupConn{Conn: conn, cancel: cancel}
-	if !idleWait {
-		c.arm()
+	c := &setupConn{Conn: conn, cancel: cancel, onFirstRead: onFirstRead}
+	if onFirstRead == nil {
+		c.arm(false)
 	}
 	stop := context.AfterFunc(wrapCtx, func() { _ = conn.Close() })
 	session, err := a.o.Wrap(wrapCtx, c, isClient, expect, p)
@@ -89,7 +94,10 @@ func (a *Connector) wrap(ctx context.Context, conn net.Conn, isClient bool, expe
 		}
 		return nil, fmt.Errorf("transport/hub: wrap: %w", err)
 	}
-	return ownSession(wrapCtx, session, func() { cancel(context.Canceled); _ = conn.Close() }), nil
+	if isClient && expect.IsZero() && session.Peer() == p.Hub {
+		p.Kind, p.Via = transport.PathDirect, ""
+	}
+	return ownSessionOnPath(wrapCtx, session, p, func() { cancel(context.Canceled); _ = conn.Close() }), nil
 }
 
 // ownedSession joins lifetime cleanup on Close and Done, including spontaneous
@@ -97,10 +105,15 @@ func (a *Connector) wrap(ctx context.Context, conn net.Conn, isClient bool, expe
 type ownedSession struct {
 	transport.Session
 	done chan struct{}
+	path transport.PathInfo
 }
 
 func ownSession(ctx context.Context, session transport.Session, cleanup func()) transport.Session {
-	s := &ownedSession{Session: session, done: make(chan struct{})}
+	return ownSessionOnPath(ctx, session, session.Path(), cleanup)
+}
+
+func ownSessionOnPath(ctx context.Context, session transport.Session, p transport.PathInfo, cleanup func()) transport.Session {
+	s := &ownedSession{Session: session, done: make(chan struct{}), path: p}
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -122,6 +135,8 @@ type ownedPairingSession struct {
 }
 
 func (s *ownedPairingSession) PairingExporter() [32]byte { return s.exporter.PairingExporter() }
+
+func (s *ownedSession) Path() transport.PathInfo { return s.path }
 
 func (s *ownedSession) Done() <-chan struct{} { return s.done }
 

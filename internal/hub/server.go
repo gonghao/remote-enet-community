@@ -15,16 +15,32 @@ import (
 	"remote-enet/internal/identity"
 )
 
-// Options callbacks can run concurrently and must return promptly.
+// Grant carries immutable policy data across reloads. Expires is the inclusive
+// admission deadline (exp + skew); zero means no ticket deadline. PairingUntil
+// is inclusive and includes skew; zero keeps the pairing window closed.
+type Grant struct {
+	Ref                   any
+	Expires, PairingUntil time.Time
+}
+
+// Policy snapshots must support concurrent Admit calls without external I/O.
+// Errors returned by Admit must be safe to log (never include a raw ticket).
+// Valid runs under the routing lock, including on grants from older snapshots.
+// It checks revocation only, never time. The server checks Expires at commit.
+// PairingOperator returns zero when the bootstrap route is disabled.
+type Policy interface {
+	Admit(dev identity.Fingerprint, req Request, now time.Time) (Grant, error)
+	Valid(g Grant, dev identity.Fingerprint) bool
+	PairingOperator() identity.Fingerprint
+}
+
+// Options.Now controls grant deadlines only; socket deadlines use real time.
 type Options struct {
-	Local     *identity.Local
-	Authorize func(dev identity.Fingerprint, role Role, target identity.Fingerprint) bool
-	// AuthorizeToken optionally validates standalone-hub credentials. Embedded
-	// self-dials ignore Token. Authorize still applies to every request.
-	AuthorizeToken func(dev identity.Fingerprint, role Role, target identity.Fingerprint, token []byte) bool
-	Embedded       *Embedded
-	Logger         *slog.Logger
-	// SetupLimits applies only when Embedded is enabled.
+	Local       *identity.Local
+	Policy      Policy
+	Now         func() time.Time
+	Embedded    *Embedded
+	Logger      *slog.Logger
 	SetupLimits SetupLimits
 }
 
@@ -38,11 +54,16 @@ type Server struct {
 }
 
 type waiter struct {
-	conn   *connection
-	target identity.Fingerprint
-	reader *io.PipeReader
-	ready  chan struct{}
-	busy   bool // guarded by Server.mu, including the pre-pair read check
+	dev       identity.Fingerprint
+	conn      *connection
+	target    identity.Fingerprint
+	reader    *io.PipeReader
+	ready     chan struct{}
+	grant     Grant
+	writer    *io.PipeWriter
+	dial      *connection // guarded by Server.mu
+	dialDev   identity.Fingerprint
+	dialGrant Grant
 }
 
 // connection closes the socket directly: TLS close_notify must not stall shutdown.
@@ -98,7 +119,36 @@ func NewServer(o Options) *Server {
 	if o.Logger == nil {
 		o.Logger = slog.Default()
 	}
+	if o.Now == nil {
+		o.Now = time.Now
+	}
 	return &Server{o: o, waits: make(map[identity.Fingerprint]*waiter)}
+}
+
+// SetPolicy atomically replaces the policy and closes revoked routes. Counts
+// distinguish idle waits from pairs. A nil policy revokes every relay route.
+func (s *Server) SetPolicy(p Policy) (closedWaits, closedPairs int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.o.Policy = p
+	for dev, w := range s.waits {
+		if p != nil && p.Valid(w.grant, dev) && (w.dial == nil || p.Valid(w.dialGrant, w.dialDev)) {
+			continue
+		}
+		s.removeWaitLocked(w)
+		if w.dial == nil {
+			closedWaits++
+		} else {
+			closedPairs++
+		}
+	}
+	return
+}
+
+func (s *Server) policy() Policy {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.o.Policy
 }
 
 // Serve closes ln and joins all connection handlers before returning.
@@ -109,6 +159,9 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	defer ln.Close()
 	if s.o.Local == nil {
 		return errors.New("hub: local identity required")
+	}
+	if s.o.Embedded == nil && s.policy() == nil {
+		return errors.New("hub: standalone server requires a policy")
 	}
 	serveCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -133,12 +186,8 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 		connsMu.Unlock()
 		wg.Wait()
 	}()
-	var admission *setupAdmission
-	timeout := setupTimeout
-	if s.o.Embedded != nil {
-		admission = newSetupAdmission(s.o.SetupLimits)
-		timeout = admission.Timeout
-	}
+	admission := newSetupAdmission(s.o.SetupLimits, s.o.Embedded != nil)
+	timeout := admission.Timeout
 	for {
 		raw, err := ln.Accept()
 		if err != nil {
@@ -148,16 +197,12 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 			return fmt.Errorf("hub: accept: %w", err)
 		}
 		now := time.Now()
-		var release func()
-		if admission != nil {
-			if !admission.acquire(now) {
-				_ = raw.Close()
-				continue
-			}
-			release = admission.release
+		if !admission.acquire(now) {
+			_ = raw.Close()
+			continue
 		}
 		_ = raw.SetDeadline(now.Add(timeout))
-		conn := &connection{releaseSetup: release, Conn: tls.Server(raw, serverTLS(s.o.Local)), raw: raw, done: make(chan struct{})}
+		conn := &connection{releaseSetup: admission.release, Conn: tls.Server(raw, serverTLS(s.o.Local)), raw: raw, done: make(chan struct{})}
 		connsMu.Lock()
 		conns[conn] = struct{}{}
 		connsMu.Unlock()
@@ -191,73 +236,138 @@ func (s *Server) handle(ctx context.Context, conn *connection, timeout time.Dura
 	if err != nil {
 		return false
 	}
-	embedded := s.o.Embedded != nil && req.Role == RoleDial && req.Target == s.o.Local.Fingerprint()
-	if (s.o.Authorize != nil && !s.o.Authorize(dev, req.Role, req.Target)) ||
-		(!embedded && s.o.AuthorizeToken != nil && !s.o.AuthorizeToken(dev, req.Role, req.Target, req.Token)) {
+	selfDial := req.Role == RoleDial && req.Target == s.o.Local.Fingerprint()
+	embedded := selfDial && s.o.Embedded != nil
+	p := s.policy()
+	var grant Grant
+	if (p == nil && !embedded) || (selfDial && !embedded && len(req.Token) != 0) {
 		_ = writeAll(conn, []byte{statusUnauthorized})
 		return false
 	}
-	if embedded {
-		if !s.o.Embedded.reserve(conn, timeout) {
-			_ = writeAll(conn, []byte{statusBusy})
+	if p != nil {
+		grant, err = p.Admit(dev, req, s.o.Now())
+		if err != nil {
+			s.o.Logger.DebugContext(ctx, "Hub policy denied request", "device", dev.Short(), "error", err)
+			_ = writeAll(conn, []byte{statusUnauthorized})
 			return false
 		}
-		if err := writeAll(conn, []byte{statusOK}); err != nil {
-			return false
-		}
-		conn.finishSetup()
-		return s.o.Embedded.publish(conn, dev)
 	}
-	if req.Role == RoleWait {
-		s.wait(conn, dev, req.Target)
-	} else {
-		s.dial(conn, dev, req.Target)
+	wait, status := s.register(conn, dev, req, grant, p != nil, selfDial, timeout)
+	if wait != nil && req.Role == RoleDial {
+		select {
+		case <-wait.ready:
+		case <-wait.conn.done:
+			s.removeWait(wait)
+			return false
+		}
+	}
+	if err := writeAll(conn, []byte{status}); err != nil || status != statusOK {
+		if wait != nil {
+			s.removeWait(wait)
+		}
+		return false
+	}
+	conn.finishSetup()
+	switch {
+	case embedded:
+		return s.o.Embedded.publish(conn, dev)
+	case req.Role == RoleWait:
+		close(wait.ready)
+		s.wait(wait)
+	default:
+		s.dial(conn, wait, timeout)
 	}
 	return false
 }
 
-func (s *Server) wait(conn *connection, dev, target identity.Fingerprint) {
-	r, w := io.Pipe()
-	wait := &waiter{conn: conn, target: target, reader: r, ready: make(chan struct{})}
+// register commits the current policy check, slot reservation and both grants
+// together. A rejected dial never consumes the wait or its pairing window.
+func (s *Server) register(conn *connection, dev identity.Fingerprint, req Request, g Grant, admitted, selfDial bool, timeout time.Duration) (*waiter, byte) {
 	s.mu.Lock()
-	if _, exists := s.waits[dev]; exists {
-		s.mu.Unlock()
-		_ = r.Close()
-		_ = w.Close()
-		_ = writeAll(conn, []byte{statusBusy})
+	defer s.mu.Unlock()
+	p := s.o.Policy
+	if p != nil {
+		if !admitted || !p.Valid(g, dev) {
+			return nil, statusUnauthorized
+		}
+	} else if !selfDial || s.o.Embedded == nil {
+		return nil, statusUnauthorized
+	}
+	now := s.o.Now()
+	if !g.Expires.IsZero() && now.After(g.Expires) {
+		return nil, statusUnauthorized
+	}
+	if selfDial && s.o.Embedded != nil {
+		if !s.o.Embedded.reserve(conn, timeout) {
+			return nil, statusBusy
+		}
+		return nil, statusOK
+	}
+	if req.Role == RoleWait {
+		if s.waits[dev] != nil {
+			return nil, statusBusy
+		}
+		r, w := io.Pipe()
+		wait := &waiter{dev: dev, conn: conn, target: req.Target, grant: g, reader: r, writer: w, ready: make(chan struct{})}
+		s.waits[dev] = wait
+		return wait, statusOK
+	}
+	target := req.Target
+	if selfDial {
+		target = p.PairingOperator()
+		if target.IsZero() {
+			return nil, statusUnauthorized
+		}
+	}
+	wait := s.waits[target]
+	switch {
+	case wait == nil:
+		return nil, statusUnknownPeer
+	case wait.dial != nil:
+		return nil, statusBusy
+	case selfDial && (wait.grant.PairingUntil.IsZero() || now.After(wait.grant.PairingUntil)):
+		return nil, statusUnauthorized
+	case !wait.target.IsZero() && wait.target != dev:
+		return nil, statusUnauthorized
+	}
+	wait.dial, wait.dialDev, wait.dialGrant = conn, dev, g
+	return wait, statusOK
+}
+
+func (s *Server) removeWait(wait *waiter) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.removeWaitLocked(wait)
+}
+
+func (s *Server) removeWaitLocked(wait *waiter) {
+	if s.waits[wait.dev] != wait {
 		return
 	}
-	s.waits[dev] = wait
-	s.mu.Unlock()
-	defer func() {
-		_ = conn.Close()
-		_ = r.Close()
-		_ = w.Close()
-		s.mu.Lock()
-		delete(s.waits, dev)
-		s.mu.Unlock()
-	}()
-	err := writeAll(conn, []byte{statusOK})
-	conn.finishSetup()
-	// Dial can reserve immediately, but cannot write to the wait socket until
-	// its routing response is complete. Never hold the routing lock during I/O.
-	close(wait.ready)
-	if err != nil {
-		return
+	delete(s.waits, wait.dev)
+	_ = wait.conn.Close()
+	if wait.dial != nil {
+		_ = wait.dial.Close()
 	}
+	_ = wait.reader.Close()
+	_ = wait.writer.Close()
+}
+
+func (s *Server) wait(wait *waiter) {
+	defer s.removeWait(wait)
 	// Only this handler reads the wait socket. Before pairing, waiters must be
 	// silent; rejecting eager data avoids an unbounded pre-pair buffer.
 	buf := make([]byte, 32*1024)
 	for {
-		n, err := conn.Read(buf)
+		n, err := wait.conn.Read(buf)
 		if n > 0 {
 			s.mu.Lock()
-			paired := wait.busy
+			paired := wait.dial != nil
 			s.mu.Unlock()
 			if !paired {
 				return
 			}
-			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
+			if _, writeErr := wait.writer.Write(buf[:n]); writeErr != nil {
 				return
 			}
 		}
@@ -267,44 +377,24 @@ func (s *Server) wait(conn *connection, dev, target identity.Fingerprint) {
 	}
 }
 
-func (s *Server) dial(conn *connection, dev, target identity.Fingerprint) {
-	s.mu.Lock()
-	wait := s.waits[target]
-	status := statusOK
-	switch {
-	case wait == nil:
-		status = statusUnknownPeer
-	case wait.busy:
-		status = statusBusy
-	case !wait.target.IsZero() && wait.target != dev:
-		status = statusUnauthorized
-	default:
-		wait.busy = true
-	}
-	s.mu.Unlock()
-	if status != statusOK {
-		_ = writeAll(conn, []byte{status})
-		return
-	}
-	defer wait.conn.Close()
-	defer wait.reader.Close()
-	<-wait.ready
-	if err := writeAll(conn, []byte{statusOK}); err != nil {
-		return
-	}
-	conn.finishSetup()
+func (s *Server) dial(conn *connection, wait *waiter, timeout time.Duration) {
 	done := make(chan struct{})
 	go func() {
-		_, _ = io.Copy(wait.conn, conn)
-		_ = wait.conn.Close()
-		_ = wait.reader.Close()
-		_ = conn.Close()
+		// Only the first dial byte is timed. Clear the deadline before
+		// forwarding it so wait-side backpressure cannot expire the relay.
+		var first [1]byte
+		if err := conn.SetReadDeadline(time.Now().Add(timeout)); err == nil {
+			if _, err := io.ReadFull(conn, first[:]); err == nil && conn.SetReadDeadline(time.Time{}) == nil {
+				if err := writeAll(wait.conn, first[:]); err == nil {
+					_, _ = io.Copy(wait.conn, conn)
+				}
+			}
+		}
+		s.removeWait(wait)
 		close(done)
 	}()
 	_, _ = io.Copy(conn, wait.reader)
-	_ = conn.Close()
-	_ = wait.conn.Close()
-	_ = wait.reader.Close()
+	s.removeWait(wait)
 	<-done
 }
 

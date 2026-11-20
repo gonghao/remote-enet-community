@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -151,6 +152,10 @@ func endpoint(addr string) error {
 
 func wrap(id *identity.Local) hubtransport.Wrap {
 	return func(ctx context.Context, conn net.Conn, isClient bool, expect identity.Fingerprint, path transport.PathInfo) (transport.Session, error) {
-		return secure.WrapStream(ctx, conn, secure.Opts{Local: id, Expect: expect, IsClient: isClient, Path: path})
+		s, err := secure.WrapStream(ctx, conn, secure.Opts{Local: id, Expect: expect, IsClient: isClient, Path: path})
+		if isClient && path.Kind == transport.PathRelay && errors.Is(err, identity.ErrFingerprintMismatch) {
+			return nil, fmt.Errorf("%w: %w", PairingErrorKind("identity_mismatch"), err)
+		}
+		return s, err
 	}
 }

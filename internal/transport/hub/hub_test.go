@@ -7,7 +7,6 @@ import (
 	"net"
 	"runtime"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,6 +14,14 @@ import (
 	"remote-enet/internal/identity"
 	"remote-enet/internal/transport"
 )
+
+type relayPolicy struct{}
+
+func (relayPolicy) Admit(identity.Fingerprint, router.Request, time.Time) (router.Grant, error) {
+	return router.Grant{}, nil
+}
+func (relayPolicy) Valid(router.Grant, identity.Fingerprint) bool { return true }
+func (relayPolicy) PairingOperator() identity.Fingerprint         { return identity.Fingerprint{} }
 
 // stubWrap exchanges identities only for test assertions. It deliberately keeps
 // ctx for the full session lifetime, like secure.WrapStream.
@@ -102,33 +109,22 @@ func id(t *testing.T) *identity.Local {
 
 func startHub(t *testing.T, h *identity.Local, e *router.Embedded) transport.Endpoint {
 	t.Helper()
-	ep, _ := startCountedHub(t, h, e)
-	return ep
-}
-
-type countedListener struct {
-	net.Listener
-	count atomic.Int32
-}
-
-func (l *countedListener) Accept() (net.Conn, error) {
-	conn, err := l.Listener.Accept()
-	if err == nil {
-		l.count.Add(1)
+	options := router.Options{Local: h, Embedded: e}
+	if e == nil {
+		options.Policy = relayPolicy{}
 	}
-	return conn, err
+	return startTestHub(t, options)
 }
 
-func startCountedHub(t *testing.T, h *identity.Local, e *router.Embedded) (transport.Endpoint, *countedListener) {
+func startTestHub(t *testing.T, options router.Options) transport.Endpoint {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	counted := &countedListener{Listener: ln}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
-	go func() { done <- router.NewServer(router.Options{Local: h, Embedded: e}).Serve(ctx, counted) }()
+	go func() { done <- router.NewServer(options).Serve(ctx, ln) }()
 	t.Cleanup(func() {
 		cancel()
 		select {
@@ -140,7 +136,7 @@ func startCountedHub(t *testing.T, h *identity.Local, e *router.Embedded) (trans
 			t.Error("server handler leaked")
 		}
 	})
-	return transport.Endpoint{Kind: "hub", Addr: ln.Addr().String(), Hub: h.Fingerprint()}, counted
+	return transport.Endpoint{Kind: "hub", Addr: ln.Addr().String(), Hub: options.Local.Fingerprint()}
 }
 
 func build(t *testing.T, o Options) (transport.Connector, transport.Acceptor) {
@@ -417,7 +413,7 @@ func TestInnerSetupTimerAndLifetime(t *testing.T) {
 				context.AfterFunc(ctx, func() { _ = s.Close(ctx.Err()) })
 				return s, nil
 			}}}
-			s, err := adapter.wrap(t.Context(), a, true, identity.Fingerprint{1}, transport.PathInfo{}, false)
+			s, err := adapter.wrap(t.Context(), a, true, identity.Fingerprint{1}, transport.PathInfo{}, nil)
 			if !succeed {
 				if !errors.Is(err, context.DeadlineExceeded) {
 					t.Fatalf("setup timeout: %v", err)
@@ -461,7 +457,7 @@ func TestIdleWaitHasNoSetupDeadline(t *testing.T) {
 	}}}
 	done := make(chan error, 1)
 	go func() {
-		_, err := adapter.wrap(ctx, a, false, identity.Fingerprint{}, transport.PathInfo{}, true)
+		_, err := adapter.wrap(ctx, a, false, identity.Fingerprint{}, transport.PathInfo{}, func() {})
 		done <- err
 	}()
 	<-started
@@ -560,4 +556,86 @@ func TestNoGoroutineLeak(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
+}
+
+func TestEmbeddedListenerIsNotARelay(t *testing.T) {
+	h, a, b := id(t), id(t), id(t)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() {
+		done <- router.NewServer(embeddedServerOptions(h, router.NewEmbedded(), router.SetupLimits{})).Serve(ctx, ln)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+	addr := ln.Addr().String()
+	for name, c := range map[string]struct {
+		local *identity.Local
+		req   router.Request
+	}{
+		"wait":             {b, router.Request{Role: router.RoleWait}},
+		"targeted wait":    {b, router.Request{Role: router.RoleWait, Target: a.Fingerprint()}},
+		"third-party dial": {a, router.Request{Role: router.RoleDial, Target: b.Fingerprint()}},
+	} {
+		conn, err := router.Connect(t.Context(), addr, c.local, h.Fingerprint(), c.req)
+		if conn != nil {
+			_ = conn.Close()
+		}
+		if !errors.Is(err, router.ErrUnauthorized) {
+			t.Errorf("%s: err = %v, want unauthorized", name, err)
+		}
+	}
+	conn, err := router.Connect(t.Context(), addr, a, h.Fingerprint(), router.Request{Role: router.RoleDial, Target: h.Fingerprint()})
+	if err != nil {
+		t.Fatalf("self dial: %v", err)
+	}
+	_ = conn.Close()
+}
+
+func TestAcceptAfterSilentPair(t *testing.T) {
+	h, a, b := id(t), id(t), id(t)
+	ep := startTestHub(t, router.Options{Local: h, Policy: relayPolicy{}, SetupLimits: router.SetupLimits{Timeout: 150 * time.Millisecond}})
+	registered := make(chan error, 2)
+	_, acceptor := build(t, Options{Local: b, Endpoints: []transport.Endpoint{ep}, Wrap: stubWrap(b.Fingerprint()), OnRegister: func(_ identity.Fingerprint, _ []byte, err error) { registered <- err }})
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	register := func() <-chan acceptedResult {
+		pending := asyncAccept(t, ctx, acceptor)
+		select {
+		case err := <-registered:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		return pending
+	}
+	pending := register()
+	conn, err := router.Connect(ctx, ep.Addr, a, ep.Hub, router.Request{Role: router.RoleDial, Target: b.Fingerprint()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	select {
+	case result := <-pending:
+		if result.err == nil || ctx.Err() != nil {
+			t.Fatalf("silent pair: %v", result.err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	pending = register()
+	dialer, _ := build(t, Options{Local: a, Wrap: stubWrap(a.Fingerprint())})
+	s, err := dialer.Dial(ctx, transport.PeerInfo{ID: b.Fingerprint(), Endpoints: []transport.Endpoint{ep}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeSession(t, s)
+	transfer(t, s, receive(t, pending))
 }

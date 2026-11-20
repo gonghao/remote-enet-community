@@ -40,6 +40,8 @@ def signed(kind: str, target: str, timestamp: int = common.NOW) -> tuple[dict, d
     inputs = dict(key=key, center_id=center, kind=kind, principal=principal.hex(), method=method,
                   target=target, timestamp=timestamp, renet_client=client, nonce=nonce.hex(),
                   idempotency_key=idem, body=body.hex())
+    if not device:
+        inputs["public_key"] = public.hex()
     return inputs, dict(result="accept", signing_input=message.hex(), signature=sig.hex(), headers=headers)
 
 
@@ -72,7 +74,10 @@ def generate(check: bool) -> list[Path]:
     get = "/v1/sessions/AAECAwQFBgcICQoLDA0ODw?since_version=1&wait_s=3"
     for kind, target in [("device", get), ("node", "/v1/node/activate")]:
         inputs, expected = signed(kind, target)
-        cases.append(dict(name=f"{kind}-request", input=inputs, expect=expected))
+        case = dict(name=f"{kind}-request", input=inputs, expect=expected)
+        if kind == "node":
+            case["note"] = "public_key 是节点激活时登记的 Ed25519 公钥（§7.8）；principal 是节点 ID。"
+        cases.append(case)
 
     targets = {
         "escaped": "/v1/a%2fb/%41?q=%2F&q=%2f",

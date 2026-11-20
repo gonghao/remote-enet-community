@@ -14,6 +14,7 @@ import (
 )
 
 type vectorRequest struct {
+	PublicKey      string `json:"public_key"`
 	Key            string
 	Kind           string
 	Principal      string
@@ -134,7 +135,7 @@ func TestRequestSignatureVectors(t *testing.T) {
 			case "device":
 				err = VerifyDevice(r, headers)
 			case "node":
-				err = VerifyNode(r, headers, [16]byte(principal), key.Public().(ed25519.PublicKey))
+				err = VerifyNode(r, headers, [16]byte(principal), ed25519.PublicKey(decode(in.PublicKey)))
 			default:
 				t.Fatalf("unknown kind %q", in.Kind)
 			}

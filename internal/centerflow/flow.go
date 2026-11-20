@@ -144,7 +144,9 @@ type ClientState = State
 
 type flow struct {
 	Dependencies
-	role session.Role
+	role               session.Role
+	operationBudget    time.Duration
+	unreachableRetries int
 	// Commands serialize replacement, cancellation and disposal of the current reception.
 	cmd     chan struct{}
 	mu      sync.Mutex
@@ -154,6 +156,7 @@ type flow struct {
 	done    chan struct{}
 }
 type reception struct {
+	receivedTicket bool
 	remote         center.Session
 	code           string
 	responder      *pairing.SessionResponder
@@ -175,7 +178,7 @@ func newFlow(d Dependencies, role session.Role) *flow {
 		d.RetryMax = 5 * time.Second
 	}
 	d.RetryMax = max(d.RetryMin, d.RetryMax)
-	return &flow{cmd: make(chan struct{}, 1), Dependencies: d, role: role, state: State{Phase: "idle"}}
+	return &flow{operationBudget: time.Minute, cmd: make(chan struct{}, 1), Dependencies: d, role: role, state: State{Phase: "idle"}}
 }
 
 func (f *flow) lockCommand(ctx context.Context) error {
@@ -192,7 +195,11 @@ func (f *flow) unlockCommand() { <-f.cmd }
 func (f *flow) Snapshot() State {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.state
+	s := f.state
+	if f.unreachableRetries > 0 {
+		s.Reason = CenterUnreachable
+	}
+	return s
 }
 func (f *flow) phase(p string, r Reason) {
 	f.mu.Lock()
@@ -359,6 +366,16 @@ func sleep(ctx context.Context, d time.Duration) error {
 }
 
 func retryAPI[T any](ctx context.Context, f *flow, call func() (T, error)) (T, error) {
+	// A poll and a ticket request can retry concurrently. Keep the outage visible
+	// until every affected call has returned.
+	unreachable := false
+	defer func() {
+		if unreachable {
+			f.mu.Lock()
+			f.unreachableRetries--
+			f.mu.Unlock()
+		}
+	}()
 	for delay := f.RetryMin; ; delay = min(delay*2, f.RetryMax) {
 		v, err := call()
 		var api *center.Error
@@ -371,7 +388,14 @@ func retryAPI[T any](ctx context.Context, f *flow, call func() (T, error)) (T, e
 			f.mu.Lock()
 			f.state.Reason = Reason(api.Code)
 			f.mu.Unlock()
-		} else if !errors.Is(err, center.ErrUnreachable) {
+		} else if errors.Is(err, center.ErrUnreachable) {
+			if !unreachable {
+				f.mu.Lock()
+				f.unreachableRetries++
+				f.mu.Unlock()
+				unreachable = true
+			}
+		} else {
 			return v, err
 		}
 		if err := sleep(ctx, wait); err != nil {

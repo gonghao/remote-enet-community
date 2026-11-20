@@ -697,3 +697,52 @@ func TestTicketObservesEndBeforePoll(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestStartRetryCanEndOrLogout(t *testing.T) {
+	for _, command := range []string{"end", "logout", "timeout"} {
+		t.Run(command, func(t *testing.T) {
+			f := fixtureFor(t, func(r *http.Request, rt http.RoundTripper) (*http.Response, error) {
+				if r.URL.Path == "/v1/sessions" {
+					return nil, io.ErrUnexpectedEOF
+				}
+				return rt.RoundTrip(r)
+			}, nil)
+			if command == "timeout" {
+				f.op.operationBudget = 150 * time.Millisecond
+			}
+			started := make(chan error, 1)
+			go func() { started <- f.op.Start(f.ctx, f.node) }()
+			until(t, func() bool { return f.op.Snapshot().Reason == CenterUnreachable })
+			switch command {
+			case "end":
+				f.check(f.op.End(f.ctx))
+			case "logout":
+				f.check(f.op.Logout(f.ctx))
+			}
+			err := waitRun(t, started)
+			if command == "timeout" {
+				if !errors.Is(err, center.ErrUnreachable) || f.op.Snapshot().Reason != CenterUnreachable {
+					t.Fatal(err)
+				}
+			} else if !errors.Is(err, context.Canceled) {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestFirstTicketBudget(t *testing.T) {
+	f := fixtureFor(t, nil, func(r *http.Request, rt http.RoundTripper) (*http.Response, error) {
+		if strings.HasSuffix(r.URL.Path, "/tickets") {
+			return nil, io.ErrUnexpectedEOF
+		}
+		return rt.RoundTrip(r)
+	})
+	f.start()
+	f.redeem()
+	f.cl.operationBudget = 100 * time.Millisecond
+	err := waitRun(t, launch(f.ctx, f.cl, session.Options{}, hold))
+	if !errors.Is(err, center.ErrUnreachable) || f.cl.Snapshot().Reason != CenterUnreachable {
+		t.Fatal(err, f.cl.Snapshot())
+	}
+}

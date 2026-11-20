@@ -150,27 +150,48 @@ func pairEnd(err error) Reason {
 	return ""
 }
 
+func (f *flow) obtainTicket(ctx context.Context, r *reception, s center.Session) (center.Ticket, error) {
+	if !r.receivedTicket {
+		budget, cancel := context.WithTimeoutCause(ctx, f.operationBudget, center.ErrUnreachable)
+		defer cancel()
+		ctx = budget
+	}
+	for delay := f.RetryMin; ; delay = min(delay*2, f.RetryMax) {
+		key := center.NewIdempotencyKey()
+		t, err := retryAPI(ctx, f, func() (center.Ticket, error) { return f.API.Ticket(ctx, key, s.SessionID) })
+		if err != nil && ctx.Err() != nil {
+			return t, context.Cause(ctx)
+		}
+		if ReasonOf(err) == "session_not_ready" {
+			state, readErr := f.read(ctx, r, 0, 0)
+			for readErr == nil && state.State == "open" {
+				state, readErr = f.read(ctx, r, state.Version, 25*time.Second)
+			}
+			if readErr != nil {
+				if ctx.Err() != nil {
+					return t, context.Cause(ctx)
+				}
+				return t, readErr
+			}
+			if err := sleep(ctx, delay); err != nil {
+				return t, context.Cause(ctx)
+			}
+			continue
+		}
+		if err == nil {
+			r.receivedTicket = true
+		}
+		return t, err
+	}
+}
+
 func (f *flow) connect(ctx context.Context, r *reception, s center.Session) (transport.Session, error) {
 	var t center.Ticket
 	var rejected bool
 	for delay := f.RetryMin; ; delay = min(2*delay, f.RetryMax) {
 		if t.Raw == nil {
-			key := center.NewIdempotencyKey()
 			var err error
-			t, err = retryAPI(ctx, f, func() (center.Ticket, error) { return f.API.Ticket(ctx, key, s.SessionID) })
-			if ReasonOf(err) == "session_not_ready" {
-				state, readErr := f.read(ctx, r, 0, 0)
-				for readErr == nil && state.State == "open" {
-					state, readErr = f.read(ctx, r, state.Version, 25*time.Second)
-				}
-				if readErr != nil {
-					return nil, readErr
-				}
-				if err := sleep(ctx, delay); err != nil {
-					return nil, err
-				}
-				continue
-			}
+			t, err = f.obtainTicket(ctx, r, s)
 			if err != nil {
 				return nil, err
 			}

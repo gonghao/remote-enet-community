@@ -132,21 +132,44 @@ func (o *Operator) resume(ctx context.Context) error {
 }
 
 // Start creates one reception or reconciles the signing device's existing session.
-func (o *Operator) Start(ctx context.Context, node center.NodeID) error {
+func (o *Operator) Start(parent context.Context, node center.NodeID) error {
+	ctx, cancelBudget := context.WithTimeoutCause(parent, o.operationBudget, center.ErrUnreachable)
+	defer cancelBudget()
 	if err := o.lockCommand(ctx); err != nil {
 		return err
 	}
-	defer o.unlockCommand()
 	if o.occupied() {
+		o.unlockCommand()
 		return DeviceBusy
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	o.mu.Lock()
+	o.cancel, o.done = cancel, done
+	o.mu.Unlock()
+	o.unlockCommand()
+	defer func() {
+		cancel()
+		o.mu.Lock()
+		o.cancel, o.done = nil, nil
+		close(done)
+		o.mu.Unlock()
+	}()
+	err := o.create(ctx, node)
+	if err != nil && context.Cause(ctx) != nil {
+		return o.fail(ctx, context.Cause(ctx))
+	}
+	return err
+}
+
+func (o *Operator) create(ctx context.Context, node center.NodeID) error {
 	key := center.NewIdempotencyKey()
 	s, err := retryAPI(ctx, o.flow, func() (center.Session, error) { return o.API.CreateSession(ctx, key, node) })
 	if ReasonOf(err) == DeviceBusy {
 		if resumeErr := o.resume(ctx); resumeErr != nil {
 			return resumeErr
 		}
-		if !o.occupied() {
+		if o.current == nil {
 			return o.fail(ctx, err)
 		}
 		return nil

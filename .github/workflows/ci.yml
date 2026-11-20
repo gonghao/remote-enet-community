@@ -33,6 +33,12 @@ jobs:
         run: |
           python3 -B -m unittest discover -s tools -p 'test_*.py'
           sh -n tools/build-macos-client.sh
+      - name: Test conformance generators
+        env:
+          CONFORMANCE_LOCAL_PAKE: "1"
+        run: |
+          python3 -B -m unittest discover -s testdata/conformance/gen -p 'test_*.py'
+          python3 -B testdata/conformance/gen/run_all.py --check
       - name: Scan for private markers
         env:
           REPO_GUARD_RULES_INLINE: ${{ secrets.REPO_GUARD_RULES_INLINE }}

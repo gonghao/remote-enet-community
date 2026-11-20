@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"remote-enet/internal/app"
+	"remote-enet/internal/centerflow"
 	"remote-enet/internal/settings"
 )
 
@@ -70,20 +71,6 @@ func readAnswer(ctx context.Context) (string, error) {
 	return string(b), err
 }
 
-func sasMatches(input, code string) bool {
-	norm := strings.Map(func(r rune) rune {
-		switch {
-		case r == ' ' || r == '　':
-			return -1
-		case r >= '０' && r <= '９':
-			return '0' + r - '０'
-		default:
-			return r
-		}
-	}, input)
-	return len(code) == 6 && norm == code
-}
-
 func centerConsole(ctx context.Context, r *app.Runtime, updates <-chan app.Snapshot, out io.Writer) {
 	var shown string
 	var seen uint64
@@ -133,25 +120,31 @@ func centerConsole(ctx context.Context, r *app.Runtime, updates <-chan app.Snaps
 			}
 			promptCtx, end := context.WithDeadline(inputCtx, p.Deadline)
 			defer end()
-			match := confirmConsole(promptCtx, state.Role == "operator", p.Code, out)
+			match := confirmConsole(promptCtx, state.Role == "operator", p, out, readAnswer, r.VerifySAS)
 			_ = r.AnswerSAS(promptCtx, p.ID, match)
 		}()
 	}
 }
 
-func confirmConsole(ctx context.Context, operator bool, code string, out io.Writer) bool {
+func confirmConsole(ctx context.Context, operator bool, p centerflow.SASPrompt, out io.Writer, read func(context.Context) (string, error), verify func(uint64, string) bool) bool {
+	if operator {
+		fmt.Fprintf(out, "Visiting device: %s. Local short code: %s %s\n", p.Peer.Short(), p.Code[:3], p.Code[3:])
+	}
 	for ctx.Err() == nil {
 		if operator {
 			fmt.Fprintln(out, "Enter the six digits read by the customer, or type no to reject.")
 		} else {
-			fmt.Fprintf(out, "Read %s to the operator. Press Enter to confirm or type no to reject.\n", code)
+			fmt.Fprintf(out, "Read %s to the operator. Press Enter to confirm or type no to reject.\n", p.Code)
 		}
-		input, err := readAnswer(ctx)
+		input, err := read(ctx)
 		if err != nil || strings.EqualFold(input, "no") {
 			return false
 		}
-		if operator && sasMatches(input, code) || !operator && input == "" {
+		if operator && verify(p.ID, input) || !operator && input == "" {
 			return true
+		}
+		if operator {
+			fmt.Fprintln(out, "Does not match this screen.")
 		}
 	}
 	return false

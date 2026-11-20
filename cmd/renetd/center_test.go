@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"remote-enet/internal/centerflow"
 	"remote-enet/internal/settings"
 )
 
@@ -50,8 +51,14 @@ func TestCenterCodeFile(t *testing.T) {
 }
 
 func TestCenterAnswer(t *testing.T) {
-	if !sasMatches("００1 ２３４", "001234") || sasMatches("01234", "001234") || sasMatches("001235", "001234") {
-		t.Fatal("operator comparison")
+	p := centerflow.SASPrompt{ID: 17, Code: "001234"}
+	for _, last := range []string{"correct", "no"} {
+		lines := []string{"wrong", last}
+		var out bytes.Buffer
+		got := confirmConsole(t.Context(), true, p, &out, func(context.Context) (string, error) { v := lines[0]; lines = lines[1:]; return v, nil }, func(id uint64, input string) bool { return id == 17 && input == "correct" })
+		if got != (last == "correct") || !strings.Contains(out.String(), "Does not match this screen") || !strings.Contains(out.String(), p.Peer.Short()) || !strings.Contains(out.String(), "001 234") {
+			t.Fatal(out.String())
+		}
 	}
 	for _, s := range []string{"", "123456", strings.Repeat(" ", 129) + "\n"} {
 		if copyAnswer(strings.NewReader(s), io.Discard) == nil {

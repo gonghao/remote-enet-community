@@ -420,3 +420,11 @@ func TestExtensionAndTagBoundaries(t *testing.T) {
 		t.Fatal("accepted nested COSE tag")
 	}
 }
+
+func TestInvalidCBORHeadSize(t *testing.T) {
+	for _, item := range [][]byte{nil, {0xbf}, {0xff}, {0xbc}, {0x1a, 0}} {
+		if _, err := headSize(item); err == nil {
+			t.Errorf("accepted head %x", item)
+		}
+	}
+}

@@ -168,13 +168,22 @@ func openEnvelope(raw []byte, key func(Kid) (ed25519.PublicKey, bool), inspect b
 	return kid, payload, 0, nil
 }
 
-// headSize is called only on a well-formed definite-length CBOR item.
-func headSize(item []byte) int {
+func headSize(item []byte) (int, error) {
+	if len(item) == 0 {
+		return 0, errors.New("empty CBOR item")
+	}
 	ai := item[0] & 31
 	if ai < 24 {
-		return 1
+		return 1, nil
 	}
-	return 1 + 1<<(ai-24)
+	if ai > 27 {
+		return 0, errors.New("reserved or indefinite CBOR head")
+	}
+	n := 1 + 1<<(ai-24)
+	if n > len(item) {
+		return 0, errors.New("truncated CBOR head")
+	}
+	return n, nil
 }
 
 // A wider argument is minimal only if it would overflow the preceding width.
@@ -195,7 +204,11 @@ func minimalHead(head []byte) bool {
 
 // children preserves tags and exact key types that generic Go decoding can discard.
 func children(item []byte) ([][]byte, error) {
-	body := item[headSize(item):]
+	n, err := headSize(item)
+	if err != nil {
+		return nil, err
+	}
+	body := item[n:]
 	dec := strict.NewDecoder(bytes.NewReader(body))
 	var items [][]byte
 	for dec.NumBytesRead() < len(body) {
@@ -211,6 +224,10 @@ func children(item []byte) ([][]byte, error) {
 // Extensions can contain arbitrary CBOR, including maps with compound keys.
 // Compare the encoded keys of these deterministic maps without interpreting tags.
 func validateInfo(item []byte) error {
+	n, err := headSize(item)
+	if err != nil {
+		return err
+	}
 	major := item[0] >> 5
 	if major == 7 && item[0] >= 0xf9 {
 		var f float64
@@ -220,12 +237,12 @@ func validateInfo(item []byte) error {
 		if !bytes.Equal(item, must(enc.Marshal(f))) {
 			return errors.New("non-deterministic information float")
 		}
-	} else if !minimalHead(item[:headSize(item)]) {
+	} else if !minimalHead(item[:n]) {
 		return errors.New("non-minimal information item")
 	}
 	switch major {
 	case 3:
-		if !utf8.Valid(item[headSize(item):]) {
+		if !utf8.Valid(item[n:]) {
 			return errors.New("invalid information text")
 		}
 	case 4, 5, 6:

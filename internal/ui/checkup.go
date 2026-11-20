@@ -178,9 +178,7 @@ func checkHint(code, role string) string {
 		return "Hub identity mismatch"
 	case "tls_failed":
 		return "Hub TLS check failed"
-	case checkup.CenterInputUnsupported:
-		return "Numeric codes from a center are not supported yet"
-	case checkup.DirectInputAddressRequired:
+	case checkup.CenterInputUnsupported, checkup.DirectInputAddressRequired:
 		return "Enter the direct address and port"
 	case "endpoint_invalid":
 		return "The endpoint is invalid. Check the saved endpoint or request a new invitation."

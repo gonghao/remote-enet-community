@@ -286,6 +286,7 @@ func TestResponsiveSessionAndSettings(t *testing.T) {
 					t.Run(fmt.Sprintf("%s/%s/%d/%d", language, role, p, width), func(t *testing.T) {
 						cfg := operatorConfig()
 						cfg.Role = role
+						cfg.Center = settings.Center{ID: "saved-center", API: []string{"https://center.invalid"}}
 						v := New(cfg, Actions{})
 						v.SetLanguage(language)
 						v.page = p
@@ -294,9 +295,17 @@ func TestResponsiveSessionAndSettings(t *testing.T) {
 							height = clientHeight
 						}
 						tt := ui.NewTester(v.Render, width, height)
+						for _, hidden := range []string{"Center", "Center ID", "Check center", "Change center…", cfg.Center.ID, cfg.Center.API[0]} {
+							if _, ok := tt.Find(hidden); ok {
+								t.Fatalf("hidden center configuration visible: %s", hidden)
+							}
+						}
 						left, right := "Numeric code · easy to dictate", "Invitation · easy to copy and paste"
 						if p == settingsPage {
-							left, right = "Preferences", "Center"
+							left, right = "Connection settings", "Network & presentation"
+							if role == settings.RoleClient {
+								left, right = "Preferences", "Connection test"
+							}
 						}
 						if role == settings.RoleClient && p == sessionPage {
 							left, right = "Adapter selection", "Connect client"

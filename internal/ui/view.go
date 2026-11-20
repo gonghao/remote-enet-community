@@ -3,13 +3,11 @@ package ui
 
 import (
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 
 	"remote-enet/internal/app"
 	"remote-enet/internal/carside"
-	"remote-enet/internal/center"
 	"remote-enet/internal/checkup"
 	"remote-enet/internal/hsfzcapture"
 	"remote-enet/internal/identity"
@@ -53,8 +51,6 @@ type Actions struct {
 	Stop              func()
 	IssueInvite       func()
 	LoadIssuerEntry   func()
-	SetCenter         func(settings.Center)
-	CheckCenter       func()
 	IssueNumericCode  func()
 	CopyNumericCode   func(uint64)
 	RevokeNumericCode func(uint64)
@@ -94,17 +90,12 @@ const (
 	ActionCopyNumericCode
 	ActionRevokeNumericCode
 	ActionIssuerEntry
-	ActionSetCenter
-	ActionCheckCenter
 )
 
 // View and all of its methods belong to the UI thread.
 type View struct {
-	issuerEntry         string
-	issuerRequested     bool
-	centerID, centerAPI string
-	checkingCenter      bool
-	centerResults       []center.EntryResult
+	issuerEntry     string
+	issuerRequested bool
 
 	actions                             Actions
 	role                                string
@@ -147,7 +138,6 @@ func New(initial settings.Config, actions Actions) *View {
 	if initial.Role == settings.RoleOperator && (initial.Operator.Mode != "hub" && initial.Operator.Endpoint == "" || initial.Operator.Bind == "") {
 		v.page = settingsPage
 	}
-	v.centerID, v.centerAPI = initial.Center.ID, strings.Join(initial.Center.API, " ")
 	return v
 }
 
@@ -158,10 +148,6 @@ func New(initial settings.Config, actions Actions) *View {
 func (v *View) SetConfig(cfg settings.Config) {
 	if cfg.Role != v.role {
 		return
-	}
-	if cfg.Center.ID != v.saved.Center.ID || !slices.Equal(cfg.Center.API, v.saved.Center.API) {
-		v.centerID, v.centerAPI = cfg.Center.ID, strings.Join(cfg.Center.API, " ")
-		v.centerResults = nil
 	}
 	clean := !v.dirty()
 	v.draft.Center = cfg.Center
@@ -253,8 +239,6 @@ func (v *View) Complete(action Action) {
 		v.captureStopping = false
 	case ActionCheckConnection:
 		v.checking = false
-	case ActionCheckCenter:
-		v.checkingCenter = false
 	case ActionCancelChecks:
 		v.cancelingChecks = false
 	case ActionIssueNumericCode, ActionCopyNumericCode, ActionRevokeNumericCode:

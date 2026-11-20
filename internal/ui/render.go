@@ -331,20 +331,23 @@ func (v *View) settingsPage(c *ui.Context) {
 	if v.locked() {
 		ui.Text(c, v.tr("Runtime active · stop before changing network settings.")).TextColor(amber).FontSize(11).Role(ui.RoleStatus)
 	}
-	ui.Grid(c).Columns(pageColumns(c)).FillWidth().Gap(12).Children(func() {
-		if v.role == settings.RoleOperator {
+	if v.role == settings.RoleOperator {
+		ui.Grid(c).Columns(pageColumns(c)).FillWidth().Gap(12).Children(func() {
 			v.card(c.Key("connection-settings"), "Connection settings", "", func() { v.operatorForm(c) })
 			v.card(c.Key("operator-settings"), "Network & presentation", "", func() { v.presentationForm(c) })
-		}
-		v.card(c.Key("save-settings"), "Preferences", "", func() {
-			v.languageSelect(c)
-			if v.role == settings.RoleClient && v.saved.Client.Peer != "" {
-				peer, _ := identity.ParseFingerprint(v.saved.Client.Peer)
-				v.peerValue(c.Key("remembered-peer"), "Remembered peer", peer)
-			}
-			ui.Checkbox(c.Key("allow-test"), &v.draft.AllowLinkTest, v.tr("Allow peer connection tests")).Label(v.tr("Allow peer connection tests")).Disabled(v.locked())
 		})
-		v.card(c.Key("center-settings"), "Center", "", func() { v.centerForm(c) })
+	}
+	v.card(c.Key("save-settings"), "Preferences", "", func() {
+		ui.Grid(c).Columns(pageColumns(c)).FillWidth().Gap(8).Children(func() {
+			ui.Column(c).FillWidth().MinWidth(0).Gap(4).Children(func() { v.languageSelect(c) })
+			ui.Column(c).FillWidth().MinWidth(0).Gap(8).Children(func() {
+				if v.role == settings.RoleClient && v.saved.Client.Peer != "" {
+					peer, _ := identity.ParseFingerprint(v.saved.Client.Peer)
+					v.peerValue(c.Key("remembered-peer"), "Remembered peer", peer)
+				}
+				ui.Checkbox(c.Key("allow-test"), &v.draft.AllowLinkTest, v.tr("Allow peer connection tests")).Label(v.tr("Allow peer connection tests")).Disabled(v.locked())
+			})
+		})
 	})
 	if v.role == settings.RoleClient {
 		v.linkTest(c)

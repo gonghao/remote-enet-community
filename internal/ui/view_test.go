@@ -792,8 +792,8 @@ func TestOperatorHubSettingsAndPath(t *testing.T) {
 	}
 	v.SetState(State{Running: true, Runtime: app.Snapshot{Phase: app.PhaseListening, HubWaiting: true}})
 	tt = ui.NewTester(v.Render, 1080, 1000)
-	if !tt.HasText("Waiting on hub") || !tt.HasText("Not configured") {
-		t.Fatal("missing hub wait or center status")
+	if !tt.HasText("Waiting on hub") {
+		t.Fatal("missing hub wait status")
 	}
 	const address = "workshop-operator-01.long-subdomain.dynamic-dns.example:47003"
 	v.actions.Copy = func(text string) { copied = text }

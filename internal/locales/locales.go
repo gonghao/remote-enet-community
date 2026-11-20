@@ -41,6 +41,10 @@ func Match(tag string) string {
 // Text formats only an application-owned message. Callers must not pass raw
 // identities, filenames, annotations or protocol payloads as message keys.
 func Text(tag, source string, args ...any) string {
+	// Until R5, both bare-code outcomes have the same actionable desktop hint.
+	if source == "Numeric codes from a center are not supported yet" {
+		source = "Enter the direct address and port"
+	}
 	text := source
 	if translated, ok := catalogs[Match(tag)][source]; ok {
 		text = translated

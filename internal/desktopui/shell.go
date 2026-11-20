@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"runtime"
-	"strings"
 	"sync"
 	"time"
 
@@ -12,7 +11,6 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"remote-enet/internal/brand"
-	"remote-enet/internal/center"
 	"remote-enet/internal/desktop"
 	"remote-enet/internal/settings"
 	renetui "remote-enet/internal/ui"
@@ -72,17 +70,6 @@ func (s *shell) ready() {
 		Save: func(cfg settings.Config) {
 			s.submit(renetui.ActionSave, func(ctx context.Context) error { return s.controller.Save(ctx, cfg) })
 		},
-		SetCenter: func(center settings.Center) {
-			detail := s.tr("Center ID") + ": " + center.ID + "\n" + s.tr("Center API") + ":\n" + strings.Join(center.API, "\n")
-			if center.ID == "" {
-				detail = s.tr("Not configured")
-			}
-			result, err := mygo.Dialog.Message(mygo.MessageOptions{Parent: s.window, Title: s.tr(s.product.name), Type: mygo.MessageQuestion, Message: s.tr("Change center?"), Detail: detail, Buttons: []string{s.tr("Cancel"), s.tr("Change center")}, DefaultButton: 0, CancelButton: 0})
-			if err == nil && result.Button == 1 {
-				s.submit(renetui.ActionSetCenter, func(ctx context.Context) error { return s.controller.SetCenter(ctx, center) })
-			}
-		},
-		CheckCenter:     s.checkCenter,
 		Refresh:         func() { s.submit(renetui.ActionRefresh, s.controller.RefreshNICs) },
 		Stop:            func() { s.submit(renetui.ActionStop, s.controller.Stop) },
 		TestLink:        func() { s.submit(renetui.ActionTest, s.controller.TestLink) },
@@ -214,18 +201,6 @@ func (s *shell) ready() {
 		}
 	}()
 	s.submit(renetui.ActionRefresh, s.controller.RefreshNICs)
-}
-
-func (s *shell) checkCenter() {
-	var cfg settings.Center
-	var results []center.EntryResult
-	s.submitWithCompletion(renetui.ActionCheckCenter, func(ctx context.Context) error {
-		var err error
-		cfg, results, err = s.controller.CheckCenter(ctx)
-		return err
-	}, func() {
-		s.view.SetCenterResults(cfg, results)
-	})
 }
 
 // submit is only called on the UI thread. A small admission budget keeps

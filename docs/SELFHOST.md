@@ -12,7 +12,7 @@
 | 自建票据 | `v = 2` 的 COSE_Sign1 票据，编码与签名结构同契约 §8.1；三种用途：Operator 的 wait 票、Client 的设备 dial 票、邀请码携带的不记名 dial 票 |
 | 签发 | Operator 状态目录里的签发密钥；`renetd issuer` 输出 Hub 配置条目；`renetd invite --hub` 离线生成带票据的邀请码；运行中的 Operator 自动签 wait 票，并给 Client 签发和续期设备票 |
 | 首次配对 | 原始邀请码（新版本 2，携带不记名票据）与「Hub 地址 + 8 位码」（经 Hub 配对入口，新配对能力 `pair-hub/1`）两种入口 |
-| 中心地址 | 配置字段、校验、显式切换、界面显示，以及调用无需签名的 `GET /v1/meta` 核对 `center_id`；规定中心状态的存放位置 |
+| 中心地址 | 配置字段、校验、控制器显式切换，以及调用无需签名的 `GET /v1/meta` 核对 `center_id`；规定中心状态的存放位置 |
 | 加固 | 内嵌 Hub 不再替陌生设备做中继（见 2.3） |
 
 非目标：
@@ -345,11 +345,11 @@ Client 的流程：外层钉住邀请码里的 Hub 指纹，dial 的 target = Op
 **R3 交付：**
 
 1. **配置。** `settings` 升为版本 2。顶层新增 `center: {"id": "", "api": []}`，两种角色共用。`id` 符合契约 §1 的 `[a-z0-9.-]{1,32}`；`api` 为 1–4 个绝对 `https://` URL，不含用户信息、查询和片段，每个至多 256 字节；`id` 为空当且仅当 `api` 为空。同一次升级加入 6.1 的 `operator.mode` 与 `operator.hub`。`Load` 读入版本 1 时在内存中补齐缺省值（`mode = "direct"`、`hub.addr`、`hub.fp`、`hub.share` 均为空字符串、`center` 取构建期缺省中心，社区构建为空）；读入版本 2 时按严格规则解码，其中显式保存的空中心优先于构建期缺省值。`Save` 总是写版本 2；旧版程序读版本 2 会报未知字段而拒绝加载（结果同样是拒绝，不会误读）。社区构建的缺省中心为空；官方发行版通过构建参数注入缺省值（`-ldflags -X`，只在发行层配置，代码不分叉）。
-2. **显式切换。** 中心与 `Client.Peer` 一样由控制器管理：`Save` 始终合入当前已保存的中心，表单不能顺带修改它；切换只能通过 `Controller.SetCenter(ctx, center)`，界面上经过确认对话框，并且只能在空闲时执行。
-3. **显示。** Client 与 Operator 的状态区显示「中心：未配置」或中心 ID，连接详情另外显示「连接方式：直连 / 经 Hub（地址、短指纹）」。自建 Hub 不是中心，两者分开显示。
-4. **核对。** 新包 `internal/center` 只实现无需签名的 `GET /v1/meta`。界面提供「检查中心」：逐个入口请求，单次超时 10 秒（契约 §14 的 `fallback_attempt_timeout`，逐入口各自计时），核对返回的 `center_id` 与配置一致，结果按入口显示为已验证、不可达或标识不一致。请求携带 `Renet-Client: <role>/<app_version>` 头（非 SemVer 的构建发送 `0.0.0-dev`），拒绝重定向，要求校验证书的 TLS，不带任何凭据。只读，不发送任何身份信息，不保存结果。
+2. **显式切换。** 中心与 `Client.Peer` 一样由控制器管理：`Save` 始终合入当前已保存的中心，表单不能顺带修改它；切换只能通过 `Controller.SetCenter(ctx, center)`，且只能在空闲时执行。
+3. **显示。** R5 之前，两端设置页隐藏中心配置，首页连接详情隐藏中心状态。R5 将 Operator 的连接方式扩展为直连、自建 Hub、中心三选一，并按所选模式呈现首页会话控制。
+4. **核对。** 新包 `internal/center` 只实现无需签名的 `GET /v1/meta`。控制器保留 `CheckCenter` 供 R5 接入。它逐个入口请求，单次超时 10 秒（契约 §14 的 `fallback_attempt_timeout`，逐入口各自计时），核对返回的 `center_id` 与配置一致，按入口返回已验证、不可达或标识不一致。请求携带 `Renet-Client: <role>/<app_version>` 头（非 SemVer 的构建发送 `0.0.0-dev`），拒绝重定向，要求校验证书的 TLS，不带任何凭据。只读，不发送任何身份信息，不保存结果。
 5. **隔离规则（写入文档，R5 执行）。** 中心相关的状态一律存放在 `state/<role>/centers/<center_id>/` 下。直连与自建 Hub 的信任（`state/<role>/trust.json`）不随中心切换而变化，中心模式也不读取它。切换中心不迁移、不删除任何状态。设备身份仍为每个角色一份。
-6. **只有 8 位码的输入。** 配置了中心时，提示「暂不支持中心数字码」；未配置时，沿用 R2 的提示「请输入直连地址和端口」。不联网。
+6. **只有 8 位码的输入。** R5 之前，Client 连接与自检均提示「请输入直连地址和端口」，无论是否已有中心配置。该提示在本地生成。
 
 **推迟到 R5：** 登录与设备记录、请求签名与 nonce、入口回退、兑换与领票、中心模式的钉住记录及其目录的实际读写、SAS 确认界面、中心模式的 Hub。R3 不为这些功能预先建立没有调用方的接口。
 
@@ -374,7 +374,6 @@ Client 的流程：外层钉住邀请码里的 Hub 指纹，dial 的 target = Op
 | 握手缺少 17，或 17 不合格 | Client | 停止，不保存 | Could not obtain hub authorization | 无法取得 Hub 授权 | 無法取得 Hub 授權 |
 | PAKE 失败（含 Hub 被替换） | Client | 同 R2 | Incorrect code or connection tampered（R2 已有） | 数字码不正确或连接被篡改 | 數字碼不正確或連線遭竄改 |
 | 设置界面 | Operator | — | Connection mode / Direct / Self-hosted hub / Hub address / Hub fingerprint / Hub authorization entry / Copy entry | 连接方式 / 直连 / 自建 Hub / Hub 地址 / Hub 指纹 / Hub 授权条目 / 复制条目 | 連線方式 / 直連 / 自建 Hub / Hub 位址 / Hub 指紋 / Hub 授權條目 / 複製條目 |
-| 中心 | 两端 | — | Center / Not configured / Change center… / Check center / Center verified / Center unreachable / Center ID mismatch / Numeric codes from a center are not supported yet | 中心 / 未配置 / 更换中心… / 检查中心 / 中心已验证 / 中心不可达 / 中心标识不一致 / 暂不支持中心数字码 | 中心 / 未設定 / 更換中心… / 檢查中心 / 中心已驗證 / 中心無法連線 / 中心識別碼不符 / 暫不支援中心數字碼 |
 | 路径 | 两端 | — | Via hub %s | 经 Hub %s | 經 Hub %s |
 
 `unauthorized` 在 Client 一侧按所用的入口区分：持票 dial 被拒是授权问题，配对入口被拒是码不可用。Hub 不提供更细的原因，这与契约 §8.4 末段一致；自建者可以用 `renet-hub ticket inspect` 或 `--debug` 日志排查。自检（`internal/checkup`）对 Hub 端点只做外层 TLS 与指纹钉扎检查，不发送路由头，也不发送票据。

@@ -56,7 +56,7 @@
 2. 票据验签：`internal/ticket`（`v = 2` 的 COSE 票据，向量由独立生成器产出）与 `internal/hubauth`（配置、签发者作用域、拒绝列表）；没有策略时 Hub 拒绝启动，不回退到无鉴权模式。
 3. 自建场景的授权：每台 Operator 持有只能为自己签票的签发密钥，`renetd issuer` 输出 Hub 配置条目，`renetd invite --hub` 离线签发邀请，运行中的 Operator 自动签 wait 票并在会话握手末尾下发、续期设备票（消息 17 `HubTicket`）。
 4. 首次配对：版本 2 邀请码，以及经 Hub 配对入口的「地址 + 8 位码」（`pair-hub/1`，Hub 指纹写入 PAKE）。
-5. 中心地址配置：settings 版本 2、显式切换、界面显示、`GET /v1/meta` 核对 `center_id`（`internal/center`）；登录与中心模式的功能属 R5。
+5. 中心地址配置：settings 版本 2、控制器显式切换、`GET /v1/meta` 核对 `center_id`（`internal/center`）；R5 之前两端隐藏中心配置界面；R5 将 Operator 的连接方式扩展为直连、自建 Hub、中心三选一，并按所选模式呈现首页会话控制。
 
 证据：
 
@@ -80,7 +80,7 @@
 
 ## R5 · 各端接入中心
 
-1. Operator：登录、选择节点、生成纯数字码、确认来访设备、结束接待。
+1. Operator 的连接方式扩展为直连、自建 Hub、中心三选一，首页按所选模式呈现会话控制。中心模式支持登录、选择节点、生成纯数字码、确认来访设备与结束接待。
 2. Client：输入纯数字码兑换授权、连接指定 Hub、断线重连；分别显示网卡缺失、Operator 忙、授权到期、码无效、节点离线等原因。
 3. Hub：上报心跳、负载与用量，执行租约与撤销。
 4. 离线测试覆盖 [CENTER-PROTOCOL 第 11 节](CENTER-PROTOCOL.md#11-一致性测试要求)列出的场景。

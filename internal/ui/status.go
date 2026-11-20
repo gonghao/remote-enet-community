@@ -143,11 +143,6 @@ func (v *View) informationSections(c *ui.Context, compact bool) {
 				v.actions.Copy(s.Path.Via)
 			}
 		}
-		center := v.saved.Center.ID
-		if center == "" {
-			center = v.tr("Not configured")
-		}
-		value("Center", center)
 	})
 	section("session", "SESSION", func() {
 		if v.role == settings.RoleOperator {

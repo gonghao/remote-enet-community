@@ -2,14 +2,10 @@ package ui
 
 import (
 	"net/netip"
-	"slices"
-	"strings"
 
 	"github.com/egoist/mygo/ui"
 
 	"remote-enet/internal/carside"
-	"remote-enet/internal/center"
-	"remote-enet/internal/settings"
 )
 
 func (v *View) field(c *ui.Context, label, placeholder string, value *string, disabled bool) {
@@ -155,54 +151,6 @@ func (v *View) presentationForm(c *ui.Context) {
 
 // SetIssuerEntry accepts only the public entry produced by the local operator.
 func (v *View) SetIssuerEntry(entry string) { v.issuerEntry = entry }
-
-func (v *View) centerForm(c *ui.Context) {
-	w, _ := c.Size()
-	columns := 2
-	if w < 400 {
-		columns = 1
-	}
-	ui.Grid(c).Columns(columns).FillWidth().Gap(12).Children(func() {
-		v.field(c, "Center ID", "", &v.centerID, v.locked())
-		v.field(c, "Center API URLs", "https://…", &v.centerAPI, v.locked())
-	})
-	cfg := v.saved
-	cfg.Center = settings.Center{ID: v.centerID, API: strings.Fields(v.centerAPI)}
-	err := cfg.Validate()
-	if err != nil {
-		ui.Text(c, v.tr("Check the center ID and HTTPS addresses.")).FontSize(11).TextColor(c.Theme().Danger)
-	}
-	ui.Row(c).FillWidth().Gap(8).Children(func() {
-		if ui.Button(c.Key("change-center"), v.tr("Change center…")).Disabled(v.locked() || err != nil || cfg.Equal(v.saved) || v.actions.SetCenter == nil).Clicked() {
-			v.actions.SetCenter(cfg.Center)
-		}
-		if ui.Button(c.Key("check-center"), v.tr("Check center")).Disabled(v.saved.Center.ID == "" || v.checkingCenter || v.actions.CheckCenter == nil).Clicked() {
-			v.checkingCenter = true
-			v.centerResults = nil
-			v.actions.CheckCenter()
-		}
-	})
-	if v.checkingCenter {
-		ui.Text(c, v.tr("Checking center…")).FontSize(11).TextColor(muted).Role(ui.RoleStatus)
-	}
-	for i, result := range v.centerResults {
-		label := "Center unreachable"
-		switch result.Status {
-		case center.Verified:
-			label = "Center verified"
-		case center.IDMismatch:
-			label = "Center ID mismatch"
-		}
-		v.value(c.Key(i), label, result.Entry)
-	}
-}
-
-// SetCenterResults accepts observations only for the currently saved center.
-func (v *View) SetCenterResults(cfg settings.Center, results []center.EntryResult) {
-	if cfg.ID == v.saved.Center.ID && slices.Equal(cfg.API, v.saved.Center.API) {
-		v.centerResults = slices.Clone(results)
-	}
-}
 
 func (v *View) value(c *ui.Context, label, text string) ui.Element {
 	display := text

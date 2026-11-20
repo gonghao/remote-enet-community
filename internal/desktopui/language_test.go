@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/egoist/mygo/ui"
+
+	"remote-enet/internal/settings"
 )
 
 func TestDisplayLanguageDoesNotModifyControllerOrDiagnostics(t *testing.T) {
@@ -40,6 +42,27 @@ func TestLocalizedMarkerReceiptAndRawErrorFallback(t *testing.T) {
 	for _, data := range []string{"/tmp/Settings.jsonl", "marker PRIVATE queued.", "Marker PRIVATE queued.", "unexpected protocol error"} {
 		if s.displayMessage(data) != data {
 			t.Fatal("unknown diagnostic data was interpreted as a message template")
+		}
+	}
+}
+
+func TestBareCodeDisplaysDirectAddressHint(t *testing.T) {
+	s, _ := testShell(t)
+	for _, center := range []settings.Center{{}, {ID: "garage", API: []string{"https://garage.invalid"}}} {
+		if err := s.controller.SetCenter(t.Context(), center); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.controller.StartClient(t.Context(), "12345678"); err == nil {
+			t.Fatal("bare code started the client")
+		}
+		s.state = s.controller.Snapshot()
+		for _, language := range []string{"en", "zh-Hans", "zh-Hant"} {
+			s.language = language
+			s.applyState()
+			tt := ui.NewTester(s.view.Render, 440, 700)
+			if !tt.HasText(s.tr("Enter the direct address and port")) {
+				t.Fatalf("missing address hint for %q in %s", center.ID, language)
+			}
 		}
 	}
 }

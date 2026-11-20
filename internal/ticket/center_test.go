@@ -154,7 +154,12 @@ type admissionInput struct {
 
 func TestCenterAdmissionVectors(t *testing.T) {
 	type outcome struct{ Result, Reason string }
-	for _, v := range readCenterVectors[admissionInput, outcome](t, "v08-ticket-reject.json") {
+	vectors := readCenterVectors[admissionInput, outcome](t, "v08-ticket-reject.json")
+	required := map[string]string{"v8-modified-role": "8.4/4", "v10-duplicate-payload-key": "8.4/5"}
+	for _, v := range vectors {
+		if step, ok := required[v.Name]; ok && v.Expect == (outcome{"reject", step}) {
+			delete(required, v.Name)
+		}
 		t.Run(v.Name, func(t *testing.T) {
 			input := v.Input
 			cfg := input.Config
@@ -199,6 +204,9 @@ func TestCenterAdmissionVectors(t *testing.T) {
 				}
 			}
 		})
+	}
+	if len(required) != 0 {
+		t.Fatalf("missing rejection vectors: %v", required)
 	}
 }
 

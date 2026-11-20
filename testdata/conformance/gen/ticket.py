@@ -67,6 +67,9 @@ def generate(check: bool) -> list[Path]:
     add("v8-signature", 4, raw[:-1] + bytes([raw[-1] ^ 1]))
     # A malformed map after a one-byte edit must still fail at authentication.
     add("v8-payload-byte", 4, raw.replace(payload, b"\xff" + payload[1:], 1))
+    add("v8-modified-role", 4, raw.replace(payload, encode(dial | {5: 2}), 1))
+    duplicate = b"\xaf" + payload[1:] + encode(14) + encode(dial[14])
+    add("v10-duplicate-payload-key", 5, bytes.fromhex(issue(duplicate, protected)["token"]))
     other = public_key("device-operator")
     add("v8-unknown-kid", 3, cfg=dict(keys=[hex_fields(kid=sha256(other).digest()[:8], public_key=other)]))
     for name, header in (("extra-protected", encode({1: -8, 4: kid, 7: 0})),

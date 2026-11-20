@@ -66,6 +66,66 @@
       }
     },
     {
+      "name": "v8-modified-role",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058d8ae0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050206582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a584014a280172b03a3b5b42e5714ea9f6e4d08b2caa2949b0d5b8f1fa9ee8f930990de61c2facd583ecba9490463120c92901dd5f32fc5e5eea6d58b609cfec83605",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/4"
+      }
+    },
+    {
+      "name": "v10-duplicate-payload-key",
+      "input": {
+        "token": "d2844da201270448b0a644d9ca60277aa058dbaf0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a0e182a584019697c69f39a01522779497c86b2da4b93436b0faa16b024707644758f0a550534135c47d141c308fe322b5fbc6eb91229bfa982eb59acd38416aac1ae1c5207",
+        "config": {
+          "center_id": "test.center",
+          "node_id": "c4e6d8f69627f69d7a0d1c2e594f371e",
+          "hub": "a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be2",
+          "gen": 42,
+          "keys": [
+            {
+              "kid": "b0a644d9ca60277a",
+              "public_key": "0426e7503c3184fe5b49cc4c7d6e35be402022f8c0ab7169940c8625145ca76e"
+            }
+          ],
+          "clock_skew": 30,
+          "ticket_max_ttl": 300
+        },
+        "route": {
+          "role": 1,
+          "target": "40a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c09"
+        },
+        "tls_device": "f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190",
+        "now": 1795000000
+      },
+      "expect": {
+        "result": "reject",
+        "reason": "8.4/5"
+      }
+    },
+    {
       "name": "v8-unknown-kid",
       "input": {
         "token": "d2844da201270448b0a644d9ca60277aa058d8ae0101026b746573742e63656e7465720350642b706d489807a0e3afdac5000952ac045820f0377b89a89ca83d6caf56591be1481ab5b08879fd3aa83d052bbaa7f90cf190050106582040a5df9d53a72f10dada413271adeaa92937aaebf6ff789cf7b4c23068cf0c0907502dd1322c712adc04ce66a8f5683fd8b00850c4e6d8f69627f69d7a0d1c2e594f371e095820a65525c333384f27d5e7aa8d7a7ab9a492da0d63fde61123f73be2e947e68be20a1a6afd86c00b1a6afd86c00c1a6afd87380d5042de2be40093c3d8b62ecf52261e7d010e182a584014a280172b03a3b5b42e5714ea9f6e4d08b2caa2949b0d5b8f1fa9ee8f930990de61c2facd583ecba9490463120c92901dd5f32fc5e5eea6d58b609cfec83605",

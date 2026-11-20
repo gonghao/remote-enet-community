@@ -89,3 +89,27 @@ func TestTicketBindingAndSize(t *testing.T) {
 		})
 	}
 }
+
+func TestHeartbeatDecisionLists(t *testing.T) {
+	const policy = `"node_state":"active","server_time":0,"heartbeat_interval_s":15,"lease_ttl_s":300`
+	for _, tc := range []struct {
+		fields string
+		valid  bool
+	}{
+		{policy, true}, {policy + `,"renew":null,"revoke":null`, true},
+		{policy + fmt.Sprintf(`,"renew":[{"session_id":%q,"lease_s":1}]`, SessionID{2}.String()), true},
+		{policy + `,"renew":{}`, false}, {`"renew":[],"revoke":[]`, false},
+	} {
+		c := testClient(t, "hub", func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/meta") {
+				fmt.Fprint(w, validMeta)
+				return
+			}
+			fmt.Fprintf(w, "{%s}", tc.fields)
+		})
+		_, err := c.Heartbeat(t.Context(), Heartbeat{Sessions: []SessionUsage{{ClosedUsage: ClosedUsage{SessionID: SessionID{1}}}}})
+		if (err == nil) != tc.valid {
+			t.Errorf("%s: %v", tc.fields, err)
+		}
+	}
+}

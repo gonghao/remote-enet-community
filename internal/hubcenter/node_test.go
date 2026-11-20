@@ -6,11 +6,14 @@ import (
 	"crypto/ed25519"
 	"encoding/json/v2"
 	"errors"
+	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -39,6 +42,7 @@ type fixture struct {
 	id                  center.NodeID
 	paths, keys, bodies []string
 	reports             []center.Heartbeat
+	response            string
 	latency             time.Duration
 }
 
@@ -101,6 +105,10 @@ func newFixture(t *testing.T, after func(time.Duration, func()) func() bool) *fi
 		res, err := base.RoundTrip(r)
 		if r.URL.Path == heartbeatPath {
 			f.advance(f.latency)
+			if err == nil && f.response != "" {
+				res.Body.Close()
+				res.Body = io.NopCloser(strings.NewReader(f.response))
+			}
 		}
 		return res, err
 	})
@@ -523,4 +531,25 @@ func TestActivationAndHeartbeatRetention(t *testing.T) {
 		check()
 		f.o.Server.SetSessionRetention(time.Hour)
 	}, func(time.Duration) { check() })
+}
+
+func TestPartialHeartbeatResponse(t *testing.T) {
+	f := newFixture(t, nil)
+	var logs bytes.Buffer
+	f.o.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+	policy := fmt.Sprintf(`"node_state":"active","server_time":%d,"heartbeat_interval_s":7,"lease_ttl_s":30`, f.now().Unix())
+	f.run(func(time.Duration) {
+		f.connect(f.op, f.token(1, 1, 1), nil)
+		f.response = fmt.Sprintf(`{%s,"renew":[{"session_id":%q,"lease_s":1}]}`, policy, center.SessionID{2}.String())
+	}, func(d time.Duration) {
+		if d != 7*time.Second || !strings.Contains(logs.String(), "level=WARN") || len(f.o.Server.Usage()) != 1 {
+			t.Fatal(d, logs.String())
+		}
+		f.response = `{"server_time":"wrong"}`
+	}, func(time.Duration) {
+		if !strings.Contains(logs.String(), "protocol_errors=1") || len(f.o.Server.Usage()) != 1 {
+			t.Fatal(logs.String())
+		}
+		f.connect(f.op, f.token(1, 2, 2), hub.ErrPeerBusy)
+	})
 }

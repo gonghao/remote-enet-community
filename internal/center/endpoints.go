@@ -19,13 +19,13 @@ import (
 	"remote-enet/internal/identity"
 )
 
-var errEndpointResponse = errors.New("center: invalid endpoint response")
+// ErrEndpointResponse marks an invalid endpoint response shape or value.
+var ErrEndpointResponse = errors.New("center: invalid endpoint response")
 
-// Unknown v1 fields are extensions. Pointer fields may be absent, but no
-// known response field accepts null. Check presence before decoding values.
+// Unknown v1 fields are extensions. Heartbeat decision lists may be absent or null.
 func checkShape(raw jsontext.Value, typ reflect.Type) error {
 	if raw.Kind() == 'n' {
-		return errEndpointResponse
+		return ErrEndpointResponse
 	}
 	if typ.Kind() == reflect.Pointer {
 		typ = typ.Elem()
@@ -34,7 +34,7 @@ func checkShape(raw jsontext.Value, typ reflect.Type) error {
 	case reflect.Struct:
 		var fields map[string]jsontext.Value
 		if err := json.Unmarshal(raw, &fields); err != nil {
-			return errEndpointResponse
+			return ErrEndpointResponse
 		}
 		for i := range typ.NumField() {
 			f := typ.Field(i)
@@ -45,11 +45,14 @@ func checkShape(raw jsontext.Value, typ reflect.Type) error {
 				continue
 			}
 			v, ok := fields[f.Tag.Get("json")]
+			if typ == reflect.TypeFor[HeartbeatResult]() && f.Type.Kind() == reflect.Slice && (!ok || v.Kind() == 'n') {
+				continue
+			}
 			if !ok && f.Type.Kind() == reflect.Pointer {
 				continue
 			}
 			if !ok {
-				return errEndpointResponse
+				return ErrEndpointResponse
 			}
 			if err := checkShape(v, f.Type); err != nil {
 				return err
@@ -61,7 +64,7 @@ func checkShape(raw jsontext.Value, typ reflect.Type) error {
 		}
 		var items []jsontext.Value
 		if err := json.Unmarshal(raw, &items); err != nil {
-			return errEndpointResponse
+			return ErrEndpointResponse
 		}
 		for _, v := range items {
 			if err := checkShape(v, typ.Elem()); err != nil {
@@ -77,7 +80,7 @@ type ticketBytes []byte
 func (b *ticketBytes) UnmarshalText(text []byte) error {
 	raw, err := wire64.DecodeString(string(text))
 	if err != nil || len(raw) < 1 || len(raw) > 1024 || wire64.EncodeToString(raw) != string(text) {
-		return errEndpointResponse
+		return ErrEndpointResponse
 	}
 	*b = raw
 	return nil
@@ -90,7 +93,7 @@ var fingerprints = json.UnmarshalFunc(func(raw []byte, dst *identity.Fingerprint
 	}
 	fp, err := identity.ParseFingerprint(s)
 	if err != nil || (s != fp.String() && s != strings.ReplaceAll(fp.String(), "-", "")) {
-		return errEndpointResponse
+		return ErrEndpointResponse
 	}
 	*dst = fp
 	return nil
@@ -106,7 +109,7 @@ func endpoint[T any](ctx context.Context, c *Client, call Call) (T, error) {
 		return zero, err
 	}
 	if err := json.Unmarshal(raw, &out, json.WithUnmarshalers(fingerprints)); err != nil {
-		return zero, errEndpointResponse
+		return zero, ErrEndpointResponse
 	}
 	return out, nil
 }
@@ -181,7 +184,7 @@ func (c *Client) Nodes(ctx context.Context) ([]Node, error) {
 	}](ctx, c, get("/v1/nodes"))
 	for _, node := range out.Nodes {
 		if !node.valid() {
-			return nil, errEndpointResponse
+			return nil, ErrEndpointResponse
 		}
 	}
 	return out.Nodes, err
@@ -194,24 +197,24 @@ func (s Session) validate(role string, nonce bool) error {
 	open := s.State == "open"
 	ended := s.State == "ended"
 	if !open && !ended && s.State != "authorized" && s.State != "active" {
-		return errEndpointResponse
+		return ErrEndpointResponse
 	}
 	code := open && nonce && role == "operator"
 	if (s.Code != nil) != code || (s.CodeExpiresAt != nil) != code || (s.ExpiresAt != nil) != (role == "operator" && !ended) || (s.EndedAt != nil) != ended || (s.EndReason != nil) != ended {
-		return errEndpointResponse
+		return ErrEndpointResponse
 	}
 	paired := s.ClientFP != nil
 	if (paired && open) || (!paired && !open && !ended) || (s.PairDeadline != nil) != paired || (s.RedeemedAt != nil) != paired {
-		return errEndpointResponse
+		return ErrEndpointResponse
 	}
 	if code {
 		normalized, err := centercode.NormalizeNumericCode(*s.Code)
 		if err != nil || normalized != *s.Code {
-			return errEndpointResponse
+			return ErrEndpointResponse
 		}
 	}
 	if !s.Node.valid() || s.Version < 1 || (role == "client" && !paired) {
-		return errEndpointResponse
+		return ErrEndpointResponse
 	}
 	return nil
 }
@@ -222,7 +225,7 @@ func (c *Client) sessionCall(ctx context.Context, call Call, id *SessionID) (Ses
 		return Session{}, err
 	}
 	if id != nil && s.SessionID != *id {
-		return Session{}, errEndpointResponse
+		return Session{}, ErrEndpointResponse
 	}
 	if err := s.validate(c.o.Role, call.Nonce); err != nil {
 		return Session{}, err
@@ -236,7 +239,7 @@ func (c *Client) CreateSession(ctx context.Context, key string, node NodeID) (Se
 	call.Nonce = true
 	s, err := c.sessionCall(ctx, call, nil)
 	if err == nil && s.Node.NodeID != node {
-		return Session{}, errEndpointResponse
+		return Session{}, ErrEndpointResponse
 	}
 	return s, err
 }
@@ -286,7 +289,7 @@ func (c *Client) Ticket(ctx context.Context, key string, id SessionID) (Ticket, 
 		peer, role = &s.OperatorFP, "dial"
 	}
 	if !t.Node.valid() || peer == nil || t.Role != role || t.PeerFP != *peer || t.Node.NodeID != s.Node.NodeID || t.Node.HubFP != s.Node.HubFP || t.Node.Addr != s.Node.Addr || t.Node.Port != s.Node.Port {
-		return Ticket{}, errEndpointResponse
+		return Ticket{}, ErrEndpointResponse
 	}
 	return t, nil
 }
@@ -318,7 +321,7 @@ func (c *Client) ClientSessions(ctx context.Context) ([]Session, error) {
 	}
 	for _, s := range out.Sessions {
 		if s.State == "ended" {
-			return nil, errEndpointResponse
+			return nil, ErrEndpointResponse
 		}
 		if err := s.validate("client", false); err != nil {
 			return nil, err
@@ -338,7 +341,7 @@ func (c *Client) Activate(ctx context.Context, key string, req Activation) (Acti
 	}{req, wire64.EncodeToString(c.o.NodeKey.Public().(ed25519.PublicKey))}
 	out, err := endpoint[Activated](ctx, c, post("/v1/node/activate", key, body))
 	if err == nil && (out.Gen == 0 || !out.NodePolicy.valid()) {
-		return Activated{}, errEndpointResponse
+		return Activated{}, ErrEndpointResponse
 	}
 	return out, err
 }
@@ -354,30 +357,20 @@ func (c *Client) Heartbeat(ctx context.Context, req Heartbeat) (HeartbeatResult,
 		return HeartbeatResult{}, err
 	}
 	if !out.NodePolicy.valid() {
-		return HeartbeatResult{}, errEndpointResponse
+		return HeartbeatResult{}, ErrEndpointResponse
 	}
-	// Every reported live session gets one decision. Additional revocations
-	// notify the hub about ended sessions with outstanding occupancy.
-	pending := make(map[SessionID]bool, len(req.Sessions))
-	for _, u := range req.Sessions {
-		pending[u.SessionID] = true
-	}
+	decisions := make(map[SessionID]bool, len(out.Renew)+len(out.Revoke))
 	for _, r := range out.Renew {
-		if !pending[r.SessionID] || r.LeaseS < 1 || r.LeaseS > out.LeaseTTLS {
-			return HeartbeatResult{}, errEndpointResponse
+		if decisions[r.SessionID] || r.LeaseS < 1 || r.LeaseS > out.LeaseTTLS {
+			return HeartbeatResult{}, ErrEndpointResponse
 		}
-		pending[r.SessionID] = false
+		decisions[r.SessionID] = true
 	}
 	for _, r := range out.Revoke {
-		if live, seen := pending[r.SessionID]; seen && !live {
-			return HeartbeatResult{}, errEndpointResponse
+		if decisions[r.SessionID] {
+			return HeartbeatResult{}, ErrEndpointResponse
 		}
-		pending[r.SessionID] = false
-	}
-	for _, live := range pending {
-		if live {
-			return HeartbeatResult{}, errEndpointResponse
-		}
+		decisions[r.SessionID] = true
 	}
 	return out, nil
 }

@@ -199,6 +199,7 @@ func (n *Node) Run(ctx context.Context) (err error) {
 	last := n.sample()
 	interval := seconds(a.HeartbeatIntervalS)
 	next := last.at.Add(interval)
+	var protocolErrors uint64
 	var closed []center.ClosedUsage
 	for seq := uint64(1); ; seq++ {
 		if err := n.wait(ctx, next.Sub(n.o.Now())); err != nil {
@@ -219,7 +220,12 @@ func (n *Node) Run(ctx context.Context) (err error) {
 			return ctx.Err()
 		}
 		if err != nil {
-			n.o.Logger.ErrorContext(ctx, "Node heartbeat failed", "seq", seq, "error", err)
+			if errors.Is(err, center.ErrEndpointResponse) {
+				protocolErrors++
+				n.o.Logger.ErrorContext(ctx, "Invalid heartbeat response", "seq", seq, "protocol_errors", protocolErrors, "error", err)
+			} else {
+				n.o.Logger.ErrorContext(ctx, "Node heartbeat failed", "seq", seq, "error", err)
+			}
 			switch errorCode(err) {
 			case "node_superseded":
 				return ErrSuperseded
@@ -230,8 +236,14 @@ func (n *Node) Run(ctx context.Context) (err error) {
 			}
 		} else {
 			admit := n.checkPolicy(ctx, reply.NodePolicy, sent, received)
+			reported := make(map[center.SessionID]bool, len(req.Sessions))
+			for _, u := range req.Sessions {
+				reported[u.SessionID] = true
+			}
 			for _, r := range reply.Renew {
-				n.o.Server.Renew(hub.SessionID(r.SessionID), sent.Add(seconds(r.LeaseS)))
+				if !reported[r.SessionID] || !n.o.Server.Renew(hub.SessionID(r.SessionID), sent.Add(seconds(r.LeaseS))) {
+					n.o.Logger.WarnContext(ctx, "Ignoring renewal for unknown session", "seq", seq, "session", r.SessionID.String())
+				}
 			}
 			closed = n.revoke(reply.Revoke, closed)
 			if admit {

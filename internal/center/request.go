@@ -56,9 +56,8 @@ func SigningInput(r Request, a RequestAuth, kind string, principal []byte) []byt
 }
 
 func (a RequestAuth) validate(r Request) error {
-	target, err := CanonicalTarget(r.Target)
-	if err != nil || target != r.Target || r.Method == "" || r.Method != strings.ToUpper(r.Method) {
-		return fmt.Errorf("%w: invalid method or target", ErrBadRequest)
+	if r.Method == "" || r.Method != strings.ToUpper(r.Method) {
+		return fmt.Errorf("%w: invalid method", ErrBadRequest)
 	}
 	if !centerIDPattern.MatchString(r.CenterID) {
 		return fmt.Errorf("%w: invalid center ID", ErrBadRequest)
@@ -93,6 +92,10 @@ func SignNode(r Request, a RequestAuth, key ed25519.PrivateKey, id [16]byte) (ht
 }
 
 func signHeaders(r Request, a RequestAuth, key ed25519.PrivateKey, kind, header string, principal []byte) (http.Header, error) {
+	target, err := CanonicalTarget(r.Target)
+	if err != nil || target != r.Target {
+		return nil, fmt.Errorf("%w: invalid signing target", ErrBadRequest)
+	}
 	if err := a.validate(r); err != nil {
 		return nil, err
 	}
@@ -123,6 +126,11 @@ func VerifyNode(r Request, h http.Header, id [16]byte, key ed25519.PublicKey) er
 }
 
 func verifyHeaders(r Request, h http.Header, kind string, id []byte, key ed25519.PublicKey) error {
+	target, err := CanonicalTarget(r.Target)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrBadRequest, err)
+	}
+	r.Target = target
 	fields := make(map[string]string)
 	for name, values := range h {
 		name = http.CanonicalHeaderKey(name)

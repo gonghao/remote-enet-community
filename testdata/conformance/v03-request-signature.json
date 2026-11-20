@@ -188,7 +188,8 @@
       "expect": {
         "result": "reject",
         "reason": "unauthenticated"
-      }
+      },
+      "note": "签名针对原始目标，中心以规范化后的目标验签。"
     },
     {
       "name": "signed-bare-query",
@@ -222,7 +223,8 @@
       "expect": {
         "result": "reject",
         "reason": "unauthenticated"
-      }
+      },
+      "note": "签名针对原始目标，中心以规范化后的目标验签。"
     },
     {
       "name": "repeated-client",

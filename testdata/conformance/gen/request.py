@@ -75,5 +75,7 @@ def generate(check: bool) -> list[Path]:
             headers["Renet-Client"] = [", ".join(headers["Renet-Client"] * 2)]
         inputs["headers"] = headers
         cases.append(dict(name=name, input=inputs, expect=dict(result="reject", reason=reason)))
+        if name.startswith("signed-"):
+            cases[-1]["note"] = "签名针对原始目标，中心以规范化后的目标验签。"
     return common.write_vector("v03-request-signature.json", "V3", "中心 API 请求签名",
                                "gen/request.py", cases, check)

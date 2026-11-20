@@ -111,7 +111,6 @@ func TestRequestSignatureVectors(t *testing.T) {
 					t.Fatalf("signed noncanonical target: %v", err)
 				}
 			}
-			r.Target = target
 			switch in.Kind {
 			case "device":
 				err = VerifyDevice(r, headers)

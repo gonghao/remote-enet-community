@@ -1,4 +1,4 @@
-// Command renet-hub runs a standalone self-hosted Hub.
+// Command renet-hub runs a self-hosted or center-managed Hub.
 package main
 
 import (
@@ -23,7 +23,7 @@ func main() {
 	defer stop()
 	if err := run(ctx, os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		os.Exit(exitCode(err))
 	}
 }
 
@@ -52,12 +52,15 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs.SetOutput(stderr)
 	var dir, config, file, device string
 	var hubFP identity.Fingerprint
-	var debug bool
+	var debug, online bool
 	switch command {
 	case "init", "fingerprint":
 		fs.StringVar(&dir, "identity-dir", "", "Hub identity directory")
 	case "serve", "check", "ticket inspect":
 		fs.StringVar(&config, "config", "", "Hub configuration file")
+		if command == "check" {
+			fs.BoolVar(&online, "online", false, "verify center entries using anonymous metadata")
+		}
 		if command == "serve" {
 			fs.BoolVar(&debug, "debug", false, "log admission rejection reasons")
 		}
@@ -103,6 +106,38 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if config == "" {
 		return errors.New("--config is required")
 	}
+	mode, err := configMode(config)
+	if err != nil {
+		if command == "serve" {
+			return fmt.Errorf("%w: read configuration: %w", errCenterServe, err)
+		}
+		return err
+	}
+	level := slog.LevelInfo
+	if debug {
+		level = slog.LevelDebug
+	}
+	logger := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: level}))
+	if mode == "center" {
+		err := runCenter(ctx, command, config, online, stdout, logger)
+		if command == "serve" && err != nil {
+			if ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+				return nil
+			}
+			return fmt.Errorf("%w: %w", errCenterServe, err)
+		}
+		return err
+	}
+	if mode != "selfhost" {
+		err := errors.New("mode: expected selfhost or center")
+		if command == "serve" {
+			return fmt.Errorf("%w: %w", errCenterServe, err)
+		}
+		return err
+	}
+	if online {
+		return errors.New("--online requires center mode")
+	}
 	cfg, err := hubauth.Load(config)
 	if err != nil {
 		return err
@@ -126,11 +161,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	case "ticket inspect":
 		return inspect(stdout, cfg, local.Fingerprint(), file, device)
 	default:
-		level := slog.LevelInfo
-		if debug {
-			level = slog.LevelDebug
-		}
-		return serve(ctx, config, cfg, local, stdout, slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: level})))
+		return serve(ctx, config, cfg, local, stdout, logger)
 	}
 }
 

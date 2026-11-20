@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -80,6 +81,49 @@ func TestValidateCenter(t *testing.T) {
 	}
 }
 
+func TestValidateCenterMode(t *testing.T) {
+	fp := identity.Fingerprint{1}.String()
+	for _, tc := range []struct {
+		name   string
+		change func(*Config)
+		fields []string
+	}{
+		{"empty inactive fields", func(c *Config) {}, nil},
+		{"retained fields", func(c *Config) {
+			c.Operator.Listen = ":47000"
+			c.Operator.Endpoint = "direct.example:47000"
+			c.Operator.Hub = Hub{Addr: "hub.example:443", FP: fp, Share: "public.example:444"}
+		}, nil},
+		{"missing center", func(c *Config) { c.Center = Center{} }, []string{"center.id", "center.api"}},
+		{"missing ID", func(c *Config) { c.Center.ID = "" }, []string{"center.id"}},
+		{"missing API", func(c *Config) { c.Center.API = nil }, []string{"center.api"}},
+		{"invalid API", func(c *Config) { c.Center.API = []string{"http://center.example"} }, []string{"center.api[0]"}},
+		{"invalid listen", func(c *Config) { c.Operator.Listen = "invalid" }, []string{"operator.listen"}},
+		{"invalid endpoint", func(c *Config) { c.Operator.Endpoint = "invalid" }, []string{"operator.endpoint"}},
+		{"invalid hub address", func(c *Config) { c.Operator.Hub.Addr = "invalid" }, []string{"operator.hub.addr"}},
+		{"invalid hub fingerprint", func(c *Config) { c.Operator.Hub.FP = "invalid" }, []string{"operator.hub.fp"}},
+		{"invalid hub share", func(c *Config) { c.Operator.Hub.Share = "invalid" }, []string{"operator.hub.share"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := baseConfig()
+			cfg.Role = RoleOperator
+			cfg.Operator.Mode = "center"
+			cfg.Operator.Listen = ""
+			cfg.Center = Center{ID: "primary", API: []string{"https://center.example"}}
+			tc.change(&cfg)
+			err := cfg.Validate()
+			if len(tc.fields) == 0 && err != nil {
+				t.Fatalf("Validate: %v", err)
+			}
+			for _, field := range tc.fields {
+				if err == nil || !strings.Contains(err.Error(), field) {
+					t.Errorf("Validate: want error naming %s, got %v", field, err)
+				}
+			}
+		})
+	}
+}
+
 func TestV2StrictDecodingAndRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	cfg := Default()
@@ -129,24 +173,28 @@ func TestLoadBuildDefaultCenter(t *testing.T) {
 	t.Cleanup(func() { defaultCenterJSON = original })
 	// Simulate -ldflags '-X remote-enet/internal/settings.defaultCenterJSON={"id":"official","api":["https://center.example"]}'.
 	defaultCenterJSON = `{"id":"official","api":["https://center.example"]}`
-	if got := Default(); got.Center.ID != "official" {
-		t.Fatalf("Default lost the build center: %+v", got.Center)
+	wantDefault := baseConfig()
+	wantDefault.Operator.Mode = "center"
+	wantDefault.Center = Center{ID: "official", API: []string{"https://center.example"}}
+	if got := Default(); !got.Equal(wantDefault) {
+		t.Fatalf("Default with a build center: %+v", got)
 	}
 	dir := t.TempDir()
 	legacy := filepath.Join(dir, "v1.json")
 	writeTestConfig(t, legacy, []byte(fixture))
-	for _, path := range []string{legacy, filepath.Join(dir, "missing.json")} {
-		got, err := Load(path)
-		if err != nil || got.Version != Version || got.Operator.Mode != "direct" || got.Operator.Hub != (Hub{}) ||
-			got.Center.ID != "official" || len(got.Center.API) != 1 || got.Center.API[0] != "https://center.example" {
-			t.Fatalf("build defaults for %s: %+v, %v", path, got, err)
-		}
+	missing := filepath.Join(dir, "missing.json")
+	if got, err := Load(missing); err != nil || !got.Equal(wantDefault) {
+		t.Fatalf("missing config with a build center: %+v, %v", got, err)
 	}
-	assertFileUnchanged(t, legacy, []byte(fixture))
 	migrated, err := Load(legacy)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if migrated.Version != Version || migrated.Operator.Mode != "direct" || migrated.Operator.Hub != (Hub{}) ||
+		migrated.Center.ID != wantDefault.Center.ID || !slices.Equal(migrated.Center.API, wantDefault.Center.API) {
+		t.Fatalf("v1 migration with a build center: %+v", migrated)
+	}
+	assertFileUnchanged(t, legacy, []byte(fixture))
 	if err := Save(legacy, migrated); err != nil {
 		t.Fatal(err)
 	}
@@ -155,16 +203,21 @@ func TestLoadBuildDefaultCenter(t *testing.T) {
 		t.Fatalf("migration was not saved as v2: %s, %v", saved, err)
 	}
 	explicit := filepath.Join(dir, "v2.json")
-	if err := Save(explicit, baseConfig()); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := Load(explicit); err != nil || !got.Equal(baseConfig()) {
-		t.Fatalf("explicit empty center replaced: %+v, %v", got, err)
+	hub := baseConfig()
+	hub.Operator.Mode = "hub"
+	hub.Operator.Hub = Hub{Addr: "hub.example:443", FP: identity.Fingerprint{1}.String()}
+	for _, cfg := range []Config{baseConfig(), hub, wantDefault} {
+		if err := Save(explicit, cfg); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := Load(explicit); err != nil || !got.Equal(cfg) {
+			t.Fatalf("existing v2 %s config changed: %+v, %v", cfg.Operator.Mode, got, err)
+		}
 	}
 	writeTestConfig(t, legacy, []byte(fixture))
 	for _, invalid := range []string{`{"id":"INVALID","api":["https://center.example"]}`, `{"id":"official","api":[null]}`} {
 		defaultCenterJSON = invalid
-		for _, path := range []string{legacy, explicit, filepath.Join(dir, "missing.json")} {
+		for _, path := range []string{legacy, explicit, missing} {
 			if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "default center") {
 				t.Errorf("invalid build defaults for %s: %v", path, err)
 			}

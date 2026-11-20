@@ -27,8 +27,7 @@ func Load(path string) (Config, error) {
 		if err := checkMissingConfigParents(path); err != nil {
 			return Config{}, err
 		}
-		cfg := baseConfig()
-		cfg.Center, err = loadDefaultCenter()
+		cfg, err := defaultConfig()
 		if err != nil {
 			return Config{}, err
 		}

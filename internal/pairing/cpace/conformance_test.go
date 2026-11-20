@@ -57,13 +57,9 @@ func TestConformanceCI(t *testing.T) {
 			if b.Capability != proto.PairDirectCapability {
 				b.HubFP = [32]byte(v.bytes(t, "hub_fp"))
 			}
-			if b.Capability == "pair-center/1" {
-				w.check(t, "ci", lvCat(
-					[]byte("renet-pake-v1"), []byte(suiteID), []byte(b.Capability), []byte("renet/1"),
-					b.ClientFP[:], b.OperatorFP[:], b.HelloClientHash[:], b.HelloOperatorHash[:],
-					b.HubFP[:], []byte(v.text(t, "center_id")), v.bytes(t, "session_id"),
-				))
-				return
+			if b.Capability == proto.PairCenterCapability {
+				b.CenterID = v.text(t, "center_id")
+				b.SessionID = [16]byte(v.bytes(t, "session_id"))
 			}
 			ci, err := b.ci()
 			if err != nil {

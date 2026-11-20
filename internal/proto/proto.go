@@ -22,6 +22,9 @@ const PairDirectCapability = "pair-direct/1"
 // PairHubCapability binds numeric pairing to the observed Hub fingerprint.
 const PairHubCapability = "pair-hub/1"
 
+// PairCenterCapability binds numeric pairing to a Hub, center and session.
+const PairCenterCapability = "pair-center/1"
+
 // HubTicketCapability negotiates device ticket delivery after pairing.
 const HubTicketCapability = "hub-ticket/1"
 

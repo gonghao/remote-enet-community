@@ -469,6 +469,7 @@
   "Cancel": "取消",
   "Cannot reach hub": "无法连接 Hub",
   "Center": "中心",
+  "Center API": "中心 API 地址",
   "Center API URLs": "中心 API 地址（空格分隔）",
   "Center ID": "中心 ID",
   "Center ID mismatch": "中心标识不一致",

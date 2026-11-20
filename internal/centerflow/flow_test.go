@@ -19,6 +19,7 @@ import (
 	"remote-enet/internal/hubauth"
 	"remote-enet/internal/hubcenter"
 	"remote-enet/internal/identity"
+	"remote-enet/internal/locales"
 	"remote-enet/internal/proto"
 	"remote-enet/internal/secure"
 	"remote-enet/internal/session"
@@ -753,5 +754,23 @@ func TestFirstTicketBudget(t *testing.T) {
 	err := waitRun(t, launch(f.ctx, f.cl, session.Options{}, hold))
 	if !errors.Is(err, center.ErrUnreachable) || f.cl.Snapshot().Reason != CenterUnreachable {
 		t.Fatal(err, f.cl.Snapshot())
+	}
+}
+
+func TestProtocolReasons(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want Reason
+	}{
+		{session.ErrVersion, PeerVersionIncompatible}, {center.ErrProtocol, CenterProtocolError},
+		{&center.Error{Code: "upgrade_required"}, UpgradeRequired},
+		{&center.Error{Code: "bad_request"}, "bad_request"}, {&center.Error{Code: "state_conflict"}, "state_conflict"},
+		{&center.Error{Code: "idempotency_key_reused"}, "idempotency_key_reused"}, {&center.Error{Code: "forbidden"}, Forbidden},
+	} {
+		reason := ReasonOf(tc.err)
+		msg := locales.CenterMessage(string(reason), "client")
+		if reason != tc.want || msg == "" || msg == "Action failed" || locales.Text("zh-Hans", msg) == msg || locales.Text("zh-Hant", msg) == msg {
+			t.Errorf("%v: %q (%s)", tc.err, reason, msg)
+		}
 	}
 }

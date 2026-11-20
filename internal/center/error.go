@@ -12,6 +12,9 @@ import (
 // ErrUnreachable marks exhaustion of the configured entries or retry budget.
 var ErrUnreachable = errors.New("center unreachable")
 
+// ErrProtocol identifies an invalid success response from a center endpoint.
+var ErrProtocol = ErrEndpointResponse
+
 // Class determines whether Do may repeat a request.
 type Class uint8
 

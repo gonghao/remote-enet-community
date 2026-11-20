@@ -396,7 +396,7 @@ func (f *flow) serveData(ctx context.Context, r *reception, s center.Session, ss
 		_, err = retryAPI(data, f, func() (center.Session, error) {
 			reply, err := f.API.Established(data, r.establishedKey, s.SessionID, ss.Peer())
 			if err == nil && reply.State != "active" {
-				return reply, errors.New("centerflow: center did not confirm active session")
+				return reply, center.ErrProtocol
 			}
 			return reply, err
 		})

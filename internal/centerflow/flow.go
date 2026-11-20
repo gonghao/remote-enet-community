@@ -25,44 +25,46 @@ type Reason string
 func (r Reason) Error() string { return string(r) }
 
 const (
-	NICMissing         Reason = "nic_missing"
-	CenterUnconfigured Reason = "center_unconfigured"
-	CenterUnreachable  Reason = "center_unreachable"
-	DeviceBusy         Reason = "device_busy"
-	CodeInvalid        Reason = "code_invalid"
-	PairingLost        Reason = "pairing_lost"
-	HubUnauthorized    Reason = "hub_unauthorized"
-	OperatorWaiting    Reason = "operator_waiting"
-	Busy               Reason = "busy"
-	Confirmation       Reason = "confirmation"
-	CenterIDMismatch   Reason = "center_id_mismatch"
-	UpgradeRequired    Reason = "upgrade_required"
-	RateLimited        Reason = "rate_limited"
-	AccountCodeFormat  Reason = "account_code_format"
-	AccountCodeInvalid Reason = "account_code_invalid"
-	AccountDisabled    Reason = "account_disabled"
-	AccountExpired     Reason = "account_expired"
-	DeviceLimit        Reason = "device_limit"
-	Unauthenticated    Reason = "unauthenticated"
-	QuotaExhausted     Reason = "quota_exhausted"
-	QuotaReleasing     Reason = "quota_releasing"
-	NodeUnavailable    Reason = "node_unavailable"
-	AwaitingCenter     Reason = "awaiting_center"
-	OperatorEnded      Reason = "operator_ended"
-	ClientEnded        Reason = "client_ended"
-	Rejected           Reason = "rejected"
-	ConfirmTimeout     Reason = "confirm_timeout"
-	PakeFailed         Reason = "pake_failed"
-	CodeExpired        Reason = "code_expired"
-	RedeemLimit        Reason = "redeem_limit"
-	PairTimeout        Reason = "pair_timeout"
-	IdleTimeout        Reason = "idle_timeout"
-	DeviceRevoked      Reason = "device_revoked"
-	NodeLost           Reason = "node_lost"
-	NodeDisabled       Reason = "node_disabled"
-	AdminRevoked       Reason = "admin_revoked"
-	NotFound           Reason = "not_found"
-	Forbidden          Reason = "forbidden"
+	PeerVersionIncompatible Reason = "peer_version_incompatible"
+	CenterProtocolError     Reason = "center_protocol_error"
+	NICMissing              Reason = "nic_missing"
+	CenterUnconfigured      Reason = "center_unconfigured"
+	CenterUnreachable       Reason = "center_unreachable"
+	DeviceBusy              Reason = "device_busy"
+	CodeInvalid             Reason = "code_invalid"
+	PairingLost             Reason = "pairing_lost"
+	HubUnauthorized         Reason = "hub_unauthorized"
+	OperatorWaiting         Reason = "operator_waiting"
+	Busy                    Reason = "busy"
+	Confirmation            Reason = "confirmation"
+	CenterIDMismatch        Reason = "center_id_mismatch"
+	UpgradeRequired         Reason = "upgrade_required"
+	RateLimited             Reason = "rate_limited"
+	AccountCodeFormat       Reason = "account_code_format"
+	AccountCodeInvalid      Reason = "account_code_invalid"
+	AccountDisabled         Reason = "account_disabled"
+	AccountExpired          Reason = "account_expired"
+	DeviceLimit             Reason = "device_limit"
+	Unauthenticated         Reason = "unauthenticated"
+	QuotaExhausted          Reason = "quota_exhausted"
+	QuotaReleasing          Reason = "quota_releasing"
+	NodeUnavailable         Reason = "node_unavailable"
+	AwaitingCenter          Reason = "awaiting_center"
+	OperatorEnded           Reason = "operator_ended"
+	ClientEnded             Reason = "client_ended"
+	Rejected                Reason = "rejected"
+	ConfirmTimeout          Reason = "confirm_timeout"
+	PakeFailed              Reason = "pake_failed"
+	CodeExpired             Reason = "code_expired"
+	RedeemLimit             Reason = "redeem_limit"
+	PairTimeout             Reason = "pair_timeout"
+	IdleTimeout             Reason = "idle_timeout"
+	DeviceRevoked           Reason = "device_revoked"
+	NodeLost                Reason = "node_lost"
+	NodeDisabled            Reason = "node_disabled"
+	AdminRevoked            Reason = "admin_revoked"
+	NotFound                Reason = "not_found"
+	Forbidden               Reason = "forbidden"
 )
 
 // ReasonOf ignores server message text and preserves the authoritative end reason.
@@ -77,7 +79,11 @@ func ReasonOf(err error) Reason {
 	case errors.Is(err, session.ReasonUnsupported):
 		return "unsupported"
 	case errors.Is(err, session.ErrVersion):
-		return UpgradeRequired
+		return PeerVersionIncompatible
+	case errors.Is(err, center.ErrProtocol):
+		return CenterProtocolError
+	case errors.Is(err, center.ErrBadRequest):
+		return "bad_request"
 	case errors.Is(err, center.ErrUnreachable):
 		return CenterUnreachable
 	case errors.As(err, &e) && e.Code != "":
@@ -266,7 +272,7 @@ func (f *flow) end(ctx context.Context, r *reception, why Reason) error {
 		return f.handle(ctx, r, err)
 	}
 	if s.EndReason == nil {
-		return errors.New("centerflow: center did not end reception")
+		return center.ErrProtocol
 	}
 	return f.cleanup(ctx, r, Reason(*s.EndReason))
 }

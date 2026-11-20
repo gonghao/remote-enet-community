@@ -1,4 +1,10 @@
 {
+  "The center rejected the request format": "The center rejected the request format",
+  "The current session state does not allow this action": "The current session state does not allow this action",
+  "The request key was reused for a different operation": "The request key was reused for a different operation",
+  "This device does not have permission for this action": "This device does not have permission for this action",
+  "The peer protocol version is incompatible": "The peer protocol version is incompatible",
+  "The center returned an invalid response": "The center returned an invalid response",
   "Connect to hub and wait": "Connect to hub and wait",
   "Complete these settings: %s": "Complete these settings: %s",
   "Invite Client": "Invite Client",

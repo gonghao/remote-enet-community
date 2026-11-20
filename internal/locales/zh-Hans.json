@@ -1,4 +1,10 @@
 {
+  "The center rejected the request format": "中心拒绝了请求格式",
+  "The current session state does not allow this action": "当前会话状态不允许此操作",
+  "The request key was reused for a different operation": "不同操作使用了同一请求键",
+  "This device does not have permission for this action": "此设备无权执行此操作",
+  "The peer protocol version is incompatible": "对端协议版本不兼容",
+  "The center returned an invalid response": "中心返回了无效响应",
   "Connect to hub and wait": "连接 Hub 并等待",
   "Complete these settings: %s": "请在设置中补全：%s",
   "Invite Client": "邀请 Client",

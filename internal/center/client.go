@@ -349,14 +349,14 @@ func (c *Client) attempt(ctx context.Context, e *entry, call Call, body []byte, 
 		return result, fmt.Errorf("%w: read response: %w", ErrUnreachable, err)
 	}
 	if len(data) > maxResponseBody {
-		return result, fmt.Errorf("center: response exceeds %d bytes", maxResponseBody)
+		return result, fmt.Errorf("%w: response exceeds %d bytes", ErrProtocol, maxResponseBody)
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return result, responseError(res.StatusCode, data)
 	}
 	if out != nil {
 		if err := json.Unmarshal(data, out); err != nil {
-			return result, fmt.Errorf("center: invalid success response")
+			return result, ErrProtocol
 		}
 	}
 	return result, nil

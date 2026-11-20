@@ -30,15 +30,44 @@ type centerVector[I, E any] struct {
 	Expect E
 }
 
-func readCenterVectors[I, E any](t *testing.T, file string) []centerVector[I, E] {
+type centerVectorHeader struct {
+	Format           int
+	Contract, Vector string
+}
+
+func (doc centerVectorHeader) valid(vector string) bool {
+	return doc.Format == 1 && doc.Vector == vector && doc.Contract == "CENTER-CONTRACT v1 第八版（2026-11-20）"
+}
+
+func TestCenterVectorHeader(t *testing.T) {
+	for _, change := range []func(*centerVectorHeader){
+		func(h *centerVectorHeader) { h.Format++ },
+		func(h *centerVectorHeader) { h.Vector = "V6" },
+		func(h *centerVectorHeader) { h.Contract = "" },
+	} {
+		h := centerVectorHeader{Format: 1, Vector: "V4/V5", Contract: "CENTER-CONTRACT v1 第八版（2026-11-20）"}
+		change(&h)
+		if h.valid("V4/V5") {
+			t.Errorf("accepted invalid vector header %+v", h)
+		}
+	}
+}
+
+func readCenterVectors[I, E any](t *testing.T, file, vector string) []centerVector[I, E] {
 	t.Helper()
-	var doc struct{ Cases []centerVector[I, E] }
+	var doc struct {
+		centerVectorHeader
+		Cases []centerVector[I, E]
+	}
 	b, err := os.ReadFile(filepath.Join("..", "..", "testdata", "conformance", file))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := json.Unmarshal(b, &doc); err != nil {
 		t.Fatal(err)
+	}
+	if !doc.valid(vector) {
+		t.Fatalf("%s: unexpected header format=%d vector=%q contract=%q", file, doc.Format, doc.Vector, doc.Contract)
 	}
 	if len(doc.Cases) == 0 {
 		t.Fatal("empty vector file")
@@ -92,7 +121,7 @@ type issuanceOutput struct {
 }
 
 func TestCenterIssuanceVectors(t *testing.T) {
-	for _, v := range readCenterVectors[issuanceInput, issuanceOutput](t, "v04-ticket.json") {
+	for _, v := range readCenterVectors[issuanceInput, issuanceOutput](t, "v04-ticket.json", "V4/V5") {
 		t.Run(v.Name, func(t *testing.T) {
 			seed := sha256.Sum256([]byte("renet-conformance-v1/" + v.Input.SigningKey))
 			priv := ed25519.NewKeyFromSeed(seed[:])
@@ -119,8 +148,18 @@ func TestCenterIssuanceVectors(t *testing.T) {
 				SigStructure: hex.EncodeToString(signatureInput(protected, payload)),
 				Length:       len(raw),
 			}
-			if output != v.Expect || len(raw) > 512 || v.Input.Claims.V != 1 {
-				t.Fatal("center issuance vector mismatch")
+			for _, field := range []struct{ name, got, want string }{
+				{"kid", output.Kid, v.Expect.Kid}, {"payload", output.Payload, v.Expect.Payload},
+				{"protected", output.Protected, v.Expect.Protected}, {"signature", output.Signature, v.Expect.Signature},
+				{"ticket", output.Token, v.Expect.Token}, {"sig_structure", output.SigStructure, v.Expect.SigStructure},
+				{"result", output.Result, v.Expect.Result},
+			} {
+				if field.got != field.want {
+					t.Errorf("%s: got %s, want %s", field.name, field.got, field.want)
+				}
+			}
+			if output.Length != v.Expect.Length || len(raw) > 512 || v.Input.Claims.V != 1 {
+				t.Errorf("length=%d (want %d, max 512), version=%d (want 1)", len(raw), v.Expect.Length, v.Input.Claims.V)
 			}
 			expect := CenterExpect{
 				Center:       c.Center,
@@ -171,7 +210,7 @@ type admissionInput struct {
 
 func TestCenterAdmissionVectors(t *testing.T) {
 	type outcome struct{ Result, Reason string }
-	vectors := readCenterVectors[admissionInput, outcome](t, "v08-ticket-reject.json")
+	vectors := readCenterVectors[admissionInput, outcome](t, "v08-ticket-reject.json", "V8–V15")
 	required := map[string]string{"v8-modified-role": "8.4/4", "v10-duplicate-payload-key": "8.4/5"}
 	for _, v := range vectors {
 		if step, ok := required[v.Name]; ok && v.Expect == (outcome{"reject", step}) {
@@ -228,7 +267,7 @@ func TestCenterAdmissionVectors(t *testing.T) {
 }
 
 func TestSignCenterBounds(t *testing.T) {
-	v := readCenterVectors[issuanceInput, issuanceOutput](t, "v04-ticket.json")[0]
+	v := readCenterVectors[issuanceInput, issuanceOutput](t, "v04-ticket.json", "V4/V5")[0]
 	for _, modify := range []func(*CenterClaims){
 		func(c *CenterClaims) { c.Center = "" },
 		func(c *CenterClaims) { c.Center = strings.Repeat("a", 33) },
@@ -245,7 +284,7 @@ func TestSignCenterBounds(t *testing.T) {
 }
 
 func TestSignCenterTTLBoundaries(t *testing.T) {
-	v := readCenterVectors[issuanceInput, issuanceOutput](t, "v04-ticket.json")[0].Input
+	v := readCenterVectors[issuanceInput, issuanceOutput](t, "v04-ticket.json", "V4/V5")[0].Input
 	c := v.claims()
 	c.Expires = time.Time{}
 	for _, modify := range []func(*CenterIssuePolicy){

@@ -500,6 +500,8 @@
   "Share address": "分享地址",
   "Copy hub address": "复制 Hub 地址",
   "Via hub %s": "经 Hub %s",
+  "Connecting to hub": "正在连接 Hub",
+  "Hub has not authorized this device": "Hub 未授权本机",
   "Waiting on hub": "已在 Hub 等待",
   "Hub address must include a host and port.": "Hub 地址必须包含主机和端口。",
   "Enter the full Hub fingerprint.": "请输入完整的 Hub 指纹。",

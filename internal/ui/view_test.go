@@ -781,6 +781,15 @@ func TestOperatorHubSettingsAndPath(t *testing.T) {
 	if !v.canListen() || !v.canInvite() {
 		t.Fatal("share address fallback unavailable")
 	}
+	for _, tc := range []struct{ message, title string }{
+		{"", "Connecting to hub"},
+		{"Hub has not authorized this device. Check the entry and the system time.", "Hub has not authorized this device"},
+	} {
+		v.SetState(State{Running: true, Runtime: app.Snapshot{Phase: app.PhaseListening, LastError: tc.message}})
+		if title, _, _ := v.stage(); title != tc.title {
+			t.Fatalf("stage = %q, want %q", title, tc.title)
+		}
+	}
 	v.SetState(State{Running: true, Runtime: app.Snapshot{Phase: app.PhaseListening, HubWaiting: true}})
 	tt = ui.NewTester(v.Render, 1080, 1000)
 	if !tt.HasText("Waiting on hub") || !tt.HasText("Not configured") {

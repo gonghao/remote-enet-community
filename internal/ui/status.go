@@ -39,6 +39,12 @@ func (v *View) stage() (string, string, ui.Color) {
 		if v.state.Runtime.HubWaiting {
 			return "Waiting on hub", "Waiting for a client to connect.", blue
 		}
+		if v.role == settings.RoleOperator && v.saved.Operator.Mode == "hub" {
+			if v.hubWaitDenied() {
+				return "Hub has not authorized this device", "", amber
+			}
+			return "Connecting to hub", "", blue
+		}
 		return "Listening", "Waiting for a client to connect.", blue
 	case app.PhaseConnected:
 		return "Connected", "The peer session is established.", green

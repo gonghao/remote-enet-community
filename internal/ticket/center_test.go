@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,15 @@ import (
 
 	"remote-enet/internal/identity"
 )
+
+func rejectionStep(t *testing.T, err error) string {
+	t.Helper()
+	var step *StepError
+	if !errors.As(err, &step) || errors.Unwrap(step) == nil {
+		t.Fatalf("expected StepError with cause, got %v", err)
+	}
+	return step.Step
+}
 
 type centerVector[I, E any] struct {
 	Name   string
@@ -123,14 +133,14 @@ func TestCenterIssuanceVectors(t *testing.T) {
 				ClockSkew:    v.Input.ClockSkew,
 				TicketMaxTTL: v.Input.TicketMaxTTL,
 			}
-			if _, err := VerifyCenter(raw, nil, expect, time.Unix(v.Input.Now, 0)); err == nil || !strings.HasPrefix(err.Error(), "8.4/3:") {
+			if _, err := VerifyCenter(raw, nil, expect, time.Unix(v.Input.Now, 0)); rejectionStep(t, err) != "8.4/3" {
 				t.Fatalf("missing trust roots: %v", err)
 			}
 			got, err := VerifyCenter(raw, lookup, expect, time.Unix(v.Input.Now, 0))
 			if err != nil || got != c {
 				t.Fatalf("verified claims %+v: %v", got, err)
 			}
-			if _, _, err := Verify(raw, lookup); err == nil || !strings.HasPrefix(err.Error(), "A5:") {
+			if _, _, err := Verify(raw, lookup); rejectionStep(t, err) != "A5" {
 				t.Fatalf("self-hosted verifier: %v", err)
 			}
 		})
@@ -198,7 +208,7 @@ func TestCenterAdmissionVectors(t *testing.T) {
 			_, err := VerifyCenter(raw, lookup, expect, time.Unix(input.Now, 0))
 			got := outcome{Result: "accept"}
 			if err != nil {
-				reason, _, _ := strings.Cut(err.Error(), ":")
+				reason := rejectionStep(t, err)
 				got = outcome{Result: "reject",
 					Reason: reason}
 			}

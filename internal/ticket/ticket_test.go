@@ -140,7 +140,7 @@ func TestEnvelopeRejections(t *testing.T) {
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			_, _, err := Verify(tc.raw, lookup)
-			if err == nil || !strings.Contains(err.Error(), tc.stage) {
+			if rejectionStep(t, err) != tc.stage {
 				t.Fatalf("expected %s, got %v", tc.stage, err)
 			}
 		})
@@ -356,7 +356,7 @@ func TestDeterministicEncoding(t *testing.T) {
 	}
 	check := func(name, stage string, b []byte) {
 		t.Run(name, func(t *testing.T) {
-			if _, _, err := Verify(b, lookup); err == nil || !strings.HasPrefix(err.Error(), stage) {
+			if _, _, err := Verify(b, lookup); rejectionStep(t, err) != stage {
 				t.Fatalf("expected %s, got %v", stage, err)
 			}
 		})

@@ -65,18 +65,18 @@ func SignCenter(priv ed25519.PrivateKey, c CenterClaims, policy CenterIssuePolic
 }
 
 // VerifyCenter applies CENTER-CONTRACT §8.4 steps 1–9 before acquiring the route lock.
-// Failures carry the contract step as an "8.4/N:" prefix for local diagnostics.
+// Failures carry the contract step in a StepError.
 func VerifyCenter(raw []byte, keys func(Kid) (ed25519.PublicKey, bool), expect CenterExpect, now time.Time) (CenterClaims, error) {
 	if len(raw) == 0 {
-		return CenterClaims{}, errors.New("8.4/1: empty token")
+		return CenterClaims{}, &StepError{"8.4/1", errors.New("empty token")}
 	}
 	_, payload, step, err := openEnvelope(raw, keys, false)
 	if err != nil {
-		return CenterClaims{}, fmt.Errorf("8.4/%d: %w", step, err)
+		return CenterClaims{}, &StepError{fmt.Sprintf("8.4/%d", step), err}
 	}
 	f, err := decodeFields(payload, 1)
 	if err != nil {
-		return CenterClaims{}, fmt.Errorf("8.4/5: %w", err)
+		return CenterClaims{}, &StepError{"8.4/5", err}
 	}
 	c := CenterClaims{
 		Center:     f[2].(string),
@@ -94,16 +94,16 @@ func VerifyCenter(raw []byte, keys func(Kid) (ed25519.PublicKey, bool), expect C
 		Generation: uint32(f[14].(uint64)),
 	}
 	if c.Center != expect.Center || c.Node != expect.Node || c.Hub != expect.Hub || c.Generation != expect.Generation {
-		return CenterClaims{}, errors.New("8.4/6: wrong center, node, hub or generation")
+		return CenterClaims{}, &StepError{"8.4/6", errors.New("wrong center, node, hub or generation")}
 	}
 	if c.Device != expect.TLSDevice {
-		return CenterClaims{}, errors.New("8.4/7: TLS device mismatch")
+		return CenterClaims{}, &StepError{"8.4/7", errors.New("TLS device mismatch")}
 	}
 	if c.Role != expect.Role || expect.Target.IsZero() || c.Peer != expect.Target {
-		return CenterClaims{}, errors.New("8.4/8: invalid route binding")
+		return CenterClaims{}, &StepError{"8.4/8", errors.New("invalid route binding")}
 	}
 	if err := checkWindow(c.IssuedAt.Unix(), c.NotBefore.Unix(), c.Expires.Unix(), now.Unix(), expect.ClockSkew, expect.TicketMaxTTL); err != nil {
-		return CenterClaims{}, fmt.Errorf("8.4/9: %w", err)
+		return CenterClaims{}, &StepError{"8.4/9", err}
 	}
 	return c, nil
 }

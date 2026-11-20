@@ -104,10 +104,19 @@ func signatureInput(protected, payload []byte) []byte {
 	return must(enc.Marshal([]any{"Signature1", protected, []byte{}, payload}))
 }
 
+// StepError identifies the contract check that rejected a ticket.
+type StepError struct {
+	Step string
+	Err  error
+}
+
+func (e *StepError) Error() string { return e.Step + ": " + e.Err.Error() }
+func (e *StepError) Unwrap() error { return e.Err }
+
 // Verify authenticates the original encoded bytes before interpreting the claims.
 func Verify(raw []byte, key func(Kid) (ed25519.PublicKey, bool)) (Kid, Claims, error) {
 	if key == nil {
-		return Kid{}, Claims{}, errors.New("missing issuer lookup")
+		return Kid{}, Claims{}, &StepError{"A3", errors.New("missing issuer lookup")}
 	}
 	return parse(raw, key)
 }
@@ -118,11 +127,11 @@ func Inspect(raw []byte) (Kid, Claims, error) { return parse(raw, nil) }
 func parse(raw []byte, key func(Kid) (ed25519.PublicKey, bool)) (Kid, Claims, error) {
 	kid, payload, step, err := openEnvelope(raw, key, key == nil)
 	if err != nil {
-		return Kid{}, Claims{}, fmt.Errorf("A%d: %w", step, err)
+		return Kid{}, Claims{}, &StepError{fmt.Sprintf("A%d", step), err}
 	}
 	c, err := decodeClaims(payload)
 	if err != nil {
-		return Kid{}, Claims{}, fmt.Errorf("A5: %w", err)
+		return Kid{}, Claims{}, &StepError{"A5", err}
 	}
 	return kid, c, nil
 }

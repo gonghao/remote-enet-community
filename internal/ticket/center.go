@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"time"
 
@@ -34,16 +35,27 @@ type CenterExpect struct {
 	ClockSkew, TicketMaxTTL int64
 }
 
-// SignCenter requires iat == nbf at issuance and enforces the supplied TTL limit in seconds.
-func SignCenter(priv ed25519.PrivateKey, c CenterClaims, ticketMaxTTL int64) ([]byte, error) {
+// CenterIssuePolicy specifies durations in seconds and the earliest session or account deadline.
+type CenterIssuePolicy struct {
+	TicketTTL, TicketMaxTTL, ClockSkew int64
+	HardDeadline                       time.Time
+}
+
+// SignCenter derives expiration from the policy. The Expires field is output-only.
+func SignCenter(priv ed25519.PrivateKey, c CenterClaims, policy CenterIssuePolicy) ([]byte, error) {
 	if !centerID.MatchString(c.Center) || (c.Role != roleDial && c.Role != roleWait) || c.Peer.IsZero() {
 		return nil, errors.New("invalid center, role or peer")
 	}
-	i, n, e := c.IssuedAt.Unix(), c.NotBefore.Unix(), c.Expires.Unix()
+	i, n := c.IssuedAt.Unix(), c.NotBefore.Unix()
+	deadline := policy.HardDeadline.Unix()
+	if i < 0 || i > math.MaxUint32 || policy.TicketTTL <= 0 || deadline <= i || policy.ClockSkew < 0 || policy.ClockSkew > (deadline-i)/2 {
+		return nil, errors.New("invalid issuance window")
+	}
+	e := i + min(policy.TicketTTL, deadline-i-2*policy.ClockSkew)
 	if i != n {
 		return nil, errors.New("signing requires iat equal to nbf")
 	}
-	if err := checkWindow(i, n, e, i, 0, ticketMaxTTL); err != nil {
+	if err := checkWindow(i, n, e, i, 0, policy.TicketMaxTTL); err != nil {
 		return nil, err
 	}
 	return signFields(priv, map[uint64]any{

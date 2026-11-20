@@ -37,6 +37,9 @@ func readCenterVectors[I, E any](t *testing.T, file string) []centerVector[I, E]
 }
 
 type issuanceInput struct {
+	TicketTTL    int64  `json:"ticket_ttl"`
+	ClockSkew    int64  `json:"clock_skew"`
+	HardDeadline int64  `json:"hard_deadline"`
 	PublicKey    string `json:"public_key"`
 	SigningKey   string `json:"signing_key"`
 	TicketMaxTTL int64  `json:"ticket_max_ttl"`
@@ -47,6 +50,10 @@ type issuanceInput struct {
 		Iat, Nbf, Exp                                int64
 		Gen                                          uint32
 	}
+}
+
+func (v issuanceInput) policy() CenterIssuePolicy {
+	return CenterIssuePolicy{TicketTTL: v.TicketTTL, TicketMaxTTL: v.TicketMaxTTL, ClockSkew: v.ClockSkew, HardDeadline: time.Unix(v.HardDeadline, 0)}
 }
 
 func (v issuanceInput) claims() CenterClaims {
@@ -86,7 +93,7 @@ func TestCenterIssuanceVectors(t *testing.T) {
 			kid := KidOf(pub)
 			lookup := func(k Kid) (ed25519.PublicKey, bool) { return pub, k == kid }
 			c := v.Input.claims()
-			raw, err := SignCenter(priv, c, v.Input.TicketMaxTTL)
+			raw, err := SignCenter(priv, c, v.Input.policy())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -113,7 +120,7 @@ func TestCenterIssuanceVectors(t *testing.T) {
 				TLSDevice:    c.Device,
 				Role:         c.Role,
 				Target:       c.Peer,
-				ClockSkew:    30,
+				ClockSkew:    v.Input.ClockSkew,
 				TicketMaxTTL: v.Input.TicketMaxTTL,
 			}
 			if _, err := VerifyCenter(raw, nil, expect, time.Unix(v.Input.Now, 0)); err == nil || !strings.HasPrefix(err.Error(), "8.4/3:") {
@@ -218,14 +225,29 @@ func TestSignCenterBounds(t *testing.T) {
 		func(c *CenterClaims) { c.Role = 0 },
 		func(c *CenterClaims) { c.Peer = identity.Fingerprint{} },
 		func(c *CenterClaims) { c.NotBefore = c.IssuedAt.Add(time.Second) },
-		func(c *CenterClaims) { c.Expires = c.IssuedAt },
-		func(c *CenterClaims) { c.Expires = c.IssuedAt.Add(time.Duration(v.Input.TicketMaxTTL+1) * time.Second) },
-		func(c *CenterClaims) { c.Expires = time.Unix(1<<32, 0) },
 	} {
 		c := v.Input.claims()
 		modify(&c)
-		if _, err := SignCenter(private(), c, v.Input.TicketMaxTTL); err == nil {
+		if _, err := SignCenter(private(), c, v.Input.policy()); err == nil {
 			t.Errorf("signed invalid claims %+v", c)
+		}
+	}
+}
+
+func TestSignCenterTTLBoundaries(t *testing.T) {
+	v := readCenterVectors[issuanceInput, issuanceOutput](t, "v04-ticket.json")[0].Input
+	c := v.claims()
+	c.Expires = time.Time{}
+	for _, modify := range []func(*CenterIssuePolicy){
+		func(p *CenterIssuePolicy) { p.TicketTTL = p.TicketMaxTTL + 1 },
+		func(p *CenterIssuePolicy) {
+			p.HardDeadline = c.IssuedAt.Add(time.Duration(2*p.ClockSkew) * time.Second)
+		},
+	} {
+		p := v.policy()
+		modify(&p)
+		if _, err := SignCenter(private(), c, p); err == nil {
+			t.Errorf("accepted policy %+v", p)
 		}
 	}
 }

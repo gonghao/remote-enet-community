@@ -40,12 +40,17 @@ def generate(check: bool) -> list[Path]:
                   gen=dial[14], keys=[hex_fields(kid=kid, public_key=pub)],
                   clock_skew=30, ticket_max_ttl=300)
     valid = []
-    for name, fields in (("v4-v5-dial", dial), ("v4-max-size-wait", wait | {
-            2: "a" * 32, 14: MAX_UINT32})):
+    for name, fields, ttl, deadline in (
+            ("v4-v5-dial", dial, 120, NOW+600),
+            ("v4-hard-deadline", dial, 120, NOW+100),
+            ("v4-max-ttl", dial, 300, NOW+600),
+            ("v4-max-size-wait", wait | {2: "a" * 32, 14: MAX_UINT32}, 120, NOW+600)):
+        fields = fields | {12: min(NOW + ttl, deadline - 2 * config["clock_skew"])}
         claims = {NAMES[k-1]: v.hex() if isinstance(v, bytes) else v for k, v in fields.items()}
         expected = issue(encode(fields), protected) | hex_fields(kid=kid)
         assert expected["length"] <= 512
         valid.append(dict(name=name, input=dict(signing_key=ISSUER, public_key=pub.hex(), claims=claims,
+                          ticket_ttl=ttl, hard_deadline=deadline, clock_skew=config["clock_skew"],
                           ticket_max_ttl=config["ticket_max_ttl"], now=NOW), expect=expected))
     assert valid[-1]["expect"]["length"] == 326
 

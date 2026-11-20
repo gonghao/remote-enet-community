@@ -348,3 +348,25 @@ func TestWaitWithoutUsableDelay(t *testing.T) {
 		t.Fatalf("err %v", err)
 	}
 }
+
+func TestAllEntriesExcludedOnLastProbe(t *testing.T) {
+	for _, mixed := range []bool{false, true} {
+		c := testClient(t, "client", func(w http.ResponseWriter, r *http.Request) {
+			if !strings.HasSuffix(r.URL.Path, "/meta") {
+				t.Error("signed request to unverified entry")
+			}
+			if mixed && strings.HasPrefix(r.URL.Path, "/c/") {
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
+			io.WriteString(w, strings.Replace(validMeta, "garage", "other", 1))
+		})
+		c.entries = append(c.entries, &entry{base: c.entries[0].origin + "/c", origin: c.entries[0].origin, prefix: "/c", gate: make(chan struct{}, 1)})
+		for range 2 {
+			_, err := c.Do(t.Context(), get("/v1/nodes"), nil)
+			if errors.Is(err, ErrIDMismatch) == mixed || errors.Is(err, ErrUnreachable) != mixed {
+				t.Fatal(mixed, err)
+			}
+		}
+	}
+}

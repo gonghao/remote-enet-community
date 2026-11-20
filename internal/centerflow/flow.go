@@ -84,6 +84,8 @@ func ReasonOf(err error) Reason {
 		return CenterProtocolError
 	case errors.Is(err, center.ErrBadRequest):
 		return "bad_request"
+	case errors.Is(err, center.ErrIDMismatch):
+		return CenterIDMismatch
 	case errors.Is(err, center.ErrUnreachable):
 		return CenterUnreachable
 	case errors.As(err, &e) && e.Code != "":

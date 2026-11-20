@@ -669,10 +669,8 @@ func TestCenterIdentityMismatch(t *testing.T) {
 	local := must(identity.Generate())
 	deps := f.op.Dependencies
 	deps.API = must(center.NewClient(center.ClientOptions{Center: settings.Center{ID: "other-center", API: f.fc.Entries()}, Role: "operator", Device: local.Key, AppVersion: "1.0.0", HTTP: f.fc.HTTPClient()}))
-	// The signed client permanently excludes mismatched entries but exposes only
-	// ErrUnreachable. A distinct center sentinel is needed for a more precise UI reason.
 	_, err := NewOperator(deps).Account(f.ctx)
-	if ReasonOf(err) != CenterUnreachable || f.fc.Calls(0, "/v1/operator/account") != 0 {
+	if !errors.Is(err, center.ErrIDMismatch) || errors.Is(err, center.ErrUnreachable) || ReasonOf(err) != CenterIDMismatch || f.fc.Calls(0, "/v1/operator/account") != 0 {
 		t.Fatal(err)
 	}
 }

@@ -9,6 +9,9 @@ import (
 	"time"
 )
 
+// ErrIDMismatch means every configured entry advertised another center.
+var ErrIDMismatch = errors.New("center identity mismatch")
+
 // ErrUnreachable marks exhaustion of the configured entries or retry budget.
 var ErrUnreachable = errors.New("center unreachable")
 

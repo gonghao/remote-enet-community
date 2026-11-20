@@ -231,7 +231,7 @@ func (c *Client) Do(ctx context.Context, call Call, out any) (Response, error) {
 		}
 		for skipped := 0; c.entries[idx].status.Load() == IDMismatch; skipped++ {
 			if skipped == len(c.entries) {
-				return resp, ErrUnreachable
+				return resp, ErrIDMismatch
 			}
 			idx = (idx + 1) % len(c.entries)
 		}
@@ -293,6 +293,10 @@ func (c *Client) Do(ctx context.Context, call Call, out any) (Response, error) {
 			return resp, api
 		}
 		last = api
+	}
+	// The final allowed probe may exclude the last remaining entry.
+	if !slices.ContainsFunc(c.entries, func(e *entry) bool { return e.status.Load() != IDMismatch }) {
+		return resp, ErrIDMismatch
 	}
 	var api *Error
 	if errors.As(last, &api) && api.Class != ClassRetry {

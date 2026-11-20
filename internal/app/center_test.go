@@ -106,7 +106,9 @@ func TestCenterReception(t *testing.T) {
 			if err := NewWithCenterHTTP(fc.HTTPClient()).RunClient(ctx, missing); !errors.Is(err, PairingErrorKind("nic_missing")) || fc.Calls(0, "/v1/redeem") != 0 {
 				t.Fatalf("missing NIC: %v", err)
 			}
-			go func() { clDone <- cl.RunClient(ctx, clientCfg) }()
+			clientCtx, pauseClient := context.WithCancel(ctx)
+			defer pauseClient()
+			go func() { clDone <- cl.RunClient(clientCtx, clientCfg) }()
 			a := snapshotWhere(t, opStates, func(s Snapshot) bool { return s.Center.SASID != 0 })
 			b := snapshotWhere(t, clStates, func(s Snapshot) bool { return s.Center.SASID != 0 })
 			_, pa := op.CenterDisplay()
@@ -190,6 +192,17 @@ func TestCenterReception(t *testing.T) {
 				server.CloseAll()
 				a = connectedGeneration(t, opStates, 2)
 				sendDiagnostic(t, a.Diagnostic).Close()
+				pauseClient()
+				if err := <-clDone; !errors.Is(err, context.Canceled) {
+					t.Fatal(err)
+				}
+				clientCfg = chooseActiveSession(t, ctx, fc, node, clientCfg)
+				cl = NewWithCenterHTTP(fc.HTTPClient())
+				clStates = cl.Subscribe(ctx)
+				go func() { clDone <- cl.RunClient(ctx, clientCfg) }()
+				connectedGeneration(t, clStates, 1)
+				a = connectedGeneration(t, opStates, 3)
+				sendDiagnostic(t, a.Diagnostic).Close()
 				if err := cl.EndReception(ctx); err != nil {
 					t.Fatal(err)
 				}
@@ -215,6 +228,53 @@ func TestCenterReception(t *testing.T) {
 			}
 		})
 	}
+}
+
+func chooseActiveSession(t *testing.T, ctx context.Context, fc *fakecenter.Center, node center.NodeID, clientCfg ClientConfig) ClientConfig {
+	t.Helper()
+	var activeID center.SessionID
+	for id := range fc.Snapshot() {
+		if err := activeID.UnmarshalText([]byte(id)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	other := NewWithCenterHTTP(fc.HTTPClient())
+	account, err := other.CenterAccount(ctx, t.TempDir(), CenterConfig{Center: *clientCfg.Center})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, enroll := fc.CreateAccount("other", 1, time.Time{})
+	if err := account.Login(ctx, enroll, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := account.Start(ctx, node); err != nil {
+		t.Fatal(err)
+	}
+	clientCfg.CenterCode = account.Invitation()
+	// Drop the initial response and both idempotent replays.
+	for range 3 {
+		fc.Inject(0, "/v1/redeem", fakecenter.Fault{DropResponse: true})
+	}
+	err = NewWithCenterHTTP(fc.HTTPClient()).RunClient(ctx, clientCfg)
+	var choice *centerflow.ChooseSessionError
+	if !errors.Is(err, centerflow.ErrChooseSession) || !errors.As(err, &choice) || len(choice.Candidates()) != 2 {
+		t.Fatal("expected two candidates", err)
+	}
+	clientCfg.CenterCode = ""
+	for _, candidate := range choice.Candidates() {
+		if candidate.ID == activeID {
+			clientCfg.CenterResume = candidate.ID
+		}
+	}
+	if clientCfg.CenterResume == (center.SessionID{}) {
+		t.Fatal("active session missing")
+	}
+	missing := clientCfg
+	missing.Hooks.Interfaces = func(context.Context) ([]carside.NIC, error) { return nil, nil }
+	if err := NewWithCenterHTTP(fc.HTTPClient()).RunClient(ctx, missing); !errors.Is(err, PairingErrorKind("nic_missing")) {
+		t.Fatal(err)
+	}
+	return clientCfg
 }
 
 func startCenterHub(t *testing.T, parent context.Context) (*fakecenter.Center, settings.Center, center.NodeID, *hub.Server) {
@@ -345,5 +405,17 @@ func TestUnverifiedOperatorTimesOut(t *testing.T) {
 		if s.Phase != "ended" || s.Reason != centerflow.ConfirmTimeout {
 			t.Fatal(s)
 		}
+	}
+}
+
+func TestCenterResumeConfiguration(t *testing.T) {
+	cfg := ClientConfig{StateDir: t.TempDir(), CenterResume: center.SessionID{1}}
+	if err := cfg.defaults(); !errors.Is(err, PairingErrorKind("center_unconfigured")) {
+		t.Fatal(err)
+	}
+	cfg.Center = &settings.Center{ID: "test", API: []string{"https://center.invalid"}}
+	cfg.CenterCode = "12345678"
+	if err := cfg.defaults(); err == nil {
+		t.Fatal("accepted code and resume ID together")
 	}
 }

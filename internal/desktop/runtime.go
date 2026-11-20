@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"remote-enet/internal/app"
+	"remote-enet/internal/center"
 	"remote-enet/internal/centercode"
 	"remote-enet/internal/centerflow"
 	"remote-enet/internal/checkup"
@@ -58,15 +59,15 @@ type running struct {
 func (c *Controller) StartClient(ctx context.Context, input string) error {
 	// The app also decodes raw invitations, so pass it the legacy trimmed text.
 	input = strings.TrimSpace(input)
-	return c.start(ctx, settings.RoleClient, strings.TrimSpace(strings.TrimPrefix(input, "\uFEFF")), "")
+	return c.start(ctx, settings.RoleClient, strings.TrimSpace(strings.TrimPrefix(input, "\uFEFF")), "", nil)
 }
 
 // StartOperator stops listening only when Stop, Close or the parent context ends.
 func (c *Controller) StartOperator(ctx context.Context) error {
-	return c.start(ctx, settings.RoleOperator, "", "")
+	return c.start(ctx, settings.RoleOperator, "", "", nil)
 }
 
-func (c *Controller) start(ctx context.Context, role, input, node string) error {
+func (c *Controller) start(ctx context.Context, role, input, node string, resume *center.SessionID) error {
 	ctx, finish, epoch, err := c.operation(ctx, true)
 	if err != nil {
 		c.failure("Runtime could not be started.", err)
@@ -96,7 +97,15 @@ func (c *Controller) start(ctx context.Context, role, input, node string) error 
 		c.failureLocked("Save the selected role before starting.", ErrRole)
 		return ErrRole
 	}
-	client, op, peer, err := c.runtimeConfigs(cfg, input)
+	if resume != nil {
+		if cfg.Center.ID == "" {
+			return centerflow.CenterUnconfigured
+		}
+		if c.sessionChoice == nil || !slices.ContainsFunc(c.sessionChoice.Candidates(), func(item centerflow.SessionCandidate) bool { return item.ID == *resume }) {
+			return centerflow.NotFound
+		}
+	}
+	client, op, peer, err := c.runtimeConfigs(cfg, input, resume)
 	if err != nil {
 		message := "Check the saved settings and invitation before starting."
 		switch err {
@@ -169,7 +178,7 @@ func pairedEndpoint(ep transport.Endpoint, peer identity.Fingerprint, address st
 	return ep.Ticket != ""
 }
 
-func (c *Controller) runtimeConfigs(cfg settings.Config, code string) (app.ClientConfig, app.OperatorConfig, transport.PeerInfo, error) {
+func (c *Controller) runtimeConfigs(cfg settings.Config, code string, resume *center.SessionID) (app.ClientConfig, app.OperatorConfig, transport.PeerInfo, error) {
 	var pairing transport.PeerInfo
 	client := app.ClientConfig{StateDir: c.roleDir(settings.RoleClient), NICName: cfg.Client.NICName,
 		AllowLinkTest: cfg.AllowLinkTest}
@@ -184,7 +193,10 @@ func (c *Controller) runtimeConfigs(cfg settings.Config, code string) (app.Clien
 		if cfg.Client.NICAddr != "" {
 			client.NICAddr, _ = netip.ParseAddr(cfg.Client.NICAddr)
 		}
-		if code != "" {
+		if resume != nil {
+			client.CenterResume = *resume
+			client.Center, client.AppVersion = &cfg.Center, c.opts.AppVersion
+		} else if code != "" {
 			input, err := invite.ParseInput(code)
 			if err != nil {
 				return client, op, pairing, err

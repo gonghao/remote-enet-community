@@ -400,10 +400,18 @@ func (r *Runtime) runCenterClient(parent context.Context, cfg ClientConfig, id *
 		}
 		return nil
 	}
-	cl := centerflow.NewClient(centerflow.ClientDeps{Dependencies: d, CheckNIC: func(ctx context.Context) error { _, err := selectNIC(ctx, cfg); return err }})
+	checkNIC := func(ctx context.Context) error { _, err := selectNIC(ctx, cfg); return err }
+	cl := centerflow.NewClient(centerflow.ClientDeps{Dependencies: d, CheckNIC: checkNIC})
 	stop := r.watchReception(ctx, func() { cancel(context.Canceled) }, cl)
 	defer stop()
-	if cfg.CenterCode != "" {
+	if cfg.CenterResume != (center.SessionID{}) {
+		if err := checkNIC(ctx); err != nil {
+			return errors.Join(centerflow.NICMissing, err)
+		}
+		if err := cl.Resume(ctx, cfg.CenterResume); err != nil {
+			return err
+		}
+	} else if cfg.CenterCode != "" {
 		if err := cl.Redeem(ctx, cfg.CenterCode); err != nil {
 			return err
 		}

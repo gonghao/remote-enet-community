@@ -21,6 +21,11 @@ func (c *Controller) CenterSessionChoice() *centerflow.ChooseSessionError {
 	return c.sessionChoice
 }
 
+// ResumeCenterSession accepts only a candidate from the last failed client run.
+func (c *Controller) ResumeCenterSession(ctx context.Context, id center.SessionID) error {
+	return c.start(ctx, settings.RoleClient, "", "", &id)
+}
+
 // CheckCenter returns the saved center snapshot alongside its results so the
 // UI can discard them if the user changes the center during the request.
 func (c *Controller) CheckCenter(ctx context.Context) (settings.Center, []center.EntryResult, error) {
@@ -83,7 +88,7 @@ func (c *Controller) StartReception(ctx context.Context, nodeID string) error {
 	if nodeID == "" {
 		return centerflow.NodeUnavailable
 	}
-	return c.start(ctx, settings.RoleOperator, "", nodeID)
+	return c.start(ctx, settings.RoleOperator, "", nodeID, nil)
 }
 
 // AnswerSAS consumes a single live prompt. A stale dialog cannot confirm a replacement.

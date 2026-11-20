@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"remote-enet/internal/carside"
+	"remote-enet/internal/center"
 	"remote-enet/internal/centerflow"
 	"remote-enet/internal/identity"
 	"remote-enet/internal/invite"
@@ -37,6 +38,7 @@ type DirectPair struct{ Address, Code string }
 // ClientConfig accepts exactly one pairing source. Zero durations use defaults;
 // negative durations are configuration errors. NICAddr is never substituted.
 type ClientConfig struct {
+	CenterResume           center.SessionID
 	CenterCode             string
 	Center                 *settings.Center
 	AppVersion             string
@@ -62,8 +64,12 @@ func (c *ClientConfig) defaults() error {
 	if c.StateDir == "" {
 		return fmt.Errorf("app: client state directory required")
 	}
+	resume := c.CenterResume != (center.SessionID{})
+	if resume && c.CenterCode != "" {
+		return fmt.Errorf("app: choose either a center code or a session to resume")
+	}
 	choices := 0
-	for _, set := range []bool{c.Invite != "", c.InviteFile != "", !c.Peer.IsZero(), c.DirectPair != nil, c.Center != nil || c.CenterCode != ""} {
+	for _, set := range []bool{c.Invite != "", c.InviteFile != "", !c.Peer.IsZero(), c.DirectPair != nil, c.Center != nil || c.CenterCode != "" || resume} {
 		if set {
 			choices++
 		}
@@ -71,7 +77,7 @@ func (c *ClientConfig) defaults() error {
 	if choices != 1 {
 		return fmt.Errorf("app: choose exactly one of invitation, invitation file, paired peer, direct pairing or center")
 	}
-	if c.CenterCode != "" && c.Center == nil {
+	if (c.CenterCode != "" || resume) && c.Center == nil {
 		return centerError(centerflow.CenterUnconfigured)
 	}
 	if d := c.DirectPair; d != nil {

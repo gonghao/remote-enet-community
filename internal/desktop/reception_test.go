@@ -75,8 +75,20 @@ func TestControllerCenterReception(t *testing.T) {
 	cfg.Operator.Mode, cfg.Center = "center", cc
 	op := realController(t, cfg, func() appRuntime { return app.NewWithCenterHTTP(fc.HTTPClient()) })
 	clcfg := clientSettings()
-	clcfg.Center = cc
 	cl := realController(t, clcfg, func() appRuntime { return discoveredClient{app.NewWithCenterHTTP(fc.HTTPClient())} })
+	candidate := center.SessionID{1}
+	if err := cl.SetCenter(ctx, settings.Center{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cl.ResumeCenterSession(ctx, candidate); !errors.Is(err, centerflow.CenterUnconfigured) {
+		t.Fatal(err)
+	}
+	if err := cl.SetCenter(ctx, cc); err != nil {
+		t.Fatal(err)
+	}
+	if err := cl.ResumeCenterSession(ctx, candidate); !errors.Is(err, centerflow.NotFound) {
+		t.Fatal(err)
+	}
 	if err := op.EndReception(ctx); !errors.Is(err, app.ErrNotConnected) {
 		t.Fatal(err)
 	}
@@ -225,6 +237,52 @@ func TestControllerCenterReception(t *testing.T) {
 		t.Fatal(err)
 	}
 	stateWhere(t, op, func(s State) bool { return s.Center.Phase == "active" })
+	if err := cl.ResumeCenterSession(ctx, candidate); !errors.Is(err, ErrBusy) {
+		t.Fatal(err)
+	}
+	if err := cl.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	second := realController(t, cfg, func() appRuntime { return app.NewWithCenterHTTP(fc.HTTPClient()) })
+	if err := second.ResumeCenterSession(ctx, center.SessionID{}); !errors.Is(err, ErrRole) {
+		t.Fatal(err)
+	}
+	_, secondEnroll := fc.CreateAccount("other", 1, time.Time{})
+	if err := second.CenterLogin(ctx, secondEnroll, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.StartReception(ctx, node.String()); err != nil {
+		t.Fatal(err)
+	}
+	stateWhere(t, second, func(s State) bool { return s.Center.Phase == "open" })
+	otherCode, _ := second.CenterDisplay()
+	// Drop the initial response and both idempotent replays.
+	for range 3 {
+		fc.Inject(0, "/v1/redeem", fakecenter.Fault{DropResponse: true})
+	}
+	if err := cl.StartClient(ctx, otherCode); err != nil {
+		t.Fatal(err)
+	}
+	stateWhere(t, cl, func(s State) bool { return !s.Running })
+	choice := cl.CenterSessionChoice()
+	if choice == nil || len(choice.Candidates()) != 2 {
+		t.Fatal("missing candidates")
+	}
+	if err := cl.ResumeCenterSession(ctx, candidate); !errors.Is(err, centerflow.NotFound) || cl.CenterSessionChoice() != choice {
+		t.Fatal("invalid selection consumed choice", err)
+	}
+	for _, item := range choice.Candidates() {
+		if fc.Snapshot()[item.ID.String()].State == "active" {
+			if err := cl.ResumeCenterSession(ctx, item.ID); err != nil {
+				t.Fatal(err)
+			}
+			break
+		}
+	}
+	if cl.CenterSessionChoice() != nil {
+		t.Fatal("choice survived successful admission")
+	}
+	stateWhere(t, cl, func(s State) bool { return s.Runtime.Phase == app.PhaseConnected })
 	if err := op.EndReception(ctx); err != nil {
 		t.Fatal(err)
 	}

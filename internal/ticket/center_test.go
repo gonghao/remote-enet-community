@@ -33,19 +33,21 @@ type centerVector[I, E any] struct {
 type centerVectorHeader struct {
 	Format           int
 	Contract, Vector string
+	ContractVersion  string `json:"contract_version"`
 }
 
 func (doc centerVectorHeader) valid(vector string) bool {
-	return doc.Format == 1 && doc.Vector == vector && doc.Contract == "CENTER-CONTRACT v1 第八版（2026-11-20）"
+	return doc.ContractVersion == "v1.9" && doc.Format == 1 && doc.Vector == vector && doc.Contract == "CENTER-CONTRACT v1 第八版（2026-11-20）"
 }
 
 func TestCenterVectorHeader(t *testing.T) {
 	for _, change := range []func(*centerVectorHeader){
 		func(h *centerVectorHeader) { h.Format++ },
+		func(h *centerVectorHeader) { h.ContractVersion = "" },
 		func(h *centerVectorHeader) { h.Vector = "V6" },
 		func(h *centerVectorHeader) { h.Contract = "" },
 	} {
-		h := centerVectorHeader{Format: 1, Vector: "V4/V5", Contract: "CENTER-CONTRACT v1 第八版（2026-11-20）"}
+		h := centerVectorHeader{ContractVersion: "v1.9", Format: 1, Vector: "V4/V5", Contract: "CENTER-CONTRACT v1 第八版（2026-11-20）"}
 		change(&h)
 		if h.valid("V4/V5") {
 			t.Errorf("accepted invalid vector header %+v", h)
@@ -67,7 +69,7 @@ func readCenterVectors[I, E any](t *testing.T, file, vector string) []centerVect
 		t.Fatal(err)
 	}
 	if !doc.valid(vector) {
-		t.Fatalf("%s: unexpected header format=%d vector=%q contract=%q", file, doc.Format, doc.Vector, doc.Contract)
+		t.Fatalf("%s: unexpected header contract_version=%q format=%d vector=%q contract=%q", file, doc.ContractVersion, doc.Format, doc.Vector, doc.Contract)
 	}
 	if len(doc.Cases) == 0 {
 		t.Fatal("empty vector file")

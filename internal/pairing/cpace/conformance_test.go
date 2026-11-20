@@ -16,15 +16,23 @@ type conformanceCase struct {
 	Input, Expect vector
 }
 
-func conformanceCases(t *testing.T, file string, count int) []conformanceCase {
+func conformanceCases(t *testing.T, file, vectorID string, count int) []conformanceCase {
 	t.Helper()
 	data, err := os.ReadFile("../../../testdata/conformance/" + file + ".json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var doc struct{ Cases []conformanceCase }
+	var doc struct {
+		Format           int
+		Contract, Vector string
+		ContractVersion  string `json:"contract_version"`
+		Cases            []conformanceCase
+	}
 	if err := json.Unmarshal(data, &doc); err != nil {
 		t.Fatal(err)
+	}
+	if doc.ContractVersion != "v1.9" || doc.Format != 1 || doc.Vector != vectorID || doc.Contract != "CENTER-CONTRACT v1 第八版（2026-11-20）" {
+		t.Fatalf("%s: unexpected header format=%d contract=%q version=%q vector=%q", file, doc.Format, doc.Contract, doc.ContractVersion, doc.Vector)
 	}
 	if len(doc.Cases) != count {
 		t.Fatalf("got %d cases, want %d", len(doc.Cases), count)
@@ -42,7 +50,7 @@ func (v vector) text(t *testing.T, key string) string {
 }
 
 func TestConformanceCI(t *testing.T) {
-	for _, tc := range conformanceCases(t, "v06-pake-ci", 3) {
+	for _, tc := range conformanceCases(t, "v06-pake-ci", "V6", 3) {
 		t.Run(tc.Name, func(t *testing.T) {
 			v, w := tc.Input, tc.Expect
 			b := Binding{
@@ -71,7 +79,7 @@ func TestConformanceCI(t *testing.T) {
 }
 
 func TestConformancePairingMessages(t *testing.T) {
-	for _, tc := range conformanceCases(t, "v07-pairing-messages", 3) {
+	for _, tc := range conformanceCases(t, "v07-pairing-messages", "V7", 3) {
 		t.Run(tc.Name, func(t *testing.T) {
 			v, w := tc.Input, tc.Expect
 			sid := v.bytes(t, "sid")

@@ -1,6 +1,7 @@
 {
   "format": 1,
   "contract": "CENTER-CONTRACT v1 第八版（2026-11-20）",
+  "contract_version": "v1.9",
   "vector": "V6",
   "title": "配对通道绑定",
   "generator": "gen/pake.py",

@@ -106,7 +106,7 @@ def verify(key: bytes, message: bytes, signature: bytes) -> bool:
 
 def write_vector(filename: str, vector: str, title: str, generator: str,
                  cases: list[dict], check: bool) -> list[Path]:
-    document = dict(format=1, contract=CONTRACT, vector=vector, title=title,
+    document = dict(format=1, contract=CONTRACT, contract_version="v1.9", vector=vector, title=title,
                     generator=generator, cases=cases)
     data = (json.dumps(document, ensure_ascii=False, indent=2) + "\n").encode()
     path = DIRECTORY / filename

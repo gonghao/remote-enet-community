@@ -1,6 +1,7 @@
 {
   "format": 1,
   "contract": "CENTER-CONTRACT v1 第八版（2026-11-20）",
+  "contract_version": "v1.9",
   "vector": "V3",
   "title": "中心 API 请求签名",
   "generator": "gen/request.py",
